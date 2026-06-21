@@ -10,9 +10,8 @@ import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.animal.LOTREntityHorse;
-import net.minecraft.block.Block;
-import net.minecraft.block.BlockLeaves;
-import net.minecraft.block.material.Material;
+import lotr.common.entity.npc.LOTREntityNPC;
+import lotr.common.fac.LOTRFaction;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
@@ -20,11 +19,14 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
 import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
+import net.minecraft.entity.monster.IMob;
+import net.minecraft.entity.passive.EntityAnimal;
+import net.minecraft.entity.passive.EntityHorse;
+import net.minecraft.entity.passive.EntityTameable;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
@@ -32,14 +34,15 @@ import net.minecraft.world.World;
 
 public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double MAX_HEALTH = 120.0D;
-    private static final double MOVEMENT_SPEED = 0.28D;
+    private static final double MOVEMENT_SPEED = 0.30D;
     private static final double KNOCKBACK_RESISTANCE = 0.75D;
     private static final double ATTACK_DAMAGE = 16.0D;
-    private static final double WILD_ATTACK_SPEED = 1.15D;
+    private static final double WILD_ATTACK_SPEED = 1.10D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
-    private static final int LEAF_BREAK_INTERVAL = 3;
-    private static final int MAX_LEAVES_PER_PASS = 64;
+    private static final int MOB_TARGET_CHECK_INTERVAL = 40;
+    private static final int MOB_TARGET_CHECK_CHANCE = 4;
+    private static final double MOB_TARGET_RANGE = 12.0D;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -58,7 +61,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     private boolean isWildMumakil() {
-        return !this.isMountSaddled() && this.riddenByEntity == null;
+        return !this.isTame() && this.riddenByEntity == null;
     }
 
     public double getMountedYOffset() {
@@ -123,7 +126,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     public void onLivingUpdate() {
         super.onLivingUpdate();
         if (!this.worldObj.isRemote) {
-            this.breakLeavesAroundBody();
+            this.tryAcquireWildMobTarget();
 
             if (this.riddenByEntity instanceof EntityLivingBase) {
                 EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
@@ -187,118 +190,85 @@ public class LOTREntityMumakil extends LOTREntityHorse {
         }
     }
 
-    private void breakLeavesAroundBody() {
-        if (this.worldObj.isRemote || this.ticksExisted % LEAF_BREAK_INTERVAL != 0) {
+    private void tryAcquireWildMobTarget() {
+        if (!this.isWildMumakil()
+                || this.getAttackTarget() != null
+                || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0
+                || this.rand.nextInt(MOB_TARGET_CHECK_CHANCE) != 0) {
             return;
         }
 
-        double horizontalSpeedSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
-        boolean riderTryingToMove = this.riddenByEntity instanceof EntityLivingBase
-                && (Math.abs(((EntityLivingBase)this.riddenByEntity).moveForward) > 0.01F
-                || Math.abs(((EntityLivingBase)this.riddenByEntity).moveStrafing) > 0.01F);
-        boolean tryingToMove = horizontalSpeedSq > 0.0004D
-                || riderTryingToMove
-                || this.isMountEnraged();
-
-        if (!tryingToMove) {
-            return;
-        }
-
-        Vec3 look = this.getLookVec();
-        double horizontalLookLength = Math.sqrt(look.xCoord * look.xCoord + look.zCoord * look.zCoord);
-        double lookX;
-        double lookZ;
-
-        if (horizontalLookLength > 1.0E-4D) {
-            lookX = look.xCoord / horizontalLookLength;
-            lookZ = look.zCoord / horizontalLookLength;
-        } else {
-            lookX = -MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F);
-            lookZ = MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F);
-        }
-
-        AxisAlignedBB upperBodyBox = AxisAlignedBB.getBoundingBox(
-                this.posX - 2.25D,
-                this.boundingBox.minY + 0.75D,
-                this.posZ - 2.25D,
-                this.posX + 2.25D,
-                this.boundingBox.maxY + 1.25D,
-                this.posZ + 2.25D
+        List nearby = this.worldObj.getEntitiesWithinAABB(
+                EntityLivingBase.class,
+                this.boundingBox.expand(MOB_TARGET_RANGE, 6.0D, MOB_TARGET_RANGE)
         );
 
-        double headX = this.posX + lookX * 3.0D;
-        double headZ = this.posZ + lookZ * 3.0D;
-        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
-                headX - 1.75D,
-                this.boundingBox.minY + 1.25D,
-                headZ - 1.75D,
-                headX + 1.75D,
-                this.boundingBox.maxY + 1.75D,
-                headZ + 1.75D
-        );
+        EntityLivingBase bestTarget = null;
+        int bestPriority = Integer.MAX_VALUE;
+        double bestDistanceSq = Double.MAX_VALUE;
 
-        double trunkX = this.posX + lookX * 4.5D;
-        double trunkZ = this.posZ + lookZ * 4.5D;
-        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
-                trunkX - 1.25D,
-                this.boundingBox.minY + 0.25D,
-                trunkZ - 1.25D,
-                trunkX + 1.25D,
-                this.boundingBox.maxY + 0.75D,
-                trunkZ + 1.25D
-        );
+        for(int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
+            if (!this.canTargetWildMob(candidate)) {
+                continue;
+            }
 
-        int remaining = MAX_LEAVES_PER_PASS;
-        remaining -= this.clearLeavesInBox(headAndTusksBox, remaining);
+            int priority = this.getWildMobTargetPriority(candidate);
+            double distanceSq = this.getDistanceSqToEntity(candidate);
 
-        if (remaining > 0) {
-            remaining -= this.clearLeavesInBox(trunkBox, remaining);
-        }
-
-        if (remaining > 0) {
-            this.clearLeavesInBox(upperBodyBox, remaining);
-        }
-    }
-
-    private int clearLeavesInBox(AxisAlignedBB leafBox, int maximum) {
-        int minX = MathHelper.floor_double(leafBox.minX);
-        int maxX = MathHelper.floor_double(leafBox.maxX);
-        int minY = MathHelper.floor_double(leafBox.minY);
-        int maxY = MathHelper.floor_double(leafBox.maxY);
-        int minZ = MathHelper.floor_double(leafBox.minZ);
-        int maxZ = MathHelper.floor_double(leafBox.maxZ);
-        int broken = 0;
-
-        for(int x = minX; x <= maxX; ++x) {
-            for(int y = minY; y <= maxY; ++y) {
-                for(int z = minZ; z <= maxZ; ++z) {
-                    if (broken >= maximum) {
-                        return broken;
-                    }
-
-                    if (!this.worldObj.blockExists(x, y, z)) {
-                        continue;
-                    }
-
-                    Block block = this.worldObj.getBlock(x, y, z);
-                    if (this.canBreakLeaf(block, x, y, z)) {
-                        this.worldObj.setBlockToAir(x, y, z);
-                        ++broken;
-                    }
-                }
+            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
+                bestTarget = candidate;
+                bestPriority = priority;
+                bestDistanceSq = distanceSq;
             }
         }
 
-        return broken;
+        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(6) == 0)) {
+            this.setAttackTarget(bestTarget);
+        }
     }
 
-    private boolean canBreakLeaf(Block block, int x, int y, int z) {
-        if (block.getMaterial() != Material.leaves) {
+    private boolean canTargetWildMob(EntityLivingBase target) {
+        if (target == this
+                || target instanceof EntityPlayer
+                || target.getClass() == this.getClass()
+                || !target.isEntityAlive()
+                || target.riddenByEntity != null
+                || target.ridingEntity != null) {
             return false;
         }
 
-        return !(block instanceof BlockLeaves)
-                || (this.worldObj.getBlockMetadata(x, y, z) & 4) == 0;
+        if (target instanceof EntityTameable && ((EntityTameable)target).isTamed()) {
+            return false;
+        }
+
+        if (target instanceof EntityHorse && ((EntityHorse)target).isTame()) {
+            return false;
+        }
+
+        if (target instanceof LOTREntityNPC) {
+            LOTREntityNPC npc = (LOTREntityNPC)target;
+            if (npc.hiredNPCInfo.isActive) {
+                return false;
+            }
+
+            LOTRFaction targetFaction = LOTRMod.getNPCFaction(npc);
+            return LOTRFaction.NEAR_HARAD.isBadRelation(targetFaction);
+        }
+
+        return target instanceof EntityCreature;
+    }
+
+    private int getWildMobTargetPriority(EntityLivingBase target) {
+        if (target instanceof IMob) {
+            return 0;
+        }
+
+        if (target instanceof LOTREntityNPC || !(target instanceof EntityAnimal)) {
+            return 1;
+        }
+
+        return 2;
     }
 
     protected void dropFewItems(boolean flag, int i) {
