@@ -16,6 +16,7 @@ import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
+import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
@@ -25,9 +26,35 @@ import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
 
 public class LOTREntityMumakil extends LOTREntityHorse {
+    private static final double MAX_HEALTH = 120.0D;
+    private static final double MOVEMENT_SPEED = 0.24D;
+    private static final double KNOCKBACK_RESISTANCE = 0.75D;
+    private static final double ATTACK_DAMAGE = 8.0D;
+    private static final float CHARGE_MIN_SPEED = 0.24F;
+    private static final float MAX_CHARGE_DAMAGE = 28.0F;
+
     public LOTREntityMumakil(World world) {
         super(world);
-        this.setSize(1.7F, 1.9F);
+        this.setSize(3.0F, 4.0F);
+        this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
+            @Override
+            public boolean shouldExecute() {
+                return LOTREntityMumakil.this.isWildMumakil() && super.shouldExecute();
+            }
+
+            @Override
+            public boolean continueExecuting() {
+                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
+            }
+        });
+    }
+
+    private boolean isWildMumakil() {
+        return !this.isMountSaddled() && this.riddenByEntity == null;
+    }
+
+    public double getMountedYOffset() {
+        return 3.4D;
     }
 
     protected boolean isMountHostile() {
@@ -35,7 +62,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     protected EntityAIBase createMountAttackAI() {
-        return new LOTREntityAIAttackOnCollide(this, (double)1.0F, true);
+        return new LOTREntityAIAttackOnCollide(this, 1.0D, true);
     }
 
     public int getHorseType() {
@@ -44,32 +71,33 @@ public class LOTREntityMumakil extends LOTREntityHorse {
 
     protected void applyEntityAttributes() {
         super.applyEntityAttributes();
-        this.getEntityAttribute(SharedMonsterAttributes.attackDamage).setBaseValue((double)4.0F);
+        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(MAX_HEALTH);
+        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(MOVEMENT_SPEED);
+        this.getEntityAttribute(SharedMonsterAttributes.knockbackResistance).setBaseValue(KNOCKBACK_RESISTANCE);
+        this.getEntityAttribute(SharedMonsterAttributes.attackDamage).setBaseValue(ATTACK_DAMAGE);
     }
 
     protected void onLOTRHorseSpawn() {
-        double maxHealth = this.getEntityAttribute(SharedMonsterAttributes.maxHealth).getAttributeValue();
-        maxHealth *= (double)1.5F;
-        maxHealth = Math.max(maxHealth, (double)40.0F);
-        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(maxHealth);
-        double speed = this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).getAttributeValue();
-        speed *= 1.2;
-        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(speed);
+        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(MAX_HEALTH);
+        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(MOVEMENT_SPEED);
+
         double jumpStrength = this.getEntityAttribute(LOTRReflection.getHorseJumpStrength()).getAttributeValue();
-        jumpStrength *= (double)0.5F;
+        jumpStrength *= 0.5D;
         this.getEntityAttribute(LOTRReflection.getHorseJumpStrength()).setBaseValue(jumpStrength);
+
+        this.setHealth(this.getMaxHealth());
     }
 
     protected double clampChildHealth(double health) {
-        return MathHelper.clamp_double(health, (double)20.0F, (double)50.0F);
+        return MathHelper.clamp_double(health, 100.0D, MAX_HEALTH);
     }
 
     protected double clampChildJump(double jump) {
-        return MathHelper.clamp_double(jump, 0.2, 0.8);
+        return MathHelper.clamp_double(jump, 0.2D, 0.8D);
     }
 
     protected double clampChildSpeed(double speed) {
-        return MathHelper.clamp_double(speed, 0.12, 0.42);
+        return MathHelper.clamp_double(speed, 0.18D, MOVEMENT_SPEED);
     }
 
     public boolean isBreedingItem(ItemStack itemstack) {
@@ -80,38 +108,42 @@ public class LOTREntityMumakil extends LOTREntityHorse {
         super.onLivingUpdate();
         if (!this.worldObj.isRemote) {
             if (this.riddenByEntity instanceof EntityLivingBase) {
-                EntityLivingBase rhinoRider = (EntityLivingBase)this.riddenByEntity;
+                EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
                 float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-                if (momentum > 0.2F) {
-                    this.setSprinting(true);
-                } else {
-                    this.setSprinting(false);
-                }
+                this.setSprinting(momentum > 0.18F);
 
-                if (momentum >= 0.32F) {
-                    float strength = momentum * 15.0F;
-                    Vec3 position = Vec3.createVectorHelper(this.posX, this.posY, this.posZ);
+                if (momentum >= CHARGE_MIN_SPEED) {
+                    float strength = Math.min(8.0F + momentum * 40.0F, MAX_CHARGE_DAMAGE);
                     Vec3 look = this.getLookVec();
-                    float sightWidth = 1.0F;
-                    double range = (double)0.5F;
-                    List list = this.worldObj.getEntitiesWithinAABBExcludingEntity(this, this.boundingBox.contract((double)1.0F, (double)1.0F, (double)1.0F).addCoord(look.xCoord * range, look.yCoord * range, look.zCoord * range).expand((double)sightWidth, (double)sightWidth, (double)sightWidth));
+                    List list = this.worldObj.getEntitiesWithinAABBExcludingEntity(
+                            this,
+                            this.boundingBox
+                                    .addCoord(look.xCoord * 1.5D, 0.0D, look.zCoord * 1.5D)
+                                    .expand(0.75D, 0.5D, 0.75D)
+                    );
                     boolean hitAnyEntities = false;
 
                     for(int i = 0; i < list.size(); ++i) {
                         Entity obj = (Entity)list.get(i);
                         if (obj instanceof EntityLivingBase) {
                             EntityLivingBase entity = (EntityLivingBase)obj;
-                            if (entity != rhinoRider && (!(rhinoRider instanceof EntityPlayer) || LOTRMod.canPlayerAttackEntity((EntityPlayer)rhinoRider, entity, false)) && (!(rhinoRider instanceof EntityCreature) || LOTRMod.canNPCAttackEntity((EntityCreature)rhinoRider, entity, false))) {
+                            if (entity != rider
+                                    && (!(rider instanceof EntityPlayer) || LOTRMod.canPlayerAttackEntity((EntityPlayer)rider, entity, false))
+                                    && (!(rider instanceof EntityCreature) || LOTRMod.canNPCAttackEntity((EntityCreature)rider, entity, false))) {
                                 boolean flag = entity.attackEntityFrom(DamageSource.causeMobDamage(this), strength);
                                 if (flag) {
-                                    float knockback = strength * 0.05F;
-                                    entity.addVelocity((double)(-MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F) * knockback), (double)knockback, (double)(MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F) * knockback));
+                                    float knockback = Math.min(strength * 0.04F, 1.0F);
+                                    entity.addVelocity(
+                                            (double)(-MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F) * knockback),
+                                            (double)knockback,
+                                            (double)(MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F) * knockback)
+                                    );
                                     hitAnyEntities = true;
                                     if (entity instanceof EntityLiving) {
                                         EntityLiving entityliving = (EntityLiving)entity;
                                         if (entityliving.getAttackTarget() == this) {
                                             entityliving.getNavigator().clearPathEntity();
-                                            entityliving.setAttackTarget(rhinoRider);
+                                            entityliving.setAttackTarget(rider);
                                         }
                                     }
                                 }
@@ -120,21 +152,21 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                     }
 
                     if (hitAnyEntities) {
-                        this.worldObj.playSoundAtEntity(this, "lotr:troll.ologHai_hammer", 1.0F, (this.rand.nextFloat() - this.rand.nextFloat()) * 0.2F + 1.0F);
+                        this.worldObj.playSoundAtEntity(
+                                this,
+                                "lotr:troll.ologHai_hammer",
+                                1.0F,
+                                (this.rand.nextFloat() - this.rand.nextFloat()) * 0.2F + 1.0F
+                        );
                     }
                 }
             } else if (this.getAttackTarget() != null) {
                 float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-                if (momentum > 0.2F) {
-                    this.setSprinting(true);
-                } else {
-                    this.setSprinting(false);
-                }
+                this.setSprinting(momentum > 0.18F);
             } else {
                 this.setSprinting(false);
             }
         }
-
     }
 
     protected void dropFewItems(boolean flag, int i) {
@@ -153,7 +185,6 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                 this.dropItem(LOTRMod.rhinoRaw, 1);
             }
         }
-
     }
 
     protected String getLivingSound() {
