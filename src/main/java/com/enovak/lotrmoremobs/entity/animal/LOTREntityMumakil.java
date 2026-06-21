@@ -10,6 +10,9 @@ import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.animal.LOTREntityHorse;
+import net.minecraft.block.Block;
+import net.minecraft.block.BlockLeaves;
+import net.minecraft.block.material.Material;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
@@ -20,6 +23,7 @@ import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
+import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
@@ -27,11 +31,11 @@ import net.minecraft.world.World;
 
 public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double MAX_HEALTH = 120.0D;
-    private static final double MOVEMENT_SPEED = 0.24D;
+    private static final double MOVEMENT_SPEED = 0.28D;
     private static final double KNOCKBACK_RESISTANCE = 0.75D;
-    private static final double ATTACK_DAMAGE = 8.0D;
+    private static final double ATTACK_DAMAGE = 12.0D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
-    private static final float MAX_CHARGE_DAMAGE = 28.0F;
+    private static final float MAX_CHARGE_DAMAGE = 36.0F;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -54,7 +58,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     public double getMountedYOffset() {
-        return 3.4D;
+        return 4.2D;
     }
 
     protected boolean isMountHostile() {
@@ -107,13 +111,15 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     public void onLivingUpdate() {
         super.onLivingUpdate();
         if (!this.worldObj.isRemote) {
+            this.breakLeavesAroundBody();
+
             if (this.riddenByEntity instanceof EntityLivingBase) {
                 EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
                 float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
                 this.setSprinting(momentum > 0.18F);
 
                 if (momentum >= CHARGE_MIN_SPEED) {
-                    float strength = Math.min(8.0F + momentum * 40.0F, MAX_CHARGE_DAMAGE);
+                    float strength = Math.min((float)ATTACK_DAMAGE + momentum * 50.0F, MAX_CHARGE_DAMAGE);
                     Vec3 look = this.getLookVec();
                     List list = this.worldObj.getEntitiesWithinAABBExcludingEntity(
                             this,
@@ -167,6 +173,52 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                 this.setSprinting(false);
             }
         }
+    }
+
+    private void breakLeavesAroundBody() {
+        if (this.worldObj.isRemote || this.ticksExisted % 2 != 0) {
+            return;
+        }
+
+        double horizontalSpeedSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
+        if (horizontalSpeedSq < 0.01D && !this.isSprinting()) {
+            return;
+        }
+
+        AxisAlignedBB leafBox = this.boundingBox
+                .expand(0.25D, 0.0D, 0.25D)
+                .addCoord(this.motionX * 2.0D, 0.0D, this.motionZ * 2.0D);
+
+        int minX = MathHelper.floor_double(leafBox.minX);
+        int maxX = MathHelper.floor_double(leafBox.maxX);
+        int minY = MathHelper.floor_double(this.boundingBox.minY + 1.0D);
+        int maxY = MathHelper.floor_double(this.boundingBox.maxY + 0.25D);
+        int minZ = MathHelper.floor_double(leafBox.minZ);
+        int maxZ = MathHelper.floor_double(leafBox.maxZ);
+
+        for(int x = minX; x <= maxX; ++x) {
+            for(int y = minY; y <= maxY; ++y) {
+                for(int z = minZ; z <= maxZ; ++z) {
+                    if (!this.worldObj.blockExists(x, y, z)) {
+                        continue;
+                    }
+
+                    Block block = this.worldObj.getBlock(x, y, z);
+                    if (this.canBreakLeaf(block, x, y, z)) {
+                        this.worldObj.setBlockToAir(x, y, z);
+                    }
+                }
+            }
+        }
+    }
+
+    private boolean canBreakLeaf(Block block, int x, int y, int z) {
+        if (block.getMaterial() != Material.leaves) {
+            return false;
+        }
+
+        return !(block instanceof BlockLeaves)
+                || (this.worldObj.getBlockMetadata(x, y, z) & 4) == 0;
     }
 
     protected void dropFewItems(boolean flag, int i) {
