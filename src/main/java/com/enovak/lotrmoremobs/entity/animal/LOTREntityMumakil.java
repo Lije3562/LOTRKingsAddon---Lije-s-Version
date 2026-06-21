@@ -232,7 +232,6 @@ public class LOTREntityMumakil extends LOTREntityHorse {
 
         if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
             this.setAttackTarget(bestTarget);
-            this.worldObj.playSoundAtEntity(this, "random.orb", 0.75F, 0.65F);
         }
     }
 
