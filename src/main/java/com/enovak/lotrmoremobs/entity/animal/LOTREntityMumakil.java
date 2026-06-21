@@ -23,6 +23,7 @@ import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
@@ -33,9 +34,12 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double MAX_HEALTH = 120.0D;
     private static final double MOVEMENT_SPEED = 0.28D;
     private static final double KNOCKBACK_RESISTANCE = 0.75D;
-    private static final double ATTACK_DAMAGE = 12.0D;
+    private static final double ATTACK_DAMAGE = 16.0D;
+    private static final double WILD_ATTACK_SPEED = 1.15D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
+    private static final int LEAF_BREAK_INTERVAL = 3;
+    private static final int MAX_LEAVES_PER_PASS = 64;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -58,7 +62,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     public double getMountedYOffset() {
-        return 4.2D;
+        return 5.0D;
     }
 
     protected boolean isMountHostile() {
@@ -66,7 +70,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     protected EntityAIBase createMountAttackAI() {
-        return new LOTREntityAIAttackOnCollide(this, 1.0D, true);
+        return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
     }
 
     public int getHorseType() {
@@ -75,6 +79,10 @@ public class LOTREntityMumakil extends LOTREntityHorse {
 
     protected void applyEntityAttributes() {
         super.applyEntityAttributes();
+        this.applyConfiguredAttributes();
+    }
+
+    private void applyConfiguredAttributes() {
         this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(MAX_HEALTH);
         this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(MOVEMENT_SPEED);
         this.getEntityAttribute(SharedMonsterAttributes.knockbackResistance).setBaseValue(KNOCKBACK_RESISTANCE);
@@ -82,14 +90,18 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     protected void onLOTRHorseSpawn() {
-        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(MAX_HEALTH);
-        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(MOVEMENT_SPEED);
+        this.applyConfiguredAttributes();
 
         double jumpStrength = this.getEntityAttribute(LOTRReflection.getHorseJumpStrength()).getAttributeValue();
         jumpStrength *= 0.5D;
         this.getEntityAttribute(LOTRReflection.getHorseJumpStrength()).setBaseValue(jumpStrength);
 
         this.setHealth(this.getMaxHealth());
+    }
+
+    public void readEntityFromNBT(NBTTagCompound nbt) {
+        super.readEntityFromNBT(nbt);
+        this.applyConfiguredAttributes();
     }
 
     protected double clampChildHealth(double health) {
@@ -176,29 +188,94 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     }
 
     private void breakLeavesAroundBody() {
-        if (this.worldObj.isRemote || this.ticksExisted % 2 != 0) {
+        if (this.worldObj.isRemote || this.ticksExisted % LEAF_BREAK_INTERVAL != 0) {
             return;
         }
 
         double horizontalSpeedSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
-        if (horizontalSpeedSq < 0.01D && !this.isSprinting()) {
+        boolean riderTryingToMove = this.riddenByEntity instanceof EntityLivingBase
+                && (Math.abs(((EntityLivingBase)this.riddenByEntity).moveForward) > 0.01F
+                || Math.abs(((EntityLivingBase)this.riddenByEntity).moveStrafing) > 0.01F);
+        boolean tryingToMove = horizontalSpeedSq > 0.0004D
+                || riderTryingToMove
+                || this.isMountEnraged();
+
+        if (!tryingToMove) {
             return;
         }
 
-        AxisAlignedBB leafBox = this.boundingBox
-                .expand(0.25D, 0.0D, 0.25D)
-                .addCoord(this.motionX * 2.0D, 0.0D, this.motionZ * 2.0D);
+        Vec3 look = this.getLookVec();
+        double horizontalLookLength = Math.sqrt(look.xCoord * look.xCoord + look.zCoord * look.zCoord);
+        double lookX;
+        double lookZ;
 
+        if (horizontalLookLength > 1.0E-4D) {
+            lookX = look.xCoord / horizontalLookLength;
+            lookZ = look.zCoord / horizontalLookLength;
+        } else {
+            lookX = -MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F);
+            lookZ = MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F);
+        }
+
+        AxisAlignedBB upperBodyBox = AxisAlignedBB.getBoundingBox(
+                this.posX - 2.25D,
+                this.boundingBox.minY + 0.75D,
+                this.posZ - 2.25D,
+                this.posX + 2.25D,
+                this.boundingBox.maxY + 1.25D,
+                this.posZ + 2.25D
+        );
+
+        double headX = this.posX + lookX * 3.0D;
+        double headZ = this.posZ + lookZ * 3.0D;
+        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
+                headX - 1.75D,
+                this.boundingBox.minY + 1.25D,
+                headZ - 1.75D,
+                headX + 1.75D,
+                this.boundingBox.maxY + 1.75D,
+                headZ + 1.75D
+        );
+
+        double trunkX = this.posX + lookX * 4.5D;
+        double trunkZ = this.posZ + lookZ * 4.5D;
+        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
+                trunkX - 1.25D,
+                this.boundingBox.minY + 0.25D,
+                trunkZ - 1.25D,
+                trunkX + 1.25D,
+                this.boundingBox.maxY + 0.75D,
+                trunkZ + 1.25D
+        );
+
+        int remaining = MAX_LEAVES_PER_PASS;
+        remaining -= this.clearLeavesInBox(headAndTusksBox, remaining);
+
+        if (remaining > 0) {
+            remaining -= this.clearLeavesInBox(trunkBox, remaining);
+        }
+
+        if (remaining > 0) {
+            this.clearLeavesInBox(upperBodyBox, remaining);
+        }
+    }
+
+    private int clearLeavesInBox(AxisAlignedBB leafBox, int maximum) {
         int minX = MathHelper.floor_double(leafBox.minX);
         int maxX = MathHelper.floor_double(leafBox.maxX);
-        int minY = MathHelper.floor_double(this.boundingBox.minY + 1.0D);
-        int maxY = MathHelper.floor_double(this.boundingBox.maxY + 0.25D);
+        int minY = MathHelper.floor_double(leafBox.minY);
+        int maxY = MathHelper.floor_double(leafBox.maxY);
         int minZ = MathHelper.floor_double(leafBox.minZ);
         int maxZ = MathHelper.floor_double(leafBox.maxZ);
+        int broken = 0;
 
         for(int x = minX; x <= maxX; ++x) {
             for(int y = minY; y <= maxY; ++y) {
                 for(int z = minZ; z <= maxZ; ++z) {
+                    if (broken >= maximum) {
+                        return broken;
+                    }
+
                     if (!this.worldObj.blockExists(x, y, z)) {
                         continue;
                     }
@@ -206,10 +283,13 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                     Block block = this.worldObj.getBlock(x, y, z);
                     if (this.canBreakLeaf(block, x, y, z)) {
                         this.worldObj.setBlockToAir(x, y, z);
+                        ++broken;
                     }
                 }
             }
         }
+
+        return broken;
     }
 
     private boolean canBreakLeaf(Block block, int x, int y, int z) {
