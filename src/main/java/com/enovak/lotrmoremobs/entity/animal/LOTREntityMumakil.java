@@ -5,7 +5,10 @@
 
 package com.enovak.lotrmoremobs.entity.animal;
 
+import java.util.HashMap;
+import java.util.Iterator;
 import java.util.List;
+import java.util.Map;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
@@ -40,7 +43,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double MOVEMENT_SPEED = 0.30D;
     private static final double KNOCKBACK_RESISTANCE = 0.75D;
     private static final double ATTACK_DAMAGE = 16.0D;
-    private static final double WILD_ATTACK_SPEED = 1.10D;
+    private static final double WILD_ATTACK_SPEED = 1.30D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
@@ -49,6 +52,12 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
     private static final int LEAF_CLEAR_INTERVAL = 2;
     private static final int MAX_LEAVES_PER_PASS = 96;
+    private static final int TRAMPLE_SCAN_INTERVAL = 2;
+    private static final int TRAMPLE_COOLDOWN_TICKS = 20;
+    private static final float TRAMPLE_MIN_SPEED = 0.10F;
+    private static final float TRAMPLE_DAMAGE = 8.0F;
+
+    private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -134,6 +143,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
         if (!this.worldObj.isRemote) {
             this.clearLeavesForMovement();
             this.tryAcquireWildMobTarget();
+            this.applyTrampleDamage();
 
             if (this.riddenByEntity instanceof EntityLivingBase) {
                 EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
@@ -276,6 +286,147 @@ public class LOTREntityMumakil extends LOTREntityHorse {
         }
 
         return 2;
+    }
+
+    private void applyTrampleDamage() {
+        if (this.worldObj.isRemote || this.ticksExisted % TRAMPLE_SCAN_INTERVAL != 0) {
+            return;
+        }
+
+        if (this.ticksExisted % 20 == 0) {
+            this.cleanupTrampleCooldowns();
+        }
+
+        boolean trampleActive = this.isWildMumakil()
+                || this.isMountEnraged()
+                || this.riddenByEntity != null;
+
+        if (!trampleActive) {
+            return;
+        }
+
+        float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
+        if (momentum < TRAMPLE_MIN_SPEED) {
+            return;
+        }
+
+        boolean mountedChargeActive = this.riddenByEntity instanceof EntityLivingBase
+                && momentum >= CHARGE_MIN_SPEED;
+        if (mountedChargeActive) {
+            return;
+        }
+
+        double directionX = this.motionX / (double)momentum;
+        double directionZ = this.motionZ / (double)momentum;
+        AxisAlignedBB trampleBox = this.boundingBox
+                .expand(0.85D, 0.5D, 0.85D)
+                .addCoord(directionX * 1.5D, -0.35D, directionZ * 1.5D);
+
+        List nearby = this.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, trampleBox);
+
+        for(int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase target = (EntityLivingBase)nearby.get(i);
+            if (!this.canTrample(target)) {
+                continue;
+            }
+
+            Integer cooldownEnd = this.trampleCooldowns.get(target.getEntityId());
+            if (cooldownEnd != null && cooldownEnd > this.ticksExisted) {
+                continue;
+            }
+
+            this.trampleCooldowns.put(target.getEntityId(), this.ticksExisted + TRAMPLE_COOLDOWN_TICKS);
+            if (target.attackEntityFrom(DamageSource.causeMobDamage(this), TRAMPLE_DAMAGE)) {
+                this.applyTrampleKnockback(target, directionX, directionZ);
+            }
+        }
+    }
+
+    private boolean canTrample(EntityLivingBase target) {
+        if (target == this
+                || target == this.riddenByEntity
+                || target instanceof LOTREntityMumakil
+                || !target.isEntityAlive()) {
+            return false;
+        }
+
+        if (target instanceof EntityPlayer) {
+            EntityPlayer player = (EntityPlayer)target;
+            if (player.capabilities.isCreativeMode || this.isOwner(player)) {
+                return false;
+            }
+        }
+
+        if (target instanceof EntityTameable && ((EntityTameable)target).isTamed()) {
+            return false;
+        }
+
+        if (target instanceof EntityHorse && ((EntityHorse)target).isTame()) {
+            return false;
+        }
+
+        if (target instanceof LOTREntityNPC) {
+            LOTREntityNPC npc = (LOTREntityNPC)target;
+            if (npc.hiredNPCInfo.isActive) {
+                return false;
+            }
+
+            LOTRFaction targetFaction = LOTRMod.getNPCFaction(npc);
+            if (!LOTRFaction.NEAR_HARAD.isBadRelation(targetFaction)) {
+                return false;
+            }
+        }
+
+        if (this.riddenByEntity instanceof EntityPlayer
+                && !LOTRMod.canPlayerAttackEntity((EntityPlayer)this.riddenByEntity, target, false)) {
+            return false;
+        }
+
+        if (this.riddenByEntity instanceof EntityCreature
+                && !LOTRMod.canNPCAttackEntity((EntityCreature)this.riddenByEntity, target, false)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean isOwner(EntityPlayer player) {
+        if (!this.isTame()) {
+            return false;
+        }
+
+        String ownerId = this.func_152119_ch();
+        return ownerId != null
+                && ownerId.length() > 0
+                && ownerId.equals(player.getUniqueID().toString());
+    }
+
+    private void applyTrampleKnockback(EntityLivingBase target, double fallbackX, double fallbackZ) {
+        double deltaX = target.posX - this.posX;
+        double deltaZ = target.posZ - this.posZ;
+        double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+        if (distance > 1.0E-4D) {
+            deltaX /= distance;
+            deltaZ /= distance;
+        } else {
+            deltaX = fallbackX;
+            deltaZ = fallbackZ;
+        }
+
+        target.addVelocity(deltaX * 0.9D, 0.25D, deltaZ * 0.9D);
+        target.velocityChanged = true;
+    }
+
+    private void cleanupTrampleCooldowns() {
+        Iterator<Map.Entry<Integer, Integer>> iterator = this.trampleCooldowns.entrySet().iterator();
+
+        while(iterator.hasNext()) {
+            Map.Entry<Integer, Integer> entry = iterator.next();
+            if (entry.getValue() <= this.ticksExisted) {
+                iterator.remove();
+            }
+        }
     }
 
     private void clearLeavesForMovement() {
