@@ -32,6 +32,8 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.potion.Potion;
+import net.minecraft.potion.PotionEffect;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
@@ -323,6 +325,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                 .addCoord(directionX * 1.5D, -0.35D, directionZ * 1.5D);
 
         List nearby = this.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, trampleBox);
+        boolean hitAnyEntities = false;
 
         for(int i = 0; i < nearby.size(); ++i) {
             EntityLivingBase target = (EntityLivingBase)nearby.get(i);
@@ -337,8 +340,19 @@ public class LOTREntityMumakil extends LOTREntityHorse {
 
             this.trampleCooldowns.put(target.getEntityId(), this.ticksExisted + TRAMPLE_COOLDOWN_TICKS);
             if (target.attackEntityFrom(DamageSource.causeMobDamage(this), TRAMPLE_DAMAGE)) {
+                target.addPotionEffect(new PotionEffect(Potion.moveSlowdown.id, 40, 0));
                 this.applyTrampleKnockback(target, directionX, directionZ);
+                hitAnyEntities = true;
             }
+        }
+
+        if (hitAnyEntities) {
+            this.worldObj.playSoundAtEntity(
+                    this,
+                    "mob.irongolem.walk",
+                    1.0F,
+                    0.55F + this.rand.nextFloat() * 0.1F
+            );
         }
     }
 
@@ -414,7 +428,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
             deltaZ = fallbackZ;
         }
 
-        target.addVelocity(deltaX * 0.9D, 0.25D, deltaZ * 0.9D);
+        target.addVelocity(deltaX * 0.25D, 0.30D, deltaZ * 0.25D);
         target.velocityChanged = true;
     }
 
