@@ -11,6 +11,8 @@ import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.animal.LOTREntityHorse;
 import lotr.common.entity.npc.LOTREntityNPC;
+import net.minecraft.block.Block;
+import net.minecraft.block.material.Material;
 import lotr.common.fac.LOTRFaction;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
@@ -27,6 +29,7 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
@@ -40,9 +43,12 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     private static final double WILD_ATTACK_SPEED = 1.10D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
-    private static final int MOB_TARGET_CHECK_INTERVAL = 40;
-    private static final int MOB_TARGET_CHECK_CHANCE = 4;
-    private static final double MOB_TARGET_RANGE = 12.0D;
+    private static final int MOB_TARGET_CHECK_INTERVAL = 20;
+    private static final int MOB_TARGET_CHECK_CHANCE = 2;
+    private static final double MOB_TARGET_RANGE = 18.0D;
+    private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
+    private static final int LEAF_CLEAR_INTERVAL = 2;
+    private static final int MAX_LEAVES_PER_PASS = 96;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -126,6 +132,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     public void onLivingUpdate() {
         super.onLivingUpdate();
         if (!this.worldObj.isRemote) {
+            this.clearLeavesForMovement();
             this.tryAcquireWildMobTarget();
 
             if (this.riddenByEntity instanceof EntityLivingBase) {
@@ -200,7 +207,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
 
         List nearby = this.worldObj.getEntitiesWithinAABB(
                 EntityLivingBase.class,
-                this.boundingBox.expand(MOB_TARGET_RANGE, 6.0D, MOB_TARGET_RANGE)
+                this.boundingBox.expand(MOB_TARGET_RANGE, MOB_TARGET_VERTICAL_RANGE, MOB_TARGET_RANGE)
         );
 
         EntityLivingBase bestTarget = null;
@@ -223,8 +230,9 @@ public class LOTREntityMumakil extends LOTREntityHorse {
             }
         }
 
-        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(6) == 0)) {
+        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
             this.setAttackTarget(bestTarget);
+            this.worldObj.playSoundAtEntity(this, "random.orb", 0.75F, 0.65F);
         }
     }
 
@@ -269,6 +277,111 @@ public class LOTREntityMumakil extends LOTREntityHorse {
         }
 
         return 2;
+    }
+
+    private void clearLeavesForMovement() {
+        if (this.worldObj.isRemote || this.ticksExisted % LEAF_CLEAR_INTERVAL != 0) {
+            return;
+        }
+
+        double horizontalSpeedSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
+        boolean riderTryingToMove = this.riddenByEntity instanceof EntityLivingBase
+                && (Math.abs(((EntityLivingBase)this.riddenByEntity).moveForward) > 0.01F
+                || Math.abs(((EntityLivingBase)this.riddenByEntity).moveStrafing) > 0.01F);
+        boolean tryingToMove = horizontalSpeedSq > 0.0004D
+                || riderTryingToMove
+                || this.isMountEnraged();
+
+        if (!tryingToMove) {
+            return;
+        }
+
+        Vec3 look = this.getLookVec();
+        double horizontalLookLength = Math.sqrt(look.xCoord * look.xCoord + look.zCoord * look.zCoord);
+        double lookX;
+        double lookZ;
+
+        if (horizontalLookLength > 1.0E-4D) {
+            lookX = look.xCoord / horizontalLookLength;
+            lookZ = look.zCoord / horizontalLookLength;
+        } else {
+            lookX = -MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F);
+            lookZ = MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F);
+        }
+
+        AxisAlignedBB bodyBox = AxisAlignedBB.getBoundingBox(
+                this.posX - 2.25D,
+                this.boundingBox.minY + 0.75D,
+                this.posZ - 2.25D,
+                this.posX + 2.25D,
+                this.boundingBox.maxY + 1.25D,
+                this.posZ + 2.25D
+        );
+
+        double headX = this.posX + lookX * 3.0D;
+        double headZ = this.posZ + lookZ * 3.0D;
+        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
+                headX - 1.75D,
+                this.boundingBox.minY + 1.25D,
+                headZ - 1.75D,
+                headX + 1.75D,
+                this.boundingBox.maxY + 1.75D,
+                headZ + 1.75D
+        );
+
+        double trunkX = this.posX + lookX * 4.5D;
+        double trunkZ = this.posZ + lookZ * 4.5D;
+        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
+                trunkX - 1.25D,
+                this.boundingBox.minY + 0.25D,
+                trunkZ - 1.25D,
+                trunkX + 1.25D,
+                this.boundingBox.maxY + 0.75D,
+                trunkZ + 1.25D
+        );
+
+        int remaining = MAX_LEAVES_PER_PASS;
+        remaining -= this.clearLeavesInBox(headAndTusksBox, remaining);
+
+        if (remaining > 0) {
+            remaining -= this.clearLeavesInBox(trunkBox, remaining);
+        }
+
+        if (remaining > 0) {
+            this.clearLeavesInBox(bodyBox, remaining);
+        }
+    }
+
+    private int clearLeavesInBox(AxisAlignedBB leafBox, int maximum) {
+        int minX = MathHelper.floor_double(leafBox.minX);
+        int maxX = MathHelper.floor_double(leafBox.maxX);
+        int minY = MathHelper.floor_double(leafBox.minY);
+        int maxY = MathHelper.floor_double(leafBox.maxY);
+        int minZ = MathHelper.floor_double(leafBox.minZ);
+        int maxZ = MathHelper.floor_double(leafBox.maxZ);
+        int broken = 0;
+
+        for(int x = minX; x <= maxX; ++x) {
+            for(int y = minY; y <= maxY; ++y) {
+                for(int z = minZ; z <= maxZ; ++z) {
+                    if (broken >= maximum) {
+                        return broken;
+                    }
+
+                    if (!this.worldObj.blockExists(x, y, z)) {
+                        continue;
+                    }
+
+                    Block block = this.worldObj.getBlock(x, y, z);
+                    if (block.getMaterial() == Material.leaves) {
+                        this.worldObj.setBlockToAir(x, y, z);
+                        ++broken;
+                    }
+                }
+            }
+        }
+
+        return broken;
     }
 
     protected void dropFewItems(boolean flag, int i) {
