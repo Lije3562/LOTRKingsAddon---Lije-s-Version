@@ -6,37 +6,18 @@
 package com.enovak.lotrmoremobs.render.entity;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
-import com.enovak.lotrmoremobs.model.LOTRModelMumakil;
-import com.enovak.lotrmoremobs.model.LOTRModelMumakilHowdah;
-import lotr.client.render.entity.LOTRRenderHorse;
-import net.minecraft.client.renderer.entity.RenderLiving;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.util.ResourceLocation;
+import com.enovak.lotrmoremobs.model.mumakil.LOTRGeoModelMumakil;
 
-public class LOTRRenderMumakil extends RenderLiving {
-    private static final ResourceLocation mumakilTexture = new ResourceLocation("lotrmoremobs:mob/mumakil/mumakil.png");
-    private static final ResourceLocation howdahTexture = mumakilTexture;
+import software.bernie.geckolib3.core.util.Color;
+import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
 
+public class LOTRRenderMumakil extends GeoEntityRenderer {
     public LOTRRenderMumakil() {
-        super(new LOTRModelMumakil(), 0.5F);
-        this.setRenderPassModel(new LOTRModelMumakilHowdah());
+        super(new LOTRGeoModelMumakil());
+        this.shadowSize = 0.5F;
     }
 
-    @Override
-    protected int shouldRenderPass(EntityLivingBase entity, int pass, float partialTicks) {
-        if (pass == 0 && entity instanceof LOTREntityMumakil
-                && ((LOTREntityMumakil)entity).isMountSaddled()) {
-            this.bindTexture(howdahTexture);
-            return 1;
-        }
-
-        return -1;
-    }
-
-    @Override
-    protected ResourceLocation getEntityTexture(Entity entity) {
-        LOTREntityMumakil mumakil = (LOTREntityMumakil) entity;
-        return LOTRRenderHorse.getLayeredMountTexture(mumakil, mumakilTexture);
+    public Color getRenderColor(LOTREntityMumakil animatable, float partialTicks) {
+        return Color.ofRGBA(255, 255, 255, 255);
     }
 }
