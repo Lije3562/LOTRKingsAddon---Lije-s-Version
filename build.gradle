@@ -35,6 +35,7 @@ minecraft {
 def geckoLibJarName = "geckolib-unofficial-1.7.10-1.0.4.jar"
 def geckoLibJar = file("libs/$geckoLibJarName")
 def deobfGeckoLibJar = file("$buildDir/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}")
+def geckoLibSrgMcp = file("$buildDir/deobf-libs/geckolib-srg-mcp.srg")
 def forgeGradleDelayed = { String path ->
     new net.minecraftforge.gradle.delayed.DelayedFile(project, path, minecraft.plugin)
 }
@@ -44,12 +45,26 @@ configurations.implementation.dependencies.removeAll { dependency ->
             && dependency.resolve().any { file -> file.canonicalFile == geckoLibJar.canonicalFile }
 }
 
+task patchGeckoLibSrgMcp {
+    dependsOn "genSrgs"
+    inputs.file forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.DEOBF_SRG_MCP_SRG)
+    outputs.file geckoLibSrgMcp
+    doLast {
+        def baseSrg = forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.DEOBF_SRG_MCP_SRG).call()
+        geckoLibSrgMcp.parentFile.mkdirs()
+        geckoLibSrgMcp.text = baseSrg.text
+        geckoLibSrgMcp << "\n"
+        geckoLibSrgMcp << "MD: cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/func_82594_a (Ljava/lang/String;)Ljava/lang/Object; cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/getObject (Ljava/lang/String;)Ljava/lang/Object;\n"
+        geckoLibSrgMcp << "MD: cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/func_148754_a (I)Ljava/lang/Object; cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/getObjectById (I)Ljava/lang/Object;\n"
+    }
+}
+
 task deobfGeckoLib(type: net.minecraftforge.gradle.tasks.ProcessJarTask) {
-    dependsOn "downloadMcpTools", "genSrgs"
+    dependsOn "downloadMcpTools", patchGeckoLibSrgMcp
     setInJar(forgeGradleDelayed("libs/$geckoLibJarName"))
     setOutCleanJar(forgeGradleDelayed("{BUILD_DIR}/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}"))
     setOutDirtyJar(forgeGradleDelayed("{BUILD_DIR}/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}"))
-    setSrg(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.DEOBF_SRG_MCP_SRG))
+    setSrg(new net.minecraftforge.gradle.delayed.DelayedFile(geckoLibSrgMcp))
     setExceptorJson(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.EXC_JSON))
     setExceptorCfg(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.EXC_MCP))
     setFieldCsv(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.FIELD_CSV))
