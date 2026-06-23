@@ -40,6 +40,7 @@ repositories {
 }
 dependencies {
     implementation 'lotr.common.LOTRMod:LOTRMod:36.15'
+    implementation files("libs/geckolib-unofficial-1.7.10-1.0.4.jar")
 
     // you may put jars on which you depend on in ./libs
     // or you may define them like so..
@@ -123,12 +124,6 @@ publishing {
             }
         }
     }
-
-    //This is what chat told me to add
-    dependencies {
-        compile files("libs/geckolib-unofficial-1.7.10-1.0.4.jar")
-    }
-
     // This block selects the repositories you want to publish to.
     repositories {
         // Add the repositories you want to publish to here.
