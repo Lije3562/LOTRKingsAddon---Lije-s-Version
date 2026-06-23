@@ -2,10 +2,19 @@ package com.enovak.lotrmoremobs.model.mumakil;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import net.minecraft.util.ResourceLocation;
+import software.bernie.geckolib3.model.AnimatedGeoModel;
 
-public class LOTRGeoModelMumakil extends GeoModel<LOTREntityMumakil> {
+public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
     @Override
-    public ResourceLocation getModelResource(LOTREntityMumakil entity) {
+    public ResourceLocation getAnimationFileLocation(LOTREntityMumakil entity) {
+        return new ResourceLocation(
+                "lotrmoremobs",
+                "animations/entity/mumakil/LOTRMumakil.animations.json"
+        );
+    }
+
+    @Override
+    public ResourceLocation getModelLocation(LOTREntityMumakil entity) {
         return new ResourceLocation(
                 "lotrmoremobs",
                 "geo/entity/mumakil/LOTRMumakilModel.geo.json"
@@ -13,18 +22,10 @@ public class LOTRGeoModelMumakil extends GeoModel<LOTREntityMumakil> {
     }
 
     @Override
-    public ResourceLocation getTextureResource(LOTREntityMumakil entity) {
+    public ResourceLocation getTextureLocation(LOTREntityMumakil entity) {
         return new ResourceLocation(
                 "lotrmoremobs",
                 "textures/mob/mumakil/mumakil_war.png"
-        );
-    }
-
-    @Override
-    public ResourceLocation getAnimationResource(LOTREntityMumakil entity) {
-        return new ResourceLocation(
-                "lotrmoremobs",
-                "animations/entity/mumakil/LOTRMumakilModel.animation.json"
         );
     }
 }
