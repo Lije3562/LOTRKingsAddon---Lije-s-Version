@@ -42,19 +42,14 @@ public class Main {
         proxy.registerRenderers();
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
-                .setUnlocalizedName("lotrmoremobs:atalcare")
+                .setUnlocalizedName("atalcare")
                 .setTextureName("lotrmoremobs:anduril");
-        this.registerItem(swordOfIsengard);
+        GameRegistry.registerItem(swordOfIsengard, "atalcare");
 
         helmOfIsengard = (new LOTRItemArmor(LOTRMaterial.MORDOR, 0, "helmet"))
                 .setUnlocalizedName("Helm of Isengard")
                 .setTextureName("lotrmoremobs:black_numenorean_1");
-        this.registerItem(helmOfIsengard);
-    }
-
-    private void registerItem(Item item) {
-        String prefixUnlocal = "item:lotr.";
-        GameRegistry.registerItem(item, "item." + item.getUnlocalizedName().substring(prefixUnlocal.length()));
+        GameRegistry.registerItem(helmOfIsengard, "helm_of_isengard");
     }
 
     @EventHandler
