@@ -32,6 +32,35 @@ minecraft {
     runDir = "run"
 }
 
+def geckoLibJarName = "geckolib-unofficial-1.7.10-1.0.4.jar"
+def geckoLibJar = file("libs/$geckoLibJarName")
+def deobfGeckoLibJar = file("$buildDir/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}")
+def forgeGradleDelayed = { String path ->
+    new net.minecraftforge.gradle.delayed.DelayedFile(project, path, minecraft.plugin)
+}
+
+configurations.implementation.dependencies.removeAll { dependency ->
+    dependency instanceof org.gradle.api.artifacts.SelfResolvingDependency
+            && dependency.resolve().any { file -> file.canonicalFile == geckoLibJar.canonicalFile }
+}
+
+task deobfGeckoLib(type: net.minecraftforge.gradle.tasks.ProcessJarTask) {
+    dependsOn "downloadMcpTools", "genSrgs"
+    setInJar(forgeGradleDelayed("libs/$geckoLibJarName"))
+    setOutCleanJar(forgeGradleDelayed("{BUILD_DIR}/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}"))
+    setOutDirtyJar(forgeGradleDelayed("{BUILD_DIR}/deobf-libs/${geckoLibJarName.replace('.jar', '-dev.jar')}"))
+    setSrg(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.DEOBF_SRG_MCP_SRG))
+    setExceptorJson(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.EXC_JSON))
+    setExceptorCfg(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.EXC_MCP))
+    setFieldCsv(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.FIELD_CSV))
+    setMethodCsv(forgeGradleDelayed(net.minecraftforge.gradle.user.UserConstants.METHOD_CSV))
+    setApplyMarkers(false)
+    setStripSynthetics(false)
+    doFirst {
+        deobfGeckoLibJar.parentFile.mkdirs()
+    }
+}
+
 repositories {
     // Adds the 'libs' folder in the project directory as a flat directory
     flatDir {
@@ -40,7 +69,10 @@ repositories {
 }
 dependencies {
     implementation 'lotr.common.LOTRMod:LOTRMod:36.15'
-    implementation files("libs/geckolib-unofficial-1.7.10-1.0.4.jar")
+    implementation fileTree(dir: 'libs', exclude: geckoLibJarName)
+    implementation files(deobfGeckoLibJar) {
+        builtBy deobfGeckoLib
+    }
 
     // you may put jars on which you depend on in ./libs
     // or you may define them like so..
