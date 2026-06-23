@@ -39,8 +39,11 @@ import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
+import software.bernie.geckolib3.core.IAnimatable;
+import software.bernie.geckolib3.core.manager.AnimationData;
+import software.bernie.geckolib3.core.manager.AnimationFactory;
 
-public class LOTREntityMumakil extends LOTREntityHorse {
+public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double MAX_HEALTH = 120.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
     private static final double KNOCKBACK_RESISTANCE = 0.75D;
@@ -60,6 +63,7 @@ public class LOTREntityMumakil extends LOTREntityHorse {
     private static final float TRAMPLE_DAMAGE = 8.0F;
 
     private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
+    private final AnimationFactory animationFactory = new AnimationFactory(this);
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -75,6 +79,15 @@ public class LOTREntityMumakil extends LOTREntityHorse {
                 return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
             }
         });
+    }
+
+    @Override
+    public void registerControllers(AnimationData data) {
+    }
+
+    @Override
+    public AnimationFactory getFactory() {
+        return this.animationFactory;
     }
 
     private boolean isWildMumakil() {
