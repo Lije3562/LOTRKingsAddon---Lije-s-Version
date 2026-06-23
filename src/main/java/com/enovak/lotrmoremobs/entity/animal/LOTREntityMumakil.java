@@ -61,13 +61,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int TRAMPLE_COOLDOWN_TICKS = 20;
     private static final float TRAMPLE_MIN_SPEED = 0.10F;
     private static final float TRAMPLE_DAMAGE = 8.0F;
+    private static final float IDLE_YAW_SNAP_THRESHOLD = 45.0F;
+    private static final float IDLE_YAW_MAX_STEP = 8.0F;
+    private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
+    private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
 
     private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
     private final AnimationFactory animationFactory = new AnimationFactory(this);
+    private float lastStableIdleYaw;
+    private float lastStableIdleHeadYaw;
+    private boolean hasStableIdleYaw;
 
     public LOTREntityMumakil(World world) {
         super(world);
-        this.setSize(3.0F, 4.0F);
+        this.setSize(4.0F, 5.5F);
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -95,7 +102,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public double getMountedYOffset() {
-        return 5.0D;
+        return 6.75D;
     }
 
     protected boolean isMountHostile() {
@@ -155,6 +162,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public void onLivingUpdate() {
         super.onLivingUpdate();
+        this.stabilizeIdleYaw();
         if (!this.worldObj.isRemote) {
             this.clearLeavesForMovement();
             this.tryAcquireWildMobTarget();
@@ -220,6 +228,77 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 this.setSprinting(false);
             }
         }
+    }
+
+    /**
+     * LOTREntityHorse can inherit idle look updates that swing the whole body while the mount is
+     * standing still. Keep those idle-only yaw changes from becoming elephant-sized snap-turns,
+     * but leave movement, combat, riding, enraged movement, and active pathing untouched.
+     */
+    private void stabilizeIdleYaw() {
+        if (!this.isStationaryIdleForYawLock()) {
+            this.rememberStableIdleYaw();
+            return;
+        }
+
+        if (!this.hasStableIdleYaw) {
+            this.rememberStableIdleYaw();
+            return;
+        }
+
+        boolean corrected = false;
+        float bodyDelta = MathHelper.wrapAngleTo180_float(this.renderYawOffset - this.lastStableIdleYaw);
+        if (Math.abs(bodyDelta) > IDLE_YAW_SNAP_THRESHOLD) {
+            this.renderYawOffset = this.clampYawStep(this.lastStableIdleYaw, this.renderYawOffset, IDLE_YAW_MAX_STEP);
+            corrected = true;
+        }
+
+        float entityDelta = MathHelper.wrapAngleTo180_float(this.rotationYaw - this.lastStableIdleYaw);
+        if (Math.abs(entityDelta) > IDLE_YAW_SNAP_THRESHOLD) {
+            this.rotationYaw = this.clampYawStep(this.lastStableIdleYaw, this.rotationYaw, IDLE_YAW_MAX_STEP);
+            corrected = true;
+        }
+
+        float headDelta = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.lastStableIdleHeadYaw);
+        float headFromBody = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.renderYawOffset);
+        if (Math.abs(headDelta) > IDLE_YAW_SNAP_THRESHOLD && Math.abs(headFromBody) > IDLE_HEAD_YAW_LIMIT) {
+            this.rotationYawHead = this.renderYawOffset + MathHelper.clamp_float(headFromBody, -IDLE_HEAD_YAW_LIMIT, IDLE_HEAD_YAW_LIMIT);
+            corrected = true;
+        }
+
+        if (corrected) {
+            this.prevRotationYaw = this.rotationYaw;
+            this.prevRenderYawOffset = this.renderYawOffset;
+            this.prevRotationYawHead = this.rotationYawHead;
+        }
+
+        this.rememberStableIdleYaw();
+    }
+
+    private boolean isStationaryIdleForYawLock() {
+        if (this.riddenByEntity != null
+                || this.getAttackTarget() != null
+                || this.isMountEnraged()
+                || this.isSprinting()
+                || !this.onGround
+                || Math.abs(this.moveForward) > 0.01F
+                || Math.abs(this.moveStrafing) > 0.01F) {
+            return false;
+        }
+
+        double horizontalMotionSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
+        return horizontalMotionSq <= IDLE_YAW_MOTION_THRESHOLD_SQ && this.getNavigator().noPath();
+    }
+
+    private void rememberStableIdleYaw() {
+        this.lastStableIdleYaw = this.renderYawOffset;
+        this.lastStableIdleHeadYaw = this.rotationYawHead;
+        this.hasStableIdleYaw = true;
+    }
+
+    private float clampYawStep(float stableYaw, float candidateYaw, float maximumStep) {
+        float delta = MathHelper.wrapAngleTo180_float(candidateYaw - stableYaw);
+        return stableYaw + MathHelper.clamp_float(delta, -maximumStep, maximumStep);
     }
 
     private void tryAcquireWildMobTarget() {
