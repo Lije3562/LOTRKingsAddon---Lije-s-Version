@@ -14,6 +14,8 @@ public class LOTRModelMumakil extends ModelBase {
      */
     private static final float GEO_TO_JAVA_UV_SCALE = 3.0F;
     private static final float JAVA_RENDER_SCALE = 1.0F / GEO_TO_JAVA_UV_SCALE;
+    private static final float Z_FIGHT_EPSILON = 0.015F;
+    private static final float SEAM_OVERLAP = 0.05F;
 
     private final ModelRenderer master;
 
@@ -40,17 +42,18 @@ public class LOTRModelMumakil extends ModelBase {
 
         // Geo bone: body. Cubes preserve UV [235,244] and [703,43].
         ModelRenderer body = part(sway, 235, 244, -2.0F, 1.0F, 17.0F, -18.01F, 1.0F, -14.0F, 39, 20, 60, inflate);
-        part(body, 703, 43, 21.0F, 7.0F, -3.0F, -0.1745F, 0.0F, 0.0F, -39.0F, -28.0F, -17.0F, 40, 31, 67, inflate);
+        // Slightly tucked to reduce flicker where the raised back intersects the main body.
+        part(body, 703, 43, 21.0F, 7.0F, -3.0F, -0.1745F, 0.0F, 0.0F, -39.0F, -28.0F, -17.0F, 40, 31, 67, stableInflate(inflate));
 
-        // Geo bone: upper_back. Cubes preserve UV [533,527] and [176,38].
+        // Geo bone: upper_back. UVs are matched to the cube dimensions from the Geo JSON.
         ModelRenderer upperBack = emptyChild(body, 2.0F, -0.8195F, -19.1583F);
-        part(upperBack, 533, 527, 0.0F, -6.0F, -5.0F, 1.8151F, 0.0F, 0.0F, -19.0F, -17.0F, -14.0F, 38, 32, 27, inflate);
-        part(upperBack, 176, 38, 0.0F, 8.6987F, -2.783F, 1.2217F, 0.0F, 0.0F, -18.9899F, -13.5F, -7.5F, 38, 26, 15, inflate);
+        part(upperBack, 176, 38, 0.0F, -6.0F, -5.0F, 1.8151F, 0.0F, 0.0F, -19.0F, -17.0F, -14.0F, 38, 32, 27, stableInflate(inflate));
+        part(upperBack, 533, 527, 0.0F, 8.6987F, -2.783F, 1.2217F, 0.0F, 0.0F, -18.9899F, -13.5F, -7.5F, 38, 26, 15, stableInflate(inflate));
 
-        // Geo bone: head. Main skull/lower-head/trunk-root cubes preserve UV [866,385], [891,576], [235,546].
+        // Geo bone: head. UVs are matched to the lower-head/trunk-root dimensions from the Geo JSON.
         ModelRenderer head = emptyChild(upperBack, 0.0F, 1.8195F, -23.8417F);
-        part(head, 891, 576, -0.5F, 15.4231F, -13.1771F, 0.6109F, 0.0F, 0.0F, -10.5F, -7.5F, -8.5F, 20, 11, 22, inflate);
-        part(head, 235, 546, 1.0F, 13.6338F, -24.3129F, 1.0036F, 0.0F, 0.0F, -13.0F, -5.0F, -5.0F, 24, 12, 19, inflate);
+        part(head, 235, 546, -0.5F, 15.4231F, -13.1771F, 0.6109F, 0.0F, 0.0F, -10.5F, -7.5F, -8.5F, 20, 11, 22, stableInflate(inflate));
+        part(head, 891, 576, 1.0F, 13.6338F, -24.3129F, 1.0036F, 0.0F, 0.0F, -13.0F, -5.0F, -5.0F, 24, 12, 19, stableInflate(inflate));
         part(head, 866, 385, 0.0F, 0.9885F, -3.2061F, 0.5672F, 0.0F, 0.0F, -14.0F, -11.5F, -15.0F, 28, 23, 30, inflate);
 
         // Geo bones: left_main_tusk and right_main_tusk. Decorative tusk spikes are intentionally not ported yet.
@@ -62,10 +65,10 @@ public class LOTRModelMumakil extends ModelBase {
 
         // Geo bones: left_ear and right_ear. Main ear cubes preserve UV [246,248]; steering ropes/hooks are skipped.
         ModelRenderer leftEar = emptyChild(head, 13.6766F, -0.0718F, -1.1615F);
-        part(leftEar, 246, 248, 4.0F, 0.0F, 0.0F, 2.1378F, 1.0787F, 2.459F, -2.0F, -9.5F, -9.5F, 4, 19, 19, inflate);
+        part(leftEar, 246, 248, 4.0F, 0.0F, 0.0F, 2.1378F, 1.0787F, 2.459F, -1.0F, -9.5F, -9.5F, 2, 19, 19, inflate);
 
         ModelRenderer rightEar = emptyChild(head, -14.6766F, 0.9282F, -1.1615F);
-        part(rightEar, 246, 248, -3.0F, -1.0F, 0.0F, 2.1378F, -1.0787F, -2.459F, -2.0F, -9.5F, -9.5F, 4, 19, 19, inflate);
+        part(rightEar, 246, 248, -3.0F, -1.0F, 0.0F, 2.1378F, -1.0787F, -2.459F, -1.0F, -9.5F, -9.5F, 2, 19, 19, inflate);
 
         // Geo bones: trunk and trunk_01 through trunk_05. UVs [721,697], [591,716], [444,731], [306,736], [163,737].
         ModelRenderer trunk = emptyChild(head, 0.0F, 3.0F, -19.0F, -0.2182F, 0.0F, 0.0F);
@@ -86,27 +89,27 @@ public class LOTRModelMumakil extends ModelBase {
         ModelRenderer frontRightLeg = emptyChild(legs, 7.0F, -47.2038F, 19.5595F);
         ModelRenderer frontRightUpperLeg = part(frontRightLeg, 493, 826, 6.0F, 0.2038F, 0.4405F, -14.0F, -8.0F, -8.0F, 15, 23, 15, inflate);
         ModelRenderer frontRightLowerLeg = part(frontRightUpperLeg, 335, 813, -13.0F, 19.0F, -4.0F, 1.0F, -8.0F, -3.0F, 11, 32, 12, inflate);
-        ModelRenderer frontRightUpperFoot = part(frontRightLowerLeg, 952, 834, 0.0F, 27.0F, 3.0F, 0.0F, -3.0F, -6.0F, 13, 4, 12, inflate);
-        part(frontRightUpperFoot, 935, 760, 0.0F, 4.0F, 1.0F, -1.0F, -3.0F, -9.0F, 15, 3, 15, inflate);
+        ModelRenderer frontRightUpperFoot = part(frontRightLowerLeg, 952, 834, 0.0F, 27.0F - SEAM_OVERLAP, 3.0F, 0.0F, -3.0F, -6.0F, 13, 4, 12, inflate);
+        part(frontRightUpperFoot, 935, 760, 0.0F, 4.0F - SEAM_OVERLAP, 1.0F, -1.0F, -3.0F, -9.0F, 15, 3, 15, inflate);
 
         // Geo group: front_left_leg. UVs [493,826], [335,813], [952,834], [935,760].
         ModelRenderer frontLeftLeg = emptyChild(legs, -23.0F, -47.2038F, 19.5595F);
-        part(frontLeftLeg, 935, 760, 0.0F, 0.0F, 0.0F, -7.0F, 47.2038F, -8.5595F, 15, 3, 15, inflate);
-        part(frontLeftLeg, 952, 834, 0.0F, 0.0F, 0.0F, -6.0F, 43.2038F, -6.5595F, 13, 4, 12, inflate);
+        part(frontLeftLeg, 935, 760, 0.0F, 0.0F, 0.0F, -7.0F, 47.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 15, inflate);
+        part(frontLeftLeg, 952, 834, 0.0F, 0.0F, 0.0F, -6.0F, 43.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 12, inflate);
         part(frontLeftLeg, 493, 826, 0.0F, 0.0F, 0.0F, -7.0F, -7.7962F, -7.5595F, 15, 23, 15, inflate);
         part(frontLeftLeg, 335, 813, 0.0F, 0.0F, 0.0F, -5.0F, 11.2038F, -6.5595F, 11, 32, 12, inflate);
 
         // Geo group: back_left_leg. UVs [695,815], [169,829], [949,898], [934,678].
         ModelRenderer backLeftLeg = emptyChild(legs, -26.0F, -43.2038F, 77.5595F);
-        part(backLeftLeg, 934, 678, 0.0F, 0.0F, 0.0F, -4.0F, 43.2038F, -8.5595F, 15, 3, 16, inflate);
-        part(backLeftLeg, 949, 898, 0.0F, 0.0F, 0.0F, -3.0F, 39.2038F, -6.5595F, 13, 4, 13, inflate);
+        part(backLeftLeg, 934, 678, 0.0F, 0.0F, 0.0F, -4.0F, 43.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 16, inflate);
+        part(backLeftLeg, 949, 898, 0.0F, 0.0F, 0.0F, -3.0F, 39.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 13, inflate);
         part(backLeftLeg, 169, 829, 0.0F, 0.0F, 0.0F, -2.0F, 14.2038F, -6.5595F, 11, 25, 13, inflate);
         part(backLeftLeg, 695, 815, 0.0F, 0.0F, 0.0F, -4.0F, -9.7962F, -8.5595F, 15, 24, 18, inflate);
 
         // Geo group: back_right_leg. UVs [695,815], [169,829], [949,898], [934,678].
         ModelRenderer backRightLeg = emptyChild(legs, 9.0F, -43.2038F, 77.5595F);
-        part(backRightLeg, 934, 678, 0.0F, 0.0F, 0.0F, -10.0F, 43.2038F, -8.5595F, 15, 3, 16, inflate);
-        part(backRightLeg, 949, 898, 0.0F, 0.0F, 0.0F, -9.0F, 39.2038F, -6.5595F, 13, 4, 13, inflate);
+        part(backRightLeg, 934, 678, 0.0F, 0.0F, 0.0F, -10.0F, 43.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 16, inflate);
+        part(backRightLeg, 949, 898, 0.0F, 0.0F, 0.0F, -9.0F, 39.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 13, inflate);
         part(backRightLeg, 169, 829, 0.0F, 0.0F, 0.0F, -8.0F, 14.2038F, -6.5595F, 11, 25, 13, inflate);
         part(backRightLeg, 695, 815, 0.0F, 0.0F, 0.0F, -10.0F, -9.7962F, -8.5595F, 15, 24, 18, inflate);
     }
@@ -116,16 +119,16 @@ public class LOTRModelMumakil extends ModelBase {
         part(tusk, 33, 38, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -29.6301F : -1.7789F,
                 -0.3552F, mirrored ? 0.3135F : -0.3135F, mirrored ? 0.1096F : -0.1096F,
                 mirrored ? -3.744F : -3.256F, -4.6306F, -3.4385F, 7, 28, 7, inflate);
-        part(tusk, 33, 38, mirrored ? -5.8692F : 6.0354F, mirrored ? -9.3049F : 31.9053F, mirrored ? -42.0529F : -14.2016F,
+        part(tusk, 39, 164, mirrored ? -5.8692F : 6.0354F, mirrored ? -9.3049F : 31.9053F, mirrored ? -42.0529F : -14.2016F,
                 -0.4861F, mirrored ? 0.3135F : -0.3135F, mirrored ? 0.1096F : -0.1096F,
                 -3.0F, -10.5F, -2.5F, 6, 20, 6, inflate);
         part(tusk, 51, 665, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -28.6301F : -0.7789F,
                 -0.9601F, mirrored ? 0.3135F : -0.3135F, mirrored ? 0.1096F : -0.1096F,
                 mirrored ? -1.6029F : -1.3971F, 41.0388F, 7.8274F, 3, 4, 9, inflate);
-        part(tusk, 39, 164, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -29.6301F : -1.7789F,
+        part(tusk, 63, 578, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -29.6301F : -1.7789F,
                 -1.6206F, mirrored ? 0.3135F : -0.3135F, mirrored ? 0.1096F : -0.1096F,
                 mirrored ? -2.2847F : -1.7153F, 12.6982F, 36.9549F, 4, 12, 4, inflate);
-        part(tusk, 63, 578, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -28.6301F : -0.7789F,
+        part(tusk, 123, 590, mirrored ? 1.7742F : -1.608F, mirrored ? -39.0075F : 2.2027F, mirrored ? -28.6301F : -0.7789F,
                 -1.5333F, mirrored ? 0.3135F : -0.3135F, mirrored ? 0.1096F : -0.1096F,
                 mirrored ? -1.7508F : -1.2492F, 30.3571F, 28.6119F, 3, 6, 3, inflate);
     }
@@ -173,6 +176,10 @@ public class LOTRModelMumakil extends ModelBase {
                 Math.round(depth * GEO_TO_JAVA_UV_SCALE),
                 inflate * GEO_TO_JAVA_UV_SCALE
         );
+    }
+
+    private static float stableInflate(float inflate) {
+        return inflate - Z_FIGHT_EPSILON;
     }
 
     @Override
