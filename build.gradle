@@ -57,6 +57,8 @@ task patchGeckoLibSrgMcp {
         geckoLibSrgMcp << "MD: cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/func_82594_a (Ljava/lang/String;)Ljava/lang/Object; cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/getObject (Ljava/lang/String;)Ljava/lang/Object;\n"
         geckoLibSrgMcp << "MD: cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/func_148754_a (I)Ljava/lang/Object; cpw/mods/fml/common/registry/FMLControlledNamespacedRegistry/getObjectById (I)Ljava/lang/Object;\n"
         geckoLibSrgMcp << "FD: net/minecraft/entity/EntityLivingBase/field_70154_o net/minecraft/entity/EntityLivingBase/ridingEntity\n"
+        geckoLibSrgMcp << "FD: net/minecraft/entity/EntityLivingBase/field_70127_C net/minecraft/entity/EntityLivingBase/prevRotationPitch\n"
+        geckoLibSrgMcp << "FD: net/minecraft/entity/EntityLivingBase/field_70125_A net/minecraft/entity/EntityLivingBase/rotationPitch\n"
     }
 }
 
