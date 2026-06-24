@@ -25,6 +25,21 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     /**
+     * RenderManager and LOTR's mob-spawner inventory preview call the raw Entity render signature. If this
+     * exact method is not overridden, those paths fall back into GeoEntityRenderer#doRender and hit GeckoLib's
+     * obfuscated EntityLivingBase.func_98034_c(EntityPlayer) invisibility call. Keep the generic entry point
+     * here and route only real Mumakil instances into the safe static renderer.
+     */
+    @Override
+    public void doRender(Entity entity, double x, double y, double z, float entityYaw, float partialTicks) {
+        if (!(entity instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        this.doRenderMumakil((LOTREntityMumakil)entity, x, y, z, entityYaw, partialTicks);
+    }
+
+    /**
      * GeckoLib-Unofficial's default GeoEntityRenderer#doRender path still calls obfuscated Minecraft methods,
      * including EntityLivingBase.func_98034_c(EntityPlayer), which is isInvisibleToPlayer(...) in this
      * deobfuscated ForgeGradle 1.2 runtime. For the UV experiment, take over the small static render loop here
@@ -32,6 +47,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      */
     @Override
     public void doRender(LOTREntityMumakil entity, double x, double y, double z, float entityYaw, float partialTicks) {
+        this.doRenderMumakil(entity, x, y, z, entityYaw, partialTicks);
+    }
+
+    private void doRenderMumakil(LOTREntityMumakil entity, double x, double y, double z, float entityYaw, float partialTicks) {
         if (entity == null || entity.isInvisible()) {
             return;
         }
