@@ -54,6 +54,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
     private static final double MOB_TARGET_RANGE = 18.0D;
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
+    private static final int ANGER_WAVE_MIN_DURATION = 60;
+    private static final int ANGER_WAVE_RANDOM_DURATION = 61;
+    private static final int ANGER_WAVE_MIN_COOLDOWN = 180;
+    private static final int ANGER_WAVE_RANDOM_COOLDOWN = 81;
     private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
     private static final int MAX_OBSTACLES_PER_PASS = 96;
     private static final int TRAMPLE_SCAN_INTERVAL = 2;
@@ -74,11 +78,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private float lastStableIdleHeadYaw;
     private boolean hasStableIdleYaw;
     private int chargeStompSoundCooldown;
+    private int angerWaveCooldownTicks;
+    private int angerWaveActiveTicks;
 
     public LOTREntityMumakil(World world) {
         super(world);
-        // Keep the 1.7.10 collision box ground-anchored; only increase coverage for the scaled renderer.
-        this.setSize(4.25F, 6.25F);
+        // Slightly narrower than the rendered body so melee attackers can path close enough to hit this giant target.
+        this.setSize(3.75F, 6.25F);
+        this.resetAngerWaveCooldown();
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -131,7 +138,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }) {
             @Override
             public boolean shouldExecute() {
-                return LOTREntityMumakil.this.isWildMumakil() && super.shouldExecute();
+                return LOTREntityMumakil.this.isWildMumakil()
+                        && (LOTREntityMumakil.this.getAttackTarget() != null || LOTREntityMumakil.this.isWildAngerWaveActive())
+                        && super.shouldExecute();
             }
 
             @Override
@@ -170,6 +179,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     public void readEntityFromNBT(NBTTagCompound nbt) {
         super.readEntityFromNBT(nbt);
         this.applyConfiguredAttributes();
+        if (this.angerWaveCooldownTicks <= 0 && this.angerWaveActiveTicks <= 0) {
+            this.resetAngerWaveCooldown();
+        }
     }
 
     protected double clampChildHealth(double health) {
@@ -192,6 +204,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         super.onLivingUpdate();
         this.stabilizeIdleYaw();
         if (!this.worldObj.isRemote) {
+            this.updateAngerWave();
             this.tryAcquireWildMobTarget();
             this.clearAggroObstaclesForMovement();
             this.updateChargeStompSound();
@@ -222,12 +235,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                                     && (!(rider instanceof EntityCreature) || LOTRMod.canNPCAttackEntity((EntityCreature)rider, entity, false))) {
                                 boolean flag = entity.attackEntityFrom(DamageSource.causeMobDamage(this), strength);
                                 if (flag) {
-                                    float knockback = Math.min(strength * 0.04F, 1.0F);
-                                    entity.addVelocity(
-                                            (double)(-MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F) * knockback),
-                                            (double)knockback,
-                                            (double)(MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F) * knockback)
-                                    );
+                                    this.applyMumakilHeavyKnockback(entity, 2.0F, 0.55F);
                                     hitAnyEntities = true;
                                     if (entity instanceof EntityLiving) {
                                         EntityLiving entityliving = (EntityLiving)entity;
@@ -258,10 +266,65 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     public boolean attackEntityAsMob(Entity target) {
         boolean attacked = super.attackEntityAsMob(target);
         if (attacked && !this.worldObj.isRemote) {
+            this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
             this.playMumakilHitSound();
         }
 
         return attacked;
+    }
+
+    private void updateAngerWave() {
+        if (!this.isWildMumakil()) {
+            this.angerWaveActiveTicks = 0;
+            if (this.angerWaveCooldownTicks <= 0) {
+                this.resetAngerWaveCooldown();
+            }
+            return;
+        }
+
+        if (this.angerWaveActiveTicks > 0) {
+            --this.angerWaveActiveTicks;
+            if (this.angerWaveActiveTicks <= 0) {
+                this.resetAngerWaveCooldown();
+            }
+            return;
+        }
+
+        if (this.angerWaveCooldownTicks > 0) {
+            --this.angerWaveCooldownTicks;
+            return;
+        }
+
+        this.angerWaveActiveTicks = ANGER_WAVE_MIN_DURATION + this.rand.nextInt(ANGER_WAVE_RANDOM_DURATION);
+    }
+
+    private void resetAngerWaveCooldown() {
+        this.angerWaveCooldownTicks = ANGER_WAVE_MIN_COOLDOWN + this.rand.nextInt(ANGER_WAVE_RANDOM_COOLDOWN);
+    }
+
+    private boolean isWildAngerWaveActive() {
+        return this.isWildMumakil() && this.angerWaveActiveTicks > 0;
+    }
+
+    private void applyMumakilHeavyKnockback(Entity target, float horizontalStrength, float verticalStrength) {
+        if (!(target instanceof EntityLivingBase)) {
+            return;
+        }
+
+        double deltaX = target.posX - this.posX;
+        double deltaZ = target.posZ - this.posZ;
+        double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+
+        if (distance > 1.0E-4D) {
+            deltaX /= distance;
+            deltaZ /= distance;
+        } else {
+            deltaX = (double)(-MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F));
+            deltaZ = (double)(MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F));
+        }
+
+        target.addVelocity(deltaX * (double)horizontalStrength, (double)verticalStrength, deltaZ * (double)horizontalStrength);
+        target.velocityChanged = true;
     }
 
     /**
@@ -337,6 +400,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private void tryAcquireWildMobTarget() {
         if (!this.isWildMumakil()
+                || !this.isWildAngerWaveActive()
                 || this.getAttackTarget() != null
                 || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0) {
             return;
@@ -543,7 +607,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             deltaZ = fallbackZ;
         }
 
-        target.addVelocity(deltaX * 0.25D, 0.30D, deltaZ * 0.25D);
+        target.addVelocity(deltaX * 0.75D, 0.42D, deltaZ * 0.75D);
         target.velocityChanged = true;
     }
 
