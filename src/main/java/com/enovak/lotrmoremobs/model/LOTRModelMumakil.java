@@ -42,8 +42,9 @@ public class LOTRModelMumakil extends ModelBase {
         ModelRenderer middleTail = part(upperTail, 53, 844, -2.0F, 1.0F, 2.0F, -2.0F, -0.9617F, -1.0F, 4, 10, 3, inflate);
         part(middleTail, 60, 897, 0.0F, 10.0383F, 2.0F, -1.0F, -1.0F, -1.0F, 2, 10, 2, inflate);
 
-        // Geo bone: body. Cubes preserve UV [235,244] and [703,43].
-        ModelRenderer body = part(sway, 235, 244, -2.0F, 1.0F, 17.0F, -18.01F, 1.0F, -14.0F, 39, 20, 60, inflate);
+        // Geo bone: body. The base cube source is 112.83 x 59.4 x 178.2, so 38 x 20 x 59
+        // better matches its UV rectangle than the previous over-rounded 39 x 20 x 60 fallback.
+        ModelRenderer body = part(sway, 235, 244, -2.0F, 1.0F, 17.0F, -17.51F, 1.0F, -13.5F, 38, 20, 59, inflate);
         // Slightly tucked to reduce flicker where the raised back intersects the main body.
         part(body, 703, 43, 21.0F, 7.0F, -3.0F, -0.1745F, 0.0F, 0.0F, -39.0F, -28.0F, -17.0F, 40, 31, 67, stableInflate(inflate));
 
@@ -90,7 +91,8 @@ public class LOTRModelMumakil extends ModelBase {
         // Geo group: front_right_leg. UVs [493,826], [335,813], [952,834], [935,760].
         ModelRenderer frontRightLeg = emptyChild(legs, 7.0F, -47.2038F, 19.5595F);
         ModelRenderer frontRightUpperLeg = part(frontRightLeg, 493, 826, 6.0F, 0.2038F, 0.4405F, -14.0F, -8.0F, -8.0F, 15, 23, 15, inflate);
-        ModelRenderer frontRightLowerLeg = part(frontRightUpperLeg, 335, 813, -13.0F, 19.0F, -4.0F, 1.0F, -8.0F, -3.0F, 11, 32, 12, inflate);
+        // Geo front_right_lower_leg declares mirror:true; mirror it here so the lower-leg UV orientation matches the source.
+        ModelRenderer frontRightLowerLeg = partMirrored(frontRightUpperLeg, 335, 813, -13.0F, 19.0F, -4.0F, 1.0F, -8.0F, -3.0F, 11, 32, 12, inflate);
         ModelRenderer frontRightUpperFoot = part(frontRightLowerLeg, 952, 834, 0.0F, 27.0F - SEAM_OVERLAP, 3.0F, 0.0F, -3.0F, -6.0F, 13, 4, 12, inflate);
         part(frontRightUpperFoot, 935, 760, 0.0F, 4.0F - SEAM_OVERLAP, 1.0F, -1.0F, -3.0F, -9.0F, 15, 3, 15, inflate);
 
@@ -149,13 +151,25 @@ public class LOTRModelMumakil extends ModelBase {
 
     private ModelRenderer part(ModelRenderer parent, int textureU, int textureV, float pointX, float pointY, float pointZ,
                                float boxX, float boxY, float boxZ, int width, int height, int depth, float inflate) {
-        return part(parent, textureU, textureV, pointX, pointY, pointZ, 0.0F, 0.0F, 0.0F, boxX, boxY, boxZ, width, height, depth, inflate);
+        return part(parent, textureU, textureV, pointX, pointY, pointZ, 0.0F, 0.0F, 0.0F, boxX, boxY, boxZ, width, height, depth, inflate, false);
+    }
+
+    private ModelRenderer partMirrored(ModelRenderer parent, int textureU, int textureV, float pointX, float pointY, float pointZ,
+                                       float boxX, float boxY, float boxZ, int width, int height, int depth, float inflate) {
+        return part(parent, textureU, textureV, pointX, pointY, pointZ, 0.0F, 0.0F, 0.0F, boxX, boxY, boxZ, width, height, depth, inflate, true);
     }
 
     private ModelRenderer part(ModelRenderer parent, int textureU, int textureV, float pointX, float pointY, float pointZ,
                                float rotX, float rotY, float rotZ, float boxX, float boxY, float boxZ,
                                int width, int height, int depth, float inflate) {
+        return part(parent, textureU, textureV, pointX, pointY, pointZ, rotX, rotY, rotZ, boxX, boxY, boxZ, width, height, depth, inflate, false);
+    }
+
+    private ModelRenderer part(ModelRenderer parent, int textureU, int textureV, float pointX, float pointY, float pointZ,
+                               float rotX, float rotY, float rotZ, float boxX, float boxY, float boxZ,
+                               int width, int height, int depth, float inflate, boolean mirror) {
         ModelRenderer child = new ModelRenderer(this, textureU, textureV);
+        child.mirror = mirror;
         setPoint(child, pointX, pointY, pointZ);
         setRotationAngle(child, rotX, rotY, rotZ);
         addScaledBox(child, boxX, boxY, boxZ, width, height, depth, inflate);
