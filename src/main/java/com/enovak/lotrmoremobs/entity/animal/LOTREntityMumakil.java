@@ -88,8 +88,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public LOTREntityMumakil(World world) {
         super(world);
-        // Slightly narrower than the rendered body so melee attackers can path close enough to hit this giant target.
-        this.setSize(3.75F, 6.25F);
+        // Intentionally generous and ground-anchored: the rendered Mumakil is huge, and normal melee NPCs need a reachable hurtbox.
+        this.setSize(4.25F, 7.0F);
         this.resetAngerWaveCooldown();
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
@@ -105,6 +105,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.targetTasks.addTask(3, this.createWildMobTargetAI(IMob.class));
         this.targetTasks.addTask(4, this.createWildMobTargetAI(LOTREntityNPC.class));
         this.targetTasks.addTask(5, this.createWildMobTargetAI(EntityLivingBase.class));
+    }
+
+    @Override
+    public float getCollisionBorderSize() {
+        // Give ray/melee checks a little extra surface area without floating or moving the main collision box.
+        return 0.75F;
     }
 
     @Override
