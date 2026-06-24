@@ -24,8 +24,11 @@ import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
 public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     private static final ResourceLocation MUMAKIL_WAR_TEXTURE =
             new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
-    private static boolean loggedFirstGeoRender;
+    private static boolean loggedSafeRenderStart;
+    private static boolean loggedModelRequest;
     private static boolean loggedMissingGeoModel;
+    private static boolean loggedTextureRequest;
+    private static boolean loggedBeforeGeoRender;
 
     public LOTRRenderMumakilGeo() {
         super(new LOTRGeoModelMumakil());
@@ -61,11 +64,26 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     private void doRenderMumakil(LOTREntityMumakil entity, double x, double y, double z, float entityYaw, float partialTicks) {
-        if (entity == null || entity.isInvisible()) {
+        if (entity == null) {
+            return;
+        }
+
+        if (!loggedSafeRenderStart) {
+            loggedSafeRenderStart = true;
+            System.out.println("[LOTRMoreMobs] Mumakil safe Geo render path started for entityId=" + entity.getEntityId());
+        }
+
+        if (entity.isInvisible()) {
             return;
         }
 
         ResourceLocation modelLocation = this.modelProvider.getModelLocation(entity);
+        if (!loggedModelRequest) {
+            loggedModelRequest = true;
+            System.out.println("[LOTRMoreMobs] Mumakil Geo model requested: " + modelLocation
+                    + " resourceFound=" + this.canLoadResource(modelLocation));
+        }
+
         GeoModel geoModel = this.modelProvider.getModel(modelLocation);
         if (geoModel == null) {
             if (!loggedMissingGeoModel) {
@@ -73,14 +91,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                 System.out.println("[LOTRMoreMobs] Mumakil Geo renderer could not load model: " + modelLocation);
             }
             return;
-        }
-
-        if (!loggedFirstGeoRender) {
-            loggedFirstGeoRender = true;
-            System.out.println("[LOTRMoreMobs] Mumakil Geo renderer active. model=" + modelLocation
-                    + " modelLoaded=true modelResourceFound=" + this.canLoadResource(modelLocation)
-                    + " texture=" + MUMAKIL_WAR_TEXTURE
-                    + " textureResourceFound=" + this.canLoadResource(MUMAKIL_WAR_TEXTURE));
         }
 
         GlStateManager.pushMatrix();
@@ -129,11 +139,23 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             GlStateManager.pushMatrix();
             try {
                 GlStateManager.translate(0.0F, 0.01F, 0.0F);
-                this.bindEntityTexture(entity);
+
+                ResourceLocation textureLocation = this.getEntityTexture(entity);
+                if (!loggedTextureRequest) {
+                    loggedTextureRequest = true;
+                    System.out.println("[LOTRMoreMobs] Mumakil Geo texture requested: " + textureLocation
+                            + " resourceFound=" + this.canLoadResource(textureLocation));
+                }
+                Minecraft.getMinecraft().renderEngine.bindTexture(textureLocation);
+
                 Color renderColor = this.getRenderColor(entity, partialTicks);
 
                 // Deliberately skip GeckoLib's EntityLivingBase.isInvisibleToPlayer(...) branch; in this
                 // 1.7.10 dev runtime it dispatches to the missing obfuscated func_98034_c method.
+                if (!loggedBeforeGeoRender) {
+                    loggedBeforeGeoRender = true;
+                    System.out.println("[LOTRMoreMobs] Mumakil calling GeckoLib render(GeoModel, ...) with modelLoaded=true");
+                }
                 this.render(
                         geoModel,
                         entity,
