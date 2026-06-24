@@ -343,7 +343,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean canTargetWildMob(EntityLivingBase target) {
         if (target == this
                 || target instanceof EntityPlayer
-                || target.getClass() == this.getClass()
+                || target instanceof LOTREntityMumakil
                 || !target.isEntityAlive()
                 || target.riddenByEntity != null
                 || target.ridingEntity != null) {
@@ -360,15 +360,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         if (target instanceof LOTREntityNPC) {
             LOTREntityNPC npc = (LOTREntityNPC)target;
-            if (npc.hiredNPCInfo.isActive) {
-                return false;
-            }
-
-            LOTRFaction targetFaction = LOTRMod.getNPCFaction(npc);
-            return LOTRFaction.NEAR_HARAD.isBadRelation(targetFaction);
+            return !npc.hiredNPCInfo.isActive;
         }
 
-        return target instanceof EntityCreature;
+        return true;
     }
 
     private int getWildMobTargetPriority(EntityLivingBase target) {
