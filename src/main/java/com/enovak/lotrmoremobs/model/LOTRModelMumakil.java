@@ -14,7 +14,9 @@ public class LOTRModelMumakil extends ModelBase {
      */
     private static final float GEO_TO_JAVA_UV_SCALE = 3.0F;
     private static final float JAVA_RENDER_SCALE = 1.0F / GEO_TO_JAVA_UV_SCALE;
-    private static final float Z_FIGHT_EPSILON = 0.015F;
+    // After the 1.35x entity render scale, negative inflation on visible exterior cubes exposes edge cracks.
+    // Keep visible boxes full-sized; handle any future true z-fighting with local offsets instead.
+    private static final float Z_FIGHT_EPSILON = 0.0F;
     private static final float SEAM_OVERLAP = 0.05F;
 
     private final ModelRenderer master;
