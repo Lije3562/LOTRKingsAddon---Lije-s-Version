@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs.render.entity;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.model.mumakil.LOTRGeoModelMumakil;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL12;
@@ -25,10 +26,8 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     /**
-     * RenderManager and LOTR's mob-spawner inventory preview call the raw Entity render signature. If this
-     * exact method is not overridden, those paths fall back into GeoEntityRenderer#doRender and hit GeckoLib's
-     * obfuscated EntityLivingBase.func_98034_c(EntityPlayer) invisibility call. Keep the generic entry point
-     * here and route only real Mumakil instances into the safe static renderer.
+     * RenderManager can enter through the raw Entity signature. Keep this generic path and route only real
+     * Mumakil instances into the safe static renderer instead of allowing dispatch to GeoEntityRenderer#doRender.
      */
     @Override
     public void doRender(Entity entity, double x, double y, double z, float entityYaw, float partialTicks) {
@@ -40,14 +39,18 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     /**
-     * GeckoLib-Unofficial's default GeoEntityRenderer#doRender path still calls obfuscated Minecraft methods,
-     * including EntityLivingBase.func_98034_c(EntityPlayer), which is isInvisibleToPlayer(...) in this
-     * deobfuscated ForgeGradle 1.2 runtime. For the UV experiment, take over the small static render loop here
-     * and skip GeckoLib's unsafe invisibility branch entirely.
+     * LOTR's mob-spawner inventory preview can enter through the EntityLivingBase signature. If this exact
+     * overload is missing, runtime dispatch can still reach GeckoLib's GeoEntityRenderer#doRender and its
+     * obfuscated EntityLivingBase.func_98034_c(EntityPlayer) invisibility call. Route it through the same safe
+     * static helper and never call super.doRender(...).
      */
     @Override
-    public void doRender(LOTREntityMumakil entity, double x, double y, double z, float entityYaw, float partialTicks) {
-        this.doRenderMumakil(entity, x, y, z, entityYaw, partialTicks);
+    public void doRender(EntityLivingBase entity, double x, double y, double z, float entityYaw, float partialTicks) {
+        if (!(entity instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        this.doRenderMumakil((LOTREntityMumakil)entity, x, y, z, entityYaw, partialTicks);
     }
 
     private void doRenderMumakil(LOTREntityMumakil entity, double x, double y, double z, float entityYaw, float partialTicks) {
