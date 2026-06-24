@@ -82,9 +82,8 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             GL11.glScalef(-1.0F, -1.0F, 1.0F);
             GL11.glTranslatef(0.0F, -1.5078125F, 0.0F);
 
-            if (this.bindEntityTexture(entity)) {
-                this.renderModel(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch, 0.0625F);
-            }
+            this.bindEntityTexture(entity);
+            this.renderModel(entity, limbSwing, limbSwingAmount, ageInTicks, netHeadYaw, headPitch, 0.0625F);
         } finally {
             GL11.glDisable(GL12.GL_RESCALE_NORMAL);
             GL11.glEnable(GL11.GL_CULL_FACE);
