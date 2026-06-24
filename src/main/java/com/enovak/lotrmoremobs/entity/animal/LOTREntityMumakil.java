@@ -15,7 +15,7 @@ import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.animal.LOTREntityHorse;
 import lotr.common.entity.npc.LOTREntityNPC;
 import net.minecraft.block.Block;
-import net.minecraft.block.material.Material;
+import net.minecraft.command.IEntitySelector;
 import lotr.common.fac.LOTRFaction;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
@@ -52,11 +52,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
-    private static final int MOB_TARGET_CHECK_CHANCE = 2;
     private static final double MOB_TARGET_RANGE = 18.0D;
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
-    private static final int LEAF_CLEAR_INTERVAL = 2;
-    private static final int MAX_LEAVES_PER_PASS = 96;
+    private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
+    private static final int MAX_OBSTACLES_PER_PASS = 96;
     private static final int TRAMPLE_SCAN_INTERVAL = 2;
     private static final int TRAMPLE_COOLDOWN_TICKS = 20;
     private static final float TRAMPLE_MIN_SPEED = 0.10F;
@@ -65,12 +64,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float IDLE_YAW_MAX_STEP = 8.0F;
     private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
     private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+    private static final float CHARGE_STOMP_SOUND_MIN_SPEED = 0.13F;
+    private static final int CHARGE_STOMP_SOUND_MIN_COOLDOWN = 10;
+    private static final int CHARGE_STOMP_SOUND_RANDOM_COOLDOWN = 7;
 
     private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
     private final AnimationFactory animationFactory = new AnimationFactory(this);
     private float lastStableIdleYaw;
     private float lastStableIdleHeadYaw;
     private boolean hasStableIdleYaw;
+    private int chargeStompSoundCooldown;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -87,6 +90,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
             }
         });
+        this.targetTasks.addTask(3, this.createWildMobTargetAI(IMob.class));
+        this.targetTasks.addTask(4, this.createWildMobTargetAI(LOTREntityNPC.class));
+        this.targetTasks.addTask(5, this.createWildMobTargetAI(EntityLivingBase.class));
     }
 
     @Override
@@ -112,6 +118,27 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     protected EntityAIBase createMountAttackAI() {
         return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
+    }
+
+    private EntityAIBase createWildMobTargetAI(Class targetClass) {
+        return new EntityAINearestAttackableTarget(this, targetClass, 5, true, false, new IEntitySelector() {
+            @Override
+            public boolean isEntityApplicable(Entity entity) {
+                return entity instanceof EntityLivingBase
+                        && LOTREntityMumakil.this.isWildMumakil()
+                        && LOTREntityMumakil.this.canTargetWildMob((EntityLivingBase)entity);
+            }
+        }) {
+            @Override
+            public boolean shouldExecute() {
+                return LOTREntityMumakil.this.isWildMumakil() && super.shouldExecute();
+            }
+
+            @Override
+            public boolean continueExecuting() {
+                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
+            }
+        };
     }
 
     public int getHorseType() {
@@ -165,8 +192,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         super.onLivingUpdate();
         this.stabilizeIdleYaw();
         if (!this.worldObj.isRemote) {
-            this.clearLeavesForMovement();
             this.tryAcquireWildMobTarget();
+            this.clearAggroObstaclesForMovement();
+            this.updateChargeStompSound();
             this.applyTrampleDamage();
 
             if (this.riddenByEntity instanceof EntityLivingBase) {
@@ -214,12 +242,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     }
 
                     if (hitAnyEntities) {
-                        this.worldObj.playSoundAtEntity(
-                                this,
-                                "lotr:troll.ologHai_hammer",
-                                1.0F,
-                                (this.rand.nextFloat() - this.rand.nextFloat()) * 0.2F + 1.0F
-                        );
+                        this.playMumakilHitSound();
                     }
                 }
             } else if (this.getAttackTarget() != null) {
@@ -229,6 +252,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 this.setSprinting(false);
             }
         }
+    }
+
+    @Override
+    public boolean attackEntityAsMob(Entity target) {
+        boolean attacked = super.attackEntityAsMob(target);
+        if (attacked && !this.worldObj.isRemote) {
+            this.playMumakilHitSound();
+        }
+
+        return attacked;
     }
 
     /**
@@ -305,8 +338,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private void tryAcquireWildMobTarget() {
         if (!this.isWildMumakil()
                 || this.getAttackTarget() != null
-                || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0
-                || this.rand.nextInt(MOB_TARGET_CHECK_CHANCE) != 0) {
+                || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0) {
             return;
         }
 
@@ -435,12 +467,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         if (hitAnyEntities) {
-            this.worldObj.playSoundAtEntity(
-                    this,
-                    "mob.irongolem.walk",
-                    1.0F,
-                    0.55F + this.rand.nextFloat() * 0.1F
-            );
+            this.playMumakilHitSound();
         }
     }
 
@@ -531,18 +558,25 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    private void clearLeavesForMovement() {
-        if (this.worldObj.isRemote || this.ticksExisted % LEAF_CLEAR_INTERVAL != 0) {
+    /**
+     * Angry Mumakil should be able to shove through trees while pursuing a target. This deliberately
+     * uses Forge's leaf/wood hooks instead of Material.wood, so planks, doors, fences, and chests are
+     * not treated as casual obstacle clearing targets.
+     */
+    private void clearAggroObstaclesForMovement() {
+        if (this.worldObj.isRemote || this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0) {
+            return;
+        }
+
+        boolean aggroed = this.getAttackTarget() != null || this.isMountEnraged();
+        if (!aggroed) {
             return;
         }
 
         double horizontalSpeedSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
-        boolean riderTryingToMove = this.riddenByEntity instanceof EntityLivingBase
-                && (Math.abs(((EntityLivingBase)this.riddenByEntity).moveForward) > 0.01F
-                || Math.abs(((EntityLivingBase)this.riddenByEntity).moveStrafing) > 0.01F);
         boolean tryingToMove = horizontalSpeedSq > 0.0004D
-                || riderTryingToMove
-                || this.isMountEnraged();
+                || this.isMountEnraged()
+                || (this.getAttackTarget() != null && !this.getNavigator().noPath());
 
         if (!tryingToMove) {
             return;
@@ -592,25 +626,25 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 trunkZ + 1.25D
         );
 
-        int remaining = MAX_LEAVES_PER_PASS;
-        remaining -= this.clearLeavesInBox(headAndTusksBox, remaining);
+        int remaining = MAX_OBSTACLES_PER_PASS;
+        remaining -= this.clearAggroObstaclesInBox(headAndTusksBox, remaining);
 
         if (remaining > 0) {
-            remaining -= this.clearLeavesInBox(trunkBox, remaining);
+            remaining -= this.clearAggroObstaclesInBox(trunkBox, remaining);
         }
 
         if (remaining > 0) {
-            this.clearLeavesInBox(bodyBox, remaining);
+            this.clearAggroObstaclesInBox(bodyBox, remaining);
         }
     }
 
-    private int clearLeavesInBox(AxisAlignedBB leafBox, int maximum) {
-        int minX = MathHelper.floor_double(leafBox.minX);
-        int maxX = MathHelper.floor_double(leafBox.maxX);
-        int minY = MathHelper.floor_double(leafBox.minY);
-        int maxY = MathHelper.floor_double(leafBox.maxY);
-        int minZ = MathHelper.floor_double(leafBox.minZ);
-        int maxZ = MathHelper.floor_double(leafBox.maxZ);
+    private int clearAggroObstaclesInBox(AxisAlignedBB obstacleBox, int maximum) {
+        int minX = MathHelper.floor_double(obstacleBox.minX);
+        int maxX = MathHelper.floor_double(obstacleBox.maxX);
+        int minY = MathHelper.floor_double(obstacleBox.minY);
+        int maxY = MathHelper.floor_double(obstacleBox.maxY);
+        int minZ = MathHelper.floor_double(obstacleBox.minZ);
+        int maxZ = MathHelper.floor_double(obstacleBox.maxZ);
         int broken = 0;
 
         for(int x = minX; x <= maxX; ++x) {
@@ -625,7 +659,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     }
 
                     Block block = this.worldObj.getBlock(x, y, z);
-                    if (block.getMaterial() == Material.leaves) {
+                    if (this.canBreakAggroObstacle(block, x, y, z)) {
                         this.worldObj.setBlockToAir(x, y, z);
                         ++broken;
                     }
@@ -634,6 +668,46 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         return broken;
+    }
+
+    private boolean canBreakAggroObstacle(Block block, int x, int y, int z) {
+        return block.isLeaves(this.worldObj, x, y, z) || block.isWood(this.worldObj, x, y, z);
+    }
+
+    private void updateChargeStompSound() {
+        if (this.chargeStompSoundCooldown > 0) {
+            --this.chargeStompSoundCooldown;
+        }
+
+        EntityLivingBase target = this.getAttackTarget();
+        if (target == null || (!this.isWildMumakil() && !this.isMountEnraged())) {
+            return;
+        }
+
+        if (this.chargeStompSoundCooldown > 0) {
+            return;
+        }
+
+        float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
+        if (momentum >= CHARGE_STOMP_SOUND_MIN_SPEED && !this.getNavigator().noPath()) {
+            this.worldObj.playSoundAtEntity(
+                    this,
+                    "mob.irongolem.walk",
+                    1.0F,
+                    0.45F + this.rand.nextFloat() * 0.1F
+            );
+            this.chargeStompSoundCooldown = CHARGE_STOMP_SOUND_MIN_COOLDOWN
+                    + this.rand.nextInt(CHARGE_STOMP_SOUND_RANDOM_COOLDOWN);
+        }
+    }
+
+    private void playMumakilHitSound() {
+        this.worldObj.playSoundAtEntity(
+                this,
+                "lotr:troll.ologHai_hammer",
+                0.9F,
+                0.85F + this.rand.nextFloat() * 0.2F
+        );
     }
 
     protected void dropFewItems(boolean flag, int i) {
