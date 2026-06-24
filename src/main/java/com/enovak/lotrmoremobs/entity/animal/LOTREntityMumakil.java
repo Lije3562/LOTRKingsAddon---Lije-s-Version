@@ -5,6 +5,7 @@
 
 package com.enovak.lotrmoremobs.entity.animal;
 
+import com.enovak.lotrmoremobs.Main;
 import java.util.HashMap;
 import java.util.Iterator;
 import java.util.List;
@@ -52,7 +53,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
     private static final double TUSK_ATTACK_RANGE = 6.5D;
-    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 40;
+    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 60;
     private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
     private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
@@ -889,20 +890,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected void dropFewItems(boolean flag, int i) {
-        int j = this.rand.nextInt(2) + this.rand.nextInt(1 + i);
-
-        for(int k = 0; k < j; ++k) {
-            this.dropItem(LOTRMod.rhinoHorn, 1);
+        this.dropItem(Main.mumakilTusk, 1);
+        if (i > 0 && this.rand.nextInt(4) < i) {
+            this.dropItem(Main.mumakilTusk, 1);
         }
 
-        int meat = this.rand.nextInt(3) + this.rand.nextInt(1 + i);
+        int shanks = 2 + this.rand.nextInt(4) + this.rand.nextInt(1 + i);
 
-        for(int l = 0; l < meat; ++l) {
-            if (this.isBurning()) {
-                this.dropItem(LOTRMod.rhinoCooked, 1);
-            } else {
-                this.dropItem(LOTRMod.rhinoRaw, 1);
-            }
+        for(int j = 0; j < shanks; ++j) {
+            this.dropItem(Main.mumakilShank, 1);
         }
     }
 
