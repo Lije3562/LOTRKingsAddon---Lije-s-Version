@@ -17,7 +17,7 @@ public class LOTRModelMumakil extends ModelBase {
     // The 1.35x entity render scale makes tiny seams easier to see; keep the anti-flicker shrink subtle.
     private static final float Z_FIGHT_EPSILON = 0.01F;
     // Slightly overlap hidden leg/foot seams so scaled rendering does not expose hairline gaps.
-    private static final float SEAM_OVERLAP = 0.08F;
+    private static final float SEAM_OVERLAP = 0.10F;
 
     private final ModelRenderer master;
 
