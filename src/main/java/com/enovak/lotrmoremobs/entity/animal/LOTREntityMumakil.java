@@ -74,7 +74,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public LOTREntityMumakil(World world) {
         super(world);
-        this.setSize(4.0F, 5.5F);
+        // Keep the 1.7.10 collision box ground-anchored; only increase coverage for the scaled renderer.
+        this.setSize(4.25F, 6.25F);
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
