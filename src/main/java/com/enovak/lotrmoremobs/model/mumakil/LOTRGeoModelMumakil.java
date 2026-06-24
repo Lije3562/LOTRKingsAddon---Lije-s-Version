@@ -12,12 +12,17 @@ import software.bernie.geckolib3.model.AnimatedGeoModel;
  * geometry and matching texture solve the UV bleed without passing through the Java ModelRenderer conversion.
  */
 public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
+    public static final ResourceLocation PLAIN_MODEL =
+            new ResourceLocation("lotrmoremobs", "geo/entity/mumakil/LOTRMumakilModel.geo.json");
+    public static final ResourceLocation WAR_MODEL =
+            new ResourceLocation("lotrmoremobs", "geo/entity/mumakil/LOTRMumakilWarModel.geo.json");
+    public static final ResourceLocation PLAIN_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil.png");
+    public static final ResourceLocation WAR_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
+
     private static final ResourceLocation ANIMATION =
             new ResourceLocation("lotrmoremobs", "animations/entity/mumakil/LOTRMumakil.animations.json");
-    private static final ResourceLocation MODEL =
-            new ResourceLocation("lotrmoremobs", "geo/entity/mumakil/LOTRMumakilModel.geo.json");
-    private static final ResourceLocation TEXTURE =
-            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
 
     @Override
     public ResourceLocation getAnimationFileLocation(LOTREntityMumakil entity) {
@@ -26,12 +31,16 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
 
     @Override
     public ResourceLocation getModelLocation(LOTREntityMumakil entity) {
-        return MODEL;
+        return shouldRenderWarEquipment(entity) ? WAR_MODEL : PLAIN_MODEL;
     }
 
     @Override
     public ResourceLocation getTextureLocation(LOTREntityMumakil entity) {
-        return TEXTURE;
+        return shouldRenderWarEquipment(entity) ? WAR_TEXTURE : PLAIN_TEXTURE;
+    }
+
+    public static boolean shouldRenderWarEquipment(LOTREntityMumakil entity) {
+        return entity != null && entity.isMountSaddled();
     }
 
     /**
