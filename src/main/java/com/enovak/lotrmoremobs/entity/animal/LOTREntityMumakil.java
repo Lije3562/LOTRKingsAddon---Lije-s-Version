@@ -51,6 +51,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double WILD_ATTACK_SPEED = 1.30D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
+    private static final double TUSK_ATTACK_RANGE = 6.5D;
+    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 40;
+    private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
+    private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
     private static final double MOB_TARGET_RANGE = 18.0D;
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
@@ -80,6 +84,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private int chargeStompSoundCooldown;
     private int angerWaveCooldownTicks;
     private int angerWaveActiveTicks;
+    private int tuskAttackCooldownTicks;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -204,8 +209,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         super.onLivingUpdate();
         this.stabilizeIdleYaw();
         if (!this.worldObj.isRemote) {
+            if (this.tuskAttackCooldownTicks > 0) {
+                --this.tuskAttackCooldownTicks;
+            }
+
             this.updateAngerWave();
             this.tryAcquireWildMobTarget();
+            this.tryTuskReachAttack();
             this.clearAggroObstaclesForMovement();
             this.updateChargeStompSound();
             this.applyTrampleDamage();
@@ -264,8 +274,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public boolean attackEntityAsMob(Entity target) {
+        if (this.tuskAttackCooldownTicks > 0) {
+            return false;
+        }
+
         boolean attacked = super.attackEntityAsMob(target);
         if (attacked && !this.worldObj.isRemote) {
+            this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
             this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
             this.playMumakilHitSound();
         }
@@ -304,6 +319,93 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private boolean isWildAngerWaveActive() {
         return this.isWildMumakil() && this.angerWaveActiveTicks > 0;
+    }
+
+    private void tryTuskReachAttack() {
+        EntityLivingBase target = this.getAttackTarget();
+        if (target == null
+                || this.tuskAttackCooldownTicks > 0
+                || !target.isEntityAlive()
+                || this.getDistanceSqToEntity(target) > TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE
+                || !this.canTuskAttackTarget(target)
+                || !this.isTuskTargetInFront(target)) {
+            return;
+        }
+
+        if (target.attackEntityFrom(DamageSource.causeMobDamage(this), (float)ATTACK_DAMAGE)) {
+            this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
+            this.applyMumakilHeavyKnockback(target, 1.75F, 0.5F);
+            this.playMumakilHitSound();
+        }
+    }
+
+    private boolean canTuskAttackTarget(EntityLivingBase target) {
+        if (target == this
+                || target == this.riddenByEntity
+                || target instanceof LOTREntityMumakil
+                || !target.isEntityAlive()
+                || target.riddenByEntity != null
+                || target.ridingEntity != null) {
+            return false;
+        }
+
+        if (target instanceof EntityPlayer) {
+            EntityPlayer player = (EntityPlayer)target;
+            if (player.capabilities.isCreativeMode || this.isOwner(player)) {
+                return false;
+            }
+        }
+
+        if (target instanceof EntityTameable && ((EntityTameable)target).isTamed()) {
+            return false;
+        }
+
+        if (target instanceof EntityHorse && ((EntityHorse)target).isTame()) {
+            return false;
+        }
+
+        if (target instanceof LOTREntityNPC) {
+            LOTREntityNPC npc = (LOTREntityNPC)target;
+            if (npc.hiredNPCInfo.isActive) {
+                return false;
+            }
+        }
+
+        if (this.riddenByEntity instanceof EntityPlayer
+                && !LOTRMod.canPlayerAttackEntity((EntityPlayer)this.riddenByEntity, target, false)) {
+            return false;
+        }
+
+        if (this.riddenByEntity instanceof EntityCreature
+                && !LOTRMod.canNPCAttackEntity((EntityCreature)this.riddenByEntity, target, false)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private boolean isTuskTargetInFront(EntityLivingBase target) {
+        double deltaX = target.posX - this.posX;
+        double deltaZ = target.posZ - this.posZ;
+        double horizontalDistance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
+        if (horizontalDistance <= TUSK_ATTACK_CLOSE_RANGE) {
+            return true;
+        }
+
+        Vec3 look = this.getLookVec();
+        double lookX = look.xCoord;
+        double lookZ = look.zCoord;
+        double lookLength = Math.sqrt(lookX * lookX + lookZ * lookZ);
+
+        if (lookLength > 1.0E-4D) {
+            lookX /= lookLength;
+            lookZ /= lookLength;
+        } else {
+            lookX = (double)(-MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F));
+            lookZ = (double)(MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F));
+        }
+
+        return (lookX * deltaX + lookZ * deltaZ) / horizontalDistance >= TUSK_ATTACK_FRONT_CONE_DOT;
     }
 
     private void applyMumakilHeavyKnockback(Entity target, float horizontalStrength, float verticalStrength) {
@@ -757,7 +859,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.worldObj.playSoundAtEntity(
                     this,
                     "mob.irongolem.walk",
-                    1.0F,
+                    1.8F,
                     0.45F + this.rand.nextFloat() * 0.1F
             );
             this.chargeStompSoundCooldown = CHARGE_STOMP_SOUND_MIN_COOLDOWN
