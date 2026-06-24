@@ -14,8 +14,10 @@ public class LOTRModelMumakil extends ModelBase {
      */
     private static final float GEO_TO_JAVA_UV_SCALE = 3.0F;
     private static final float JAVA_RENDER_SCALE = 1.0F / GEO_TO_JAVA_UV_SCALE;
-    private static final float Z_FIGHT_EPSILON = 0.015F;
-    private static final float SEAM_OVERLAP = 0.05F;
+    // The 1.35x entity render scale makes tiny seams easier to see; keep the anti-flicker shrink subtle.
+    private static final float Z_FIGHT_EPSILON = 0.01F;
+    // Slightly overlap hidden leg/foot seams so scaled rendering does not expose hairline gaps.
+    private static final float SEAM_OVERLAP = 0.08F;
 
     private final ModelRenderer master;
 
