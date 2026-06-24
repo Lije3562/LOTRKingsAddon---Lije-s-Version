@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.materials.AddonMaterial;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
 import cpw.mods.fml.common.Mod;
@@ -31,6 +32,8 @@ public class Main {
 
     public static Item swordOfIsengard;
     public static Item helmOfIsengard;
+    public static Item mumakilTusk;
+    public static Item mumakilShank;
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
@@ -41,6 +44,14 @@ public class Main {
         LOTREntities.registerCreature(LOTREntityMumakil.class, "Mumakil", 811, 6118481, 12171165);
         proxy.registerRenderers();
         proxy.registerEventHandlers();
+
+        mumakilTusk = new Item()
+                .setUnlocalizedName("mumakil_tusk")
+                .setTextureName("lotrmoremobs:mumakil_tusk");
+        GameRegistry.registerItem(mumakilTusk, "mumakil_tusk");
+
+        mumakilShank = new LOTRItemMumakilShank();
+        GameRegistry.registerItem(mumakilShank, "mumakil_shank");
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
                 .setUnlocalizedName("atalcare")
