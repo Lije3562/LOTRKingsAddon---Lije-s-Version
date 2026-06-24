@@ -40,6 +40,7 @@ public class Main {
     public void init(FMLInitializationEvent event) {
         LOTREntities.registerCreature(LOTREntityMumakil.class, "Mumakil", 811, 6118481, 12171165);
         proxy.registerRenderers();
+        proxy.registerEventHandlers();
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
                 .setUnlocalizedName("atalcare")
