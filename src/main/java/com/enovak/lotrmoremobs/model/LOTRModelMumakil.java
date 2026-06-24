@@ -90,7 +90,7 @@ public class LOTRModelMumakil extends ModelBase {
 
         // Geo group: front_right_leg. UVs [493,826], [335,813], [952,834], [935,760].
         ModelRenderer frontRightLeg = emptyChild(legs, 7.0F, -47.2038F, 19.5595F);
-        ModelRenderer frontRightUpperLeg = part(frontRightLeg, 493, 826, 6.0F, 0.2038F, 0.4405F, -14.0F, -8.0F, -8.0F, 15, 23, 15, inflate);
+        ModelRenderer frontRightUpperLeg = part(frontRightLeg, 493, 826, 6.0F, 0.2038F, 0.4405F, -14.0F, -10.0F, -8.0F, 15, 25, 15, inflate);
         // Geo front_right_lower_leg declares mirror:true; mirror it here so the lower-leg UV orientation matches the source.
         ModelRenderer frontRightLowerLeg = partMirrored(frontRightUpperLeg, 335, 813, -13.0F, 19.0F, -4.0F, 1.0F, -8.0F, -3.0F, 11, 32, 12, inflate);
         ModelRenderer frontRightUpperFoot = part(frontRightLowerLeg, 952, 834, 0.0F, 27.0F - SEAM_OVERLAP, 3.0F, 0.0F, -3.0F, -6.0F, 13, 4, 12, inflate);
@@ -100,7 +100,7 @@ public class LOTRModelMumakil extends ModelBase {
         ModelRenderer frontLeftLeg = emptyChild(legs, -23.0F, -47.2038F, 19.5595F);
         part(frontLeftLeg, 935, 760, 0.0F, 0.0F, 0.0F, -7.0F, 47.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 15, inflate);
         part(frontLeftLeg, 952, 834, 0.0F, 0.0F, 0.0F, -6.0F, 43.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 12, inflate);
-        part(frontLeftLeg, 493, 826, 0.0F, 0.0F, 0.0F, -7.0F, -7.7962F, -7.5595F, 15, 23, 15, inflate);
+        part(frontLeftLeg, 493, 826, 0.0F, 0.0F, 0.0F, -7.0F, -9.7962F, -7.5595F, 15, 25, 15, inflate);
         part(frontLeftLeg, 335, 813, 0.0F, 0.0F, 0.0F, -5.0F, 11.2038F, -6.5595F, 11, 32, 12, inflate);
 
         // Geo group: back_left_leg. UVs [695,815], [169,829], [949,898], [934,678].
@@ -108,14 +108,23 @@ public class LOTRModelMumakil extends ModelBase {
         part(backLeftLeg, 934, 678, 0.0F, 0.0F, 0.0F, -4.0F, 43.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 16, inflate);
         part(backLeftLeg, 949, 898, 0.0F, 0.0F, 0.0F, -3.0F, 39.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 13, inflate);
         part(backLeftLeg, 169, 829, 0.0F, 0.0F, 0.0F, -2.0F, 14.2038F, -6.5595F, 11, 25, 13, inflate);
-        part(backLeftLeg, 695, 815, 0.0F, 0.0F, 0.0F, -4.0F, -9.7962F, -8.5595F, 15, 24, 18, inflate);
+        part(backLeftLeg, 695, 815, 0.0F, 0.0F, 0.0F, -4.0F, -11.7962F, -8.5595F, 15, 26, 18, inflate);
 
         // Geo group: back_right_leg. UVs [695,815], [169,829], [949,898], [934,678].
         ModelRenderer backRightLeg = emptyChild(legs, 9.0F, -43.2038F, 77.5595F);
         part(backRightLeg, 934, 678, 0.0F, 0.0F, 0.0F, -10.0F, 43.2038F - SEAM_OVERLAP, -8.5595F, 15, 3, 16, inflate);
         part(backRightLeg, 949, 898, 0.0F, 0.0F, 0.0F, -9.0F, 39.2038F - SEAM_OVERLAP, -6.5595F, 13, 4, 13, inflate);
         part(backRightLeg, 169, 829, 0.0F, 0.0F, 0.0F, -8.0F, 14.2038F, -6.5595F, 11, 25, 13, inflate);
-        part(backRightLeg, 695, 815, 0.0F, 0.0F, 0.0F, -10.0F, -9.7962F, -8.5595F, 15, 24, 18, inflate);
+        part(backRightLeg, 695, 815, 0.0F, 0.0F, 0.0F, -10.0F, -11.7962F, -8.5595F, 15, 26, 18, inflate);
+
+        // Screenshot seam repair: subtle belly/shoulder/hip connector cubes hide open gaps where
+        // the simplified Java body does not perfectly meet the original Bedrock leg geometry.
+        part(legs, 235, 244, 0.0F, 0.0F, 0.0F, -30.5F, -58.0F, 10.0F, 17, 8, 20, stableInflate(inflate));
+        part(legs, 235, 244, 0.0F, 0.0F, 0.0F, -1.5F, -58.0F, 10.0F, 17, 8, 20, stableInflate(inflate));
+        part(legs, 703, 43, 0.0F, 0.0F, 0.0F, -31.0F, -56.0F, 66.5F, 18, 9, 24, stableInflate(inflate));
+        part(legs, 703, 43, 0.0F, 0.0F, 0.0F, -2.0F, -56.0F, 66.5F, 18, 9, 24, stableInflate(inflate));
+        // Underside belly bridge: deliberately plain body texture, not armor or decoration.
+        part(legs, 235, 244, 0.0F, 0.0F, 0.0F, -16.5F, -56.5F, 27.0F, 17, 5, 40, stableInflate(inflate));
     }
 
     private void addTuskSegments(ModelRenderer tusk, boolean mirrored, float inflate) {
