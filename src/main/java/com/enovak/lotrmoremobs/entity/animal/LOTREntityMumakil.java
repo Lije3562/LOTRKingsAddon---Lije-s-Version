@@ -46,7 +46,7 @@ import software.bernie.geckolib3.core.manager.AnimationFactory;
 public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double MAX_HEALTH = 120.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
-    private static final double KNOCKBACK_RESISTANCE = 0.75D;
+    private static final double KNOCKBACK_RESISTANCE = 1.0D;
     private static final double ATTACK_DAMAGE = 16.0D;
     private static final double WILD_ATTACK_SPEED = 1.30D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
@@ -286,6 +286,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         return attacked;
+    }
+
+    @Override
+    public void knockBack(Entity attacker, float strength, double xRatio, double zRatio) {
+        // A Mumakil's mass lets damage land normally without letting ordinary hits shove the war beast around.
+        super.knockBack(attacker, strength * 0.1F, xRatio, zRatio);
     }
 
     private void updateAngerWave() {
