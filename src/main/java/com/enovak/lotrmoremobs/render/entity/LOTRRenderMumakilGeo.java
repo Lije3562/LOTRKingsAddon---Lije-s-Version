@@ -31,9 +31,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "saddle_rear_strap"
     };
     private static final String[] WAR_EQUIPMENT_BONES = new String[] {
-            "left_steering",
-            "left_hook",
-            "right_steering",
             "war_howdah",
             "howdah_rigging",
             "howdah_supports",
@@ -42,12 +39,17 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "perch_02",
             "perch_03",
             "perch_04",
+            "left_steering",
+            "left_hook",
+            "right_steering",
+            "right_hook",
             "left_tusk_spikes",
             "right_tusk_spikes",
             "front_left_ankle_spikes",
             "front_right_ankle_spikes"
     };
     private static final boolean[] loggedEquipmentStates = new boolean[4];
+    private static final boolean[] loggedWarBoneVisibilityStates = new boolean[2];
 
     private static boolean loggedSafeRenderStart;
     private static boolean loggedModelRequest;
@@ -133,7 +135,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             }
             return;
         }
-        this.applyEquipmentVisibility(geoModel, renderSaddle, renderHowdahOrWarEquipment);
 
         GlStateManager.pushMatrix();
         try {
@@ -202,6 +203,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
                 Color renderColor = this.getRenderColor(entity, partialTicks);
 
+                // Apply bone visibility at the last safe point. GeckoLib can rebuild or touch bones during model
+                // setup, so delay hiding/unhiding until immediately before the real Geo render call.
+                this.applyEquipmentVisibility(geoModel, renderSaddle, renderHowdahOrWarEquipment);
+
                 // Deliberately skip GeckoLib's EntityLivingBase.isInvisibleToPlayer(...) branch; in this
                 // 1.7.10 dev runtime it dispatches to the missing obfuscated func_98034_c method.
                 if (!loggedBeforeGeoRender) {
@@ -242,18 +247,37 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * independent so normal saddle rendering does not pull in tusk spikes, ankle spikes, ropes, or the howdah.
      */
     private void applyEquipmentVisibility(GeoModel geoModel, boolean renderSaddle, boolean renderHowdahOrWarEquipment) {
-        this.applyBoneVisibility(geoModel, SADDLE_BONES, renderSaddle);
-        this.applyBoneVisibility(geoModel, WAR_EQUIPMENT_BONES, renderHowdahOrWarEquipment);
+        this.applyBoneVisibility(geoModel, SADDLE_BONES, renderSaddle, false);
+        this.applyBoneVisibility(geoModel, WAR_EQUIPMENT_BONES, renderHowdahOrWarEquipment, true);
     }
 
-    private void applyBoneVisibility(GeoModel geoModel, String[] boneNames, boolean visible) {
+    private void applyBoneVisibility(GeoModel geoModel, String[] boneNames, boolean visible, boolean logWarBones) {
         boolean hidden = !visible;
+        boolean shouldLogThisPass = logWarBones && !loggedWarBoneVisibilityStates[visible ? 1 : 0];
         for (int i = 0; i < boneNames.length; ++i) {
             Optional<GeoBone> bone = geoModel.getBone(boneNames[i]);
-            if (bone.isPresent()) {
-                bone.get().setHidden(hidden, true);
-                bone.get().setCubesHidden(hidden);
+            if (shouldLogThisPass) {
+                System.out.println("[LOTRMoreMobs] Mumakil Geo war bone visibility: bone="
+                        + boneNames[i]
+                        + " found=" + bone.isPresent()
+                        + " requestedVisible=" + visible);
             }
+            if (bone.isPresent()) {
+                GeoBone geoBone = bone.get();
+                geoBone.setHidden(hidden, true);
+                geoBone.setCubesHidden(hidden);
+
+                // When armor is present, explicitly unhide every named howdah/perch/rigging/support child too.
+                // Do not rely only on recursive parent unhiding; some GeckoLib bone flags can remain sticky after
+                // a previous render hid the parent tree.
+                if (visible) {
+                    geoBone.setHidden(false, true);
+                    geoBone.setCubesHidden(false);
+                }
+            }
+        }
+        if (shouldLogThisPass) {
+            loggedWarBoneVisibilityStates[visible ? 1 : 0] = true;
         }
     }
 
