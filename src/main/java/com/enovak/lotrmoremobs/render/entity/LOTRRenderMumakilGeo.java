@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs.render.entity;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.model.mumakil.LOTRGeoModelMumakil;
 import java.util.Collections;
+import java.util.Optional;
 import net.geckominecraft.client.renderer.GlStateManager;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.Entity;
@@ -11,6 +12,7 @@ import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
 import software.bernie.geckolib3.core.event.predicate.AnimationEvent;
 import software.bernie.geckolib3.core.util.Color;
+import software.bernie.geckolib3.geo.render.built.GeoBone;
 import software.bernie.geckolib3.geo.render.built.GeoModel;
 import software.bernie.geckolib3.model.provider.data.EntityModelData;
 import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
@@ -22,12 +24,34 @@ import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
  * whether the original Geo model fixes the UV bleed at the root.
  */
 public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
-    private static final ResourceLocation MUMAKIL_WAR_TEXTURE =
-            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
+    private static final String[] WAR_EQUIPMENT_BONES = new String[] {
+            "front_strap",
+            "left_steering",
+            "left_hook",
+            "right_steering",
+            "war_howdah",
+            "howdah_rigging",
+            "howdah_supports",
+            "howdah_ladder",
+            "perch_01",
+            "perch_02",
+            "perch_03",
+            "perch_04",
+            "saddle",
+            "saddle_mid_strap",
+            "saddle_rear_strap",
+            "left_tusk_spikes",
+            "right_tusk_spikes",
+            "front_left_ankle_spikes",
+            "front_right_ankle_spikes"
+    };
+
     private static boolean loggedSafeRenderStart;
     private static boolean loggedModelRequest;
+    private static boolean loggedModelFallback;
     private static boolean loggedMissingGeoModel;
     private static boolean loggedTextureRequest;
+    private static boolean loggedTextureFallback;
     private static boolean loggedBeforeGeoRender;
 
     public LOTRRenderMumakilGeo() {
@@ -77,11 +101,21 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             return;
         }
 
+        boolean renderWarEquipment = LOTRGeoModelMumakil.shouldRenderWarEquipment(entity);
         ResourceLocation modelLocation = this.modelProvider.getModelLocation(entity);
+        if (!this.canLoadResource(modelLocation) && !LOTRGeoModelMumakil.PLAIN_MODEL.equals(modelLocation)) {
+            if (!loggedModelFallback) {
+                loggedModelFallback = true;
+                System.out.println("[LOTRMoreMobs] Mumakil Geo model missing, falling back to plain export: " + modelLocation);
+            }
+            modelLocation = LOTRGeoModelMumakil.PLAIN_MODEL;
+        }
+
         if (!loggedModelRequest) {
             loggedModelRequest = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo model requested: " + modelLocation
-                    + " resourceFound=" + this.canLoadResource(modelLocation));
+                    + " resourceFound=" + this.canLoadResource(modelLocation)
+                    + " renderWarEquipment=" + renderWarEquipment);
         }
 
         GeoModel geoModel = this.modelProvider.getModel(modelLocation);
@@ -92,6 +126,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             }
             return;
         }
+        this.applyWarEquipmentVisibility(geoModel, renderWarEquipment);
 
         GlStateManager.pushMatrix();
         try {
@@ -141,10 +176,19 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                 GlStateManager.translate(0.0F, 0.01F, 0.0F);
 
                 ResourceLocation textureLocation = this.getEntityTexture(entity);
+                if (!this.canLoadResource(textureLocation) && !LOTRGeoModelMumakil.WAR_TEXTURE.equals(textureLocation)) {
+                    if (!loggedTextureFallback) {
+                        loggedTextureFallback = true;
+                        System.out.println("[LOTRMoreMobs] Mumakil plain texture missing, falling back to war texture: " + textureLocation);
+                    }
+                    textureLocation = LOTRGeoModelMumakil.WAR_TEXTURE;
+                }
+
                 if (!loggedTextureRequest) {
                     loggedTextureRequest = true;
                     System.out.println("[LOTRMoreMobs] Mumakil Geo texture requested: " + textureLocation
-                            + " resourceFound=" + this.canLoadResource(textureLocation));
+                            + " resourceFound=" + this.canLoadResource(textureLocation)
+                            + " renderWarEquipment=" + renderWarEquipment);
                 }
                 Minecraft.getMinecraft().renderEngine.bindTexture(textureLocation);
 
@@ -174,6 +218,22 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     /**
+     * The exported test Geo currently contains war equipment in the same model as the animal body. Until the
+     * plain export is physically split into its own JSON, hide the known equipment bones on unsaddled Mumakil.
+     * If a future plain JSON omits these bones entirely, the lookups simply do nothing.
+     */
+    private void applyWarEquipmentVisibility(GeoModel geoModel, boolean renderWarEquipment) {
+        boolean hideWarEquipment = !renderWarEquipment;
+        for (int i = 0; i < WAR_EQUIPMENT_BONES.length; ++i) {
+            Optional<GeoBone> bone = geoModel.getBone(WAR_EQUIPMENT_BONES[i]);
+            if (bone.isPresent()) {
+                bone.get().setHidden(hideWarEquipment, true);
+                bone.get().setCubesHidden(hideWarEquipment);
+            }
+        }
+    }
+
+    /**
      * GeckoLib-Unofficial's default GeoEntityRenderer#getUniqueID path calls EntityLivingBase.getUniqueID()
      * through a name that crashes in this ForgeGradle 1.2 / 1.7.10 deobfuscated runtime. LOTR's creative
      * mob-spawner preview also renders temporary entities, so use the vanilla entity id as a safe per-instance
@@ -186,7 +246,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
     @Override
     protected ResourceLocation getEntityTexture(Entity entity) {
-        return MUMAKIL_WAR_TEXTURE;
+        if (entity instanceof LOTREntityMumakil) {
+            return this.modelProvider.getTextureLocation((LOTREntityMumakil)entity);
+        }
+        return LOTRGeoModelMumakil.WAR_TEXTURE;
     }
 
     public Color getRenderColor(LOTREntityMumakil animatable, float partialTicks) {
