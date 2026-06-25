@@ -24,8 +24,13 @@ import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
  * whether the original Geo model fixes the UV bleed at the root.
  */
 public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
-    private static final String[] WAR_EQUIPMENT_BONES = new String[] {
+    private static final String[] SADDLE_BONES = new String[] {
             "front_strap",
+            "saddle",
+            "saddle_mid_strap",
+            "saddle_rear_strap"
+    };
+    private static final String[] WAR_EQUIPMENT_BONES = new String[] {
             "left_steering",
             "left_hook",
             "right_steering",
@@ -37,14 +42,12 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "perch_02",
             "perch_03",
             "perch_04",
-            "saddle",
-            "saddle_mid_strap",
-            "saddle_rear_strap",
             "left_tusk_spikes",
             "right_tusk_spikes",
             "front_left_ankle_spikes",
             "front_right_ankle_spikes"
     };
+    private static final boolean[] loggedEquipmentStates = new boolean[4];
 
     private static boolean loggedSafeRenderStart;
     private static boolean loggedModelRequest;
@@ -101,7 +104,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             return;
         }
 
-        boolean renderWarEquipment = LOTRGeoModelMumakil.shouldRenderWarEquipment(entity);
+        boolean renderSaddle = LOTRGeoModelMumakil.shouldRenderSaddle(entity);
+        boolean renderHowdahOrWarEquipment = LOTRGeoModelMumakil.shouldRenderHowdahOrWarEquipment(entity);
+        this.logEquipmentState(entity, renderSaddle, renderHowdahOrWarEquipment);
+
         ResourceLocation modelLocation = this.modelProvider.getModelLocation(entity);
         if (!this.canLoadResource(modelLocation) && !LOTRGeoModelMumakil.PLAIN_MODEL.equals(modelLocation)) {
             if (!loggedModelFallback) {
@@ -115,7 +121,8 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             loggedModelRequest = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo model requested: " + modelLocation
                     + " resourceFound=" + this.canLoadResource(modelLocation)
-                    + " renderWarEquipment=" + renderWarEquipment);
+                    + " renderSaddle=" + renderSaddle
+                    + " renderHowdahOrWarEquipment=" + renderHowdahOrWarEquipment);
         }
 
         GeoModel geoModel = this.modelProvider.getModel(modelLocation);
@@ -126,7 +133,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             }
             return;
         }
-        this.applyWarEquipmentVisibility(geoModel, renderWarEquipment);
+        this.applyEquipmentVisibility(geoModel, renderSaddle, renderHowdahOrWarEquipment);
 
         GlStateManager.pushMatrix();
         try {
@@ -188,7 +195,8 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                     loggedTextureRequest = true;
                     System.out.println("[LOTRMoreMobs] Mumakil Geo texture requested: " + textureLocation
                             + " resourceFound=" + this.canLoadResource(textureLocation)
-                            + " renderWarEquipment=" + renderWarEquipment);
+                            + " renderSaddle=" + renderSaddle
+                            + " renderHowdahOrWarEquipment=" + renderHowdahOrWarEquipment);
                 }
                 Minecraft.getMinecraft().renderEngine.bindTexture(textureLocation);
 
@@ -217,18 +225,34 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         }
     }
 
+    private void logEquipmentState(LOTREntityMumakil entity, boolean renderSaddle, boolean renderHowdahOrWarEquipment) {
+        int stateIndex = (renderSaddle ? 1 : 0) | (renderHowdahOrWarEquipment ? 2 : 0);
+        if (!loggedEquipmentStates[stateIndex]) {
+            loggedEquipmentStates[stateIndex] = true;
+            System.out.println("[LOTRMoreMobs] Mumakil Geo equipment state: isMountSaddled="
+                    + entity.isMountSaddled()
+                    + " detectedArmorState=" + LOTRGeoModelMumakil.getHowdahOrWarEquipmentDebugValue(entity)
+                    + " shouldRenderSaddle=" + renderSaddle
+                    + " shouldRenderHowdahOrWarEquipment=" + renderHowdahOrWarEquipment);
+        }
+    }
+
     /**
-     * The exported test Geo currently contains war equipment in the same model as the animal body. Until the
-     * plain export is physically split into its own JSON, hide the known equipment bones on unsaddled Mumakil.
-     * If a future plain JSON omits these bones entirely, the lookups simply do nothing.
+     * The exported test Geo currently contains animal body, saddle, and war kit in one model. Keep each layer
+     * independent so normal saddle rendering does not pull in tusk spikes, ankle spikes, ropes, or the howdah.
      */
-    private void applyWarEquipmentVisibility(GeoModel geoModel, boolean renderWarEquipment) {
-        boolean hideWarEquipment = !renderWarEquipment;
-        for (int i = 0; i < WAR_EQUIPMENT_BONES.length; ++i) {
-            Optional<GeoBone> bone = geoModel.getBone(WAR_EQUIPMENT_BONES[i]);
+    private void applyEquipmentVisibility(GeoModel geoModel, boolean renderSaddle, boolean renderHowdahOrWarEquipment) {
+        this.applyBoneVisibility(geoModel, SADDLE_BONES, renderSaddle);
+        this.applyBoneVisibility(geoModel, WAR_EQUIPMENT_BONES, renderHowdahOrWarEquipment);
+    }
+
+    private void applyBoneVisibility(GeoModel geoModel, String[] boneNames, boolean visible) {
+        boolean hidden = !visible;
+        for (int i = 0; i < boneNames.length; ++i) {
+            Optional<GeoBone> bone = geoModel.getBone(boneNames[i]);
             if (bone.isPresent()) {
-                bone.get().setHidden(hideWarEquipment, true);
-                bone.get().setCubesHidden(hideWarEquipment);
+                bone.get().setHidden(hidden, true);
+                bone.get().setCubesHidden(hidden);
             }
         }
     }
