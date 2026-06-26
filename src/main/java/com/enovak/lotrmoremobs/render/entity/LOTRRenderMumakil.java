@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.render.entity;
 
+import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.model.LOTRModelMumakil;
 import net.minecraft.client.renderer.entity.RenderLiving;
 import net.minecraft.entity.Entity;
@@ -10,6 +11,10 @@ import org.lwjgl.opengl.GL11;
 public class LOTRRenderMumakil extends RenderLiving {
     private static final ResourceLocation MUMAKIL_TEXTURE =
             new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
+    private static final ResourceLocation MUMAKIL_WILD_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_wild.png");
+    private static final ResourceLocation MUMAKIL_SADDLED_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_saddled.png");
     private static final float MUMAKIL_RENDER_SCALE = 1.35F;
 
     public LOTRRenderMumakil() {
@@ -23,6 +28,17 @@ public class LOTRRenderMumakil extends RenderLiving {
 
     @Override
     protected ResourceLocation getEntityTexture(Entity entity) {
+        if (entity instanceof LOTREntityMumakil) {
+            LOTREntityMumakil mumakil = (LOTREntityMumakil)entity;
+            if (mumakil.isHorseSaddled()) {
+                return MUMAKIL_SADDLED_TEXTURE;
+            }
+
+            if (!mumakil.isTame()) {
+                return MUMAKIL_WILD_TEXTURE;
+            }
+        }
+
         return MUMAKIL_TEXTURE;
     }
 }
