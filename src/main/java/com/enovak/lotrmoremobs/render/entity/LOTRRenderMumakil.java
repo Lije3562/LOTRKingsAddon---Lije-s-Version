@@ -10,8 +10,6 @@ import net.minecraft.util.ResourceLocation;
 import org.lwjgl.opengl.GL11;
 
 public class LOTRRenderMumakil extends RenderLiving {
-    private static final ResourceLocation MUMAKIL_TEXTURE =
-            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
     private static final ResourceLocation MUMAKIL_WILD_TEXTURE =
             new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_wild.png");
     private static final ResourceLocation MUMAKIL_SADDLED_TEXTURE =
@@ -34,7 +32,9 @@ public class LOTRRenderMumakil extends RenderLiving {
             return isMumakilSaddled(mumakil) ? MUMAKIL_SADDLED_TEXTURE : MUMAKIL_WILD_TEXTURE;
         }
 
-        return MUMAKIL_TEXTURE;
+        // The Mumakil renderer should never fall back to the old war texture. If this is called for
+        // an unexpected entity instance, prefer the unsaddled/wild texture so texture bugs are obvious.
+        return MUMAKIL_WILD_TEXTURE;
     }
 
     private static boolean isMumakilSaddled(LOTREntityMumakil mumakil) {
