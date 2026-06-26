@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.render.entity;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.model.LOTRModelMumakil;
+import java.lang.reflect.Method;
 import net.minecraft.client.renderer.entity.RenderLiving;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
@@ -30,9 +31,41 @@ public class LOTRRenderMumakil extends RenderLiving {
     protected ResourceLocation getEntityTexture(Entity entity) {
         if (entity instanceof LOTREntityMumakil) {
             LOTREntityMumakil mumakil = (LOTREntityMumakil)entity;
-            return mumakil.isHorseSaddled() ? MUMAKIL_SADDLED_TEXTURE : MUMAKIL_WILD_TEXTURE;
+            return isMumakilSaddled(mumakil) ? MUMAKIL_SADDLED_TEXTURE : MUMAKIL_WILD_TEXTURE;
         }
 
         return MUMAKIL_TEXTURE;
+    }
+
+    private static boolean isMumakilSaddled(LOTREntityMumakil mumakil) {
+        Boolean lotrSaddleState = callBooleanNoArg(mumakil, "isMountSaddled");
+        if (lotrSaddleState != null) {
+            return lotrSaddleState.booleanValue();
+        }
+
+        return mumakil.isHorseSaddled();
+    }
+
+    private static Boolean callBooleanNoArg(Object target, String methodName) {
+        Class currentClass = target.getClass();
+        while (currentClass != null) {
+            try {
+                Method method = currentClass.getDeclaredMethod(methodName);
+                Class returnType = method.getReturnType();
+                if (returnType != Boolean.TYPE && returnType != Boolean.class) {
+                    return null;
+                }
+
+                method.setAccessible(true);
+                Object result = method.invoke(target);
+                return result instanceof Boolean ? (Boolean)result : null;
+            } catch (NoSuchMethodException e) {
+                currentClass = currentClass.getSuperclass();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        return null;
     }
 }
