@@ -30,13 +30,7 @@ public class LOTRRenderMumakil extends RenderLiving {
     protected ResourceLocation getEntityTexture(Entity entity) {
         if (entity instanceof LOTREntityMumakil) {
             LOTREntityMumakil mumakil = (LOTREntityMumakil)entity;
-            if (mumakil.isHorseSaddled()) {
-                return MUMAKIL_SADDLED_TEXTURE;
-            }
-
-            if (!mumakil.isTame()) {
-                return MUMAKIL_WILD_TEXTURE;
-            }
+            return mumakil.isHorseSaddled() ? MUMAKIL_SADDLED_TEXTURE : MUMAKIL_WILD_TEXTURE;
         }
 
         return MUMAKIL_TEXTURE;
