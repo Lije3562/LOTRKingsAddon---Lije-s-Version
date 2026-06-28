@@ -89,9 +89,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public LOTREntityMumakil(World world) {
         super(world);
-        // Intentionally generous and ground-anchored: the rendered Mumakil is huge, and normal melee NPCs need a reachable hurtbox.
-        this.setSize(4.25F, 7.0F);
+        // Main physical/hurt box. Wide and tall enough to roughly fit the rendered Mumakil body.
+        this.setSize(7.0F, 15.0F);
         this.resetAngerWaveCooldown();
+
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -110,8 +111,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public float getCollisionBorderSize() {
-        // Give ray/melee checks a little extra surface area without floating or moving the main collision box.
-        return 0.75F;
+        // Small melee/raycast padding so normal-reach weapons can hit the large body reliably.
+        return 1.25F;
     }
 
     @Override
@@ -127,9 +128,35 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return !this.isTame() && this.riddenByEntity == null;
     }
 
+    // This code controls the player sitting on the Mumakil.
+    @Override
     public double getMountedYOffset() {
+        if (this.isMountSaddled()) {
+            return 16.0D;
+        }
+
         return 6.75D;
     }
+
+    @Override
+    public void updateRiderPosition() {
+        if (this.riddenByEntity != null) {
+            double forwardOffset = this.isMountSaddled() ? 4.0D : 0.0D;
+            double verticalOffset = this.getMountedYOffset() + this.riddenByEntity.getYOffset();
+
+            float yawRadians = this.rotationYaw * 3.1415927F / 180.0F;
+
+            double xOffset = -MathHelper.sin(yawRadians) * forwardOffset;
+            double zOffset = MathHelper.cos(yawRadians) * forwardOffset;
+
+            this.riddenByEntity.setPosition(
+                    this.posX + xOffset,
+                    this.posY + verticalOffset,
+                    this.posZ + zOffset
+            );
+        }
+    }
+
 
     protected boolean isMountHostile() {
         return true;
@@ -698,6 +725,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return true;
     }
 
+
     private boolean isOwner(EntityPlayer player) {
         if (!this.isTame()) {
             return false;
@@ -738,17 +766,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     /**
-     * Angry Mumakil should be able to shove through trees while pursuing a target. This deliberately
-     * uses Forge's leaf/wood hooks instead of Material.wood, so planks, doors, fences, and chests are
-     * not treated as casual obstacle clearing targets.
+     * Angry Mumakil should be able to shove through trees while pursuing a target.
+     * This deliberately uses Forge's leaf/wood hooks instead of Material.wood, so planks,
+     * doors, fences, and chests are not treated as casual obstacle clearing targets.
+     *
+     * Broken leaves/logs now drop their normal drops instead of silently disappearing.
      */
     private void clearAggroObstaclesForMovement() {
         if (this.worldObj.isRemote || this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0) {
-            return;
-        }
-
-        boolean aggroed = this.getAttackTarget() != null || this.isMountEnraged();
-        if (!aggroed) {
             return;
         }
 
@@ -756,10 +781,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         boolean tryingToMove = horizontalSpeedSq > 0.0004D
                 || this.isMountEnraged()
                 || (this.getAttackTarget() != null && !this.getNavigator().noPath());
-
-        if (!tryingToMove) {
-            return;
-        }
 
         Vec3 look = this.getLookVec();
         double horizontalLookLength = Math.sqrt(look.xCoord * look.xCoord + look.zCoord * look.zCoord);
@@ -774,38 +795,67 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             lookZ = MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F);
         }
 
-        AxisAlignedBB bodyBox = AxisAlignedBB.getBoundingBox(
-                this.posX - 2.25D,
-                this.boundingBox.minY + 0.75D,
-                this.posZ - 2.25D,
-                this.posX + 2.25D,
-                this.boundingBox.maxY + 1.25D,
-                this.posZ + 2.25D
-        );
-
-        double headX = this.posX + lookX * 3.0D;
-        double headZ = this.posZ + lookZ * 3.0D;
-        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
-                headX - 1.75D,
-                this.boundingBox.minY + 1.25D,
-                headZ - 1.75D,
-                headX + 1.75D,
-                this.boundingBox.maxY + 1.75D,
-                headZ + 1.75D
-        );
-
-        double trunkX = this.posX + lookX * 4.5D;
-        double trunkZ = this.posZ + lookZ * 4.5D;
-        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
-                trunkX - 1.25D,
-                this.boundingBox.minY + 0.25D,
-                trunkZ - 1.25D,
-                trunkX + 1.25D,
-                this.boundingBox.maxY + 0.75D,
-                trunkZ + 1.25D
-        );
-
         int remaining = MAX_OBSTACLES_PER_PASS;
+
+        /*
+         * Clear logs/leaves directly under and around the Mumakil.
+         * This fixes the case where the Mumakil is standing on tree blocks.
+         */
+        AxisAlignedBB standingBox = AxisAlignedBB.getBoundingBox(
+                this.posX - 3.5D,
+                this.boundingBox.minY - 1.5D,
+                this.posZ - 3.5D,
+                this.posX + 3.5D,
+                this.boundingBox.minY + 2.0D,
+                this.posZ + 3.5D
+        );
+
+        remaining -= this.clearAggroObstaclesInBox(standingBox, remaining);
+
+        if (remaining <= 0 || !tryingToMove) {
+            return;
+        }
+
+        /*
+         * Clear around the body while moving.
+         */
+        AxisAlignedBB bodyBox = AxisAlignedBB.getBoundingBox(
+                this.posX - 3.5D,
+                this.boundingBox.minY + 0.25D,
+                this.posZ - 3.5D,
+                this.posX + 3.5D,
+                this.boundingBox.maxY + 1.25D,
+                this.posZ + 3.5D
+        );
+
+        /*
+         * Clear in front of the head/tusks.
+         */
+        double headX = this.posX + lookX * 4.0D;
+        double headZ = this.posZ + lookZ * 4.0D;
+        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
+                headX - 2.25D,
+                this.boundingBox.minY + 1.0D,
+                headZ - 2.25D,
+                headX + 2.25D,
+                this.boundingBox.maxY + 1.75D,
+                headZ + 2.25D
+        );
+
+        /*
+         * Clear lower blocks farther forward for trunk/tusk area.
+         */
+        double trunkX = this.posX + lookX * 5.5D;
+        double trunkZ = this.posZ + lookZ * 5.5D;
+        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
+                trunkX - 1.5D,
+                this.boundingBox.minY + 0.25D,
+                trunkZ - 1.5D,
+                trunkX + 1.5D,
+                this.boundingBox.maxY + 0.75D,
+                trunkZ + 1.5D
+        );
+
         remaining -= this.clearAggroObstaclesInBox(headAndTusksBox, remaining);
 
         if (remaining > 0) {
@@ -826,9 +876,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         int maxZ = MathHelper.floor_double(obstacleBox.maxZ);
         int broken = 0;
 
-        for(int x = minX; x <= maxX; ++x) {
-            for(int y = minY; y <= maxY; ++y) {
-                for(int z = minZ; z <= maxZ; ++z) {
+        for (int x = minX; x <= maxX; ++x) {
+            for (int y = minY; y <= maxY; ++y) {
+                for (int z = minZ; z <= maxZ; ++z) {
                     if (broken >= maximum) {
                         return broken;
                     }
@@ -839,7 +889,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
                     Block block = this.worldObj.getBlock(x, y, z);
                     if (this.canBreakAggroObstacle(block, x, y, z)) {
-                        this.worldObj.setBlockToAir(x, y, z);
+                        this.breakAggroObstacleBlock(block, x, y, z);
                         ++broken;
                     }
                 }
@@ -847,6 +897,30 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         return broken;
+    }
+
+    private void breakAggroObstacleBlock(Block block, int x, int y, int z) {
+        int metadata = this.worldObj.getBlockMetadata(x, y, z);
+
+        /*
+         * Drop normal block drops first.
+         * Logs drop logs.
+         * Leaves can drop saplings/apples according to their normal drop logic.
+         */
+        block.dropBlockAsItem(this.worldObj, x, y, z, metadata, 0);
+
+        /*
+         * Block break particles/sound.
+         */
+        this.worldObj.playAuxSFX(
+                2001,
+                x,
+                y,
+                z,
+                Block.getIdFromBlock(block) + (metadata << 12)
+        );
+
+        this.worldObj.setBlockToAir(x, y, z);
     }
 
     private boolean canBreakAggroObstacle(Block block, int x, int y, int z) {
