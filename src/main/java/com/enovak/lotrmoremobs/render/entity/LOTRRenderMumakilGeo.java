@@ -2,10 +2,23 @@ package com.enovak.lotrmoremobs.render.entity;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.model.mumakil.LOTRGeoModelMumakil;
+import com.google.gson.JsonArray;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
+import java.io.InputStream;
+import java.io.InputStreamReader;
+import java.io.Reader;
+import java.util.ArrayList;
 import java.util.Collections;
+import java.util.Comparator;
+import java.util.LinkedHashMap;
+import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import net.geckominecraft.client.renderer.GlStateManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.IResource;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.util.ResourceLocation;
@@ -24,12 +37,14 @@ import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
  * whether the original Geo model fixes the UV bleed at the root.
  */
 public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
+
     private static final String[] SADDLE_BONES = new String[] {
-            "front_strap",
             "saddle",
+            "front_strap",
             "saddle_mid_strap",
             "saddle_rear_strap"
     };
+
     private static final String[] WAR_EQUIPMENT_BONES = new String[] {
             "war_howdah",
             "howdah_rigging",
@@ -39,15 +54,38 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "perch_02",
             "perch_03",
             "perch_04",
-            "left_steering",
-            "left_hook",
-            "right_steering",
-            "right_hook",
+            "front_right_ankle_spikes",
+            "front_left_ankle_spikes",
             "left_tusk_spikes",
             "right_tusk_spikes",
-            "front_left_ankle_spikes",
-            "front_right_ankle_spikes"
+            "left_steering",
+            "right_steering",
+            "left_hook"
     };
+
+    private static final String[] ALL_EQUIPMENT_BONES = new String[] {
+            "saddle",
+            "front_strap",
+            "saddle_mid_strap",
+            "saddle_rear_strap",
+
+            "war_howdah",
+            "howdah_rigging",
+            "howdah_supports",
+            "howdah_ladder",
+            "perch_01",
+            "perch_02",
+            "perch_03",
+            "perch_04",
+            "front_right_ankle_spikes",
+            "front_left_ankle_spikes",
+            "left_tusk_spikes",
+            "right_tusk_spikes",
+            "left_steering",
+            "right_steering",
+            "left_hook"
+    };
+
     private static final boolean[] loggedEquipmentStates = new boolean[4];
     private static final boolean[] loggedWarBoneVisibilityStates = new boolean[2];
 
@@ -59,9 +97,174 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     private static boolean loggedTextureFallback;
     private static boolean loggedBeforeGeoRender;
 
+    private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V8_AMBIENT_STRIKES_2026_06_28";
+    private static final boolean USE_BLOCKBENCH_TRUMPET = true;
+    private static final boolean USE_BLOCKBENCH_EAR_FLAP = true;
+    private static final boolean USE_BLOCKBENCH_TAIL_FLIP = true;
+    private static final boolean USE_BLOCKBENCH_STRIKES = true;
+
+    /*
+     * Verification mode:
+     * true = trumpet plays every 320 ticks so you can immediately confirm this renderer is active.
+     * false = restore the rarer chance-based event after the Blockbench path is confirmed.
+     */
+    private static final boolean DEBUG_FORCE_BLOCKBENCH_TRUMPET_EVERY_CYCLE = false;
+
+    private static final float BLOCKBENCH_TRUMPET_FALLBACK_LENGTH_SECONDS = 4.25F;
+    private static final int BLOCKBENCH_TRUMPET_DURATION_TICKS = 53;
+    private static final int BLOCKBENCH_EAR_FLAP_DURATION_TICKS = 45;
+    private static final int BLOCKBENCH_TAIL_FLIP_DURATION_TICKS = 40;
+    private static final int BLOCKBENCH_STRIKE_DURATION_TICKS = 36;
+
+    /*
+     * Random ambient animation cadence.
+     * These are deterministic per entity, but visually random in-game.
+     */
+    private static final int AMBIENT_TRUMPET_INTERVAL_TICKS = 360;
+    private static final int AMBIENT_TRUMPET_CHANCE_MODULO = 4;
+    private static final int AMBIENT_EAR_FLAP_INTERVAL_TICKS = 180;
+    private static final int AMBIENT_EAR_FLAP_CHANCE_MODULO = 2;
+    private static final int AMBIENT_TAIL_FLIP_INTERVAL_TICKS = 140;
+    private static final int AMBIENT_TAIL_FLIP_CHANCE_MODULO = 2;
+
+    /*
+     * Your working in-game test needed the Blockbench X axis flipped.
+     * Keep this at -1.0F unless the animation visually points the wrong way again.
+     */
+    private static final float BLOCKBENCH_TRUMPET_X_SIGN = -1.0F;
+
+    private static final String BLOCKBENCH_TRUMPET_ANIMATION_NAME = "animation.mumakil.trumpet";
+    private static final String BLOCKBENCH_EAR_FLAP_ANIMATION_NAME = "animation.mumakil.ear_flap";
+    private static final String BLOCKBENCH_TAIL_FLIP_ANIMATION_NAME = "animation.mumakil.tail_flip";
+    private static final String BLOCKBENCH_STRIKE_LEFT_ANIMATION_NAME = "animation.mumakil.strike_left";
+    private static final String BLOCKBENCH_STRIKE_RIGHT_ANIMATION_NAME = "animation.mumakil.strike_right";
+    private static final ResourceLocation BLOCKBENCH_TRUMPET_RESOURCE = new ResourceLocation(
+            "lotrmoremobs",
+            "animations/entity/mumakil/mumakil.animations.json"
+    );
+
+    private static boolean loggedRendererBuild;
+    private static boolean loggedBlockbenchTrumpetApplied;
+    private static boolean loggedBlockbenchEarFlapApplied;
+    private static boolean loggedBlockbenchTailFlipApplied;
+    private static boolean loggedBlockbenchStrikeApplied;
+    private static boolean attemptedLoadBlockbenchAnimationFile;
+    private static Map<String, BlockbenchAnimation> loadedBlockbenchAnimations;
+    private static boolean attemptedLoadBlockbenchTrumpetAnimation;
+    private static BlockbenchAnimation loadedBlockbenchTrumpetAnimation;
+
+    private static final float[][] BB_TRUMPET_BODY_SWAY = new float[][] {
+            {0.0000F, 0.0000F, 0.0000F, 0.0000F},
+            {0.7917F, -4.4500F, 0.0000F, 0.0000F},
+            {0.8333F, -4.3500F, 0.0000F, 0.0000F},
+            {1.4167F, 0.0000F, 0.0000F, 0.0000F},
+            {1.5417F, 0.5000F, 0.0000F, 0.0000F},
+            {1.7083F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_UPPER_BACK = new float[][] {
+            {0.1667F, 0.0000F, 0.0000F, 0.0000F},
+            {0.7917F, -14.5000F, 0.0000F, 0.0000F},
+            {0.8333F, -14.3500F, 0.0000F, 0.0000F},
+            {1.4167F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_HEAD = new float[][] {
+            {0.0833F, 0.0000F, 0.0000F, 0.0000F},
+            {0.8333F, -42.5000F, 0.0000F, 0.0000F},
+            {1.4167F, 0.0000F, 0.0000F, 0.0000F},
+            {1.7083F, 6.0000F, 0.0000F, 0.0000F},
+            {2.0000F, 1.0000F, 0.0000F, 0.0000F},
+            {2.2500F, -2.0000F, 0.0000F, 0.0000F},
+            {2.4583F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_LEFT_EAR = new float[][] {
+            {0.0000F, 0.0000F, 0.0000F, 0.0000F},
+            {0.1250F, 0.0000F, 0.0000F, 0.0000F},
+            {0.2500F, 0.0000F, 0.6310F, 0.0000F},
+            {0.3333F, 0.0000F, 1.6430F, 0.0000F},
+            {0.4583F, 0.0000F, 2.7630F, 0.0000F},
+            {0.5417F, 0.0000F, 3.0000F, 0.0000F},
+            {0.6667F, 0.0000F, 3.0000F, 0.0000F},
+            {0.7917F, 0.0000F, 3.0000F, 0.0000F},
+            {1.0000F, 0.0000F, 3.0000F, 0.0000F},
+            {1.2500F, 0.0000F, 3.0000F, 0.0000F},
+            {1.4583F, 0.0000F, 3.0000F, 0.0000F},
+            {1.6667F, 0.0000F, 2.9990F, 0.0000F},
+            {1.8333F, 0.0000F, 2.2900F, 0.0000F},
+            {2.0417F, 0.0000F, 0.9700F, 0.0000F},
+            {2.2500F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_RIGHT_EAR = new float[][] {
+            {0.0000F, 0.0000F, 0.0000F, 0.0000F},
+            {0.1250F, 0.0000F, 0.0000F, 0.0000F},
+            {0.2500F, 0.0000F, -0.6310F, 0.0000F},
+            {0.3333F, 0.0000F, -1.6430F, 0.0000F},
+            {0.4583F, 0.0000F, -2.7630F, 0.0000F},
+            {0.5417F, 0.0000F, -3.0000F, 0.0000F},
+            {0.6667F, 0.0000F, -3.0000F, 0.0000F},
+            {0.7917F, 0.0000F, -3.0000F, 0.0000F},
+            {1.0000F, 0.0000F, -3.0000F, 0.0000F},
+            {1.2500F, 0.0000F, -3.0000F, 0.0000F},
+            {1.4583F, 0.0000F, -3.0000F, 0.0000F},
+            {1.6667F, 0.0000F, -2.9990F, 0.0000F},
+            {1.8333F, 0.0000F, -2.2900F, 0.0000F},
+            {2.0417F, 0.0000F, -0.9700F, 0.0000F},
+            {2.2500F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK = new float[][] {
+            {0.0000F, 0.0000F, 0.0000F, 0.0000F},
+            {0.8750F, -18.7510F, 0.1540F, 0.0000F},
+            {1.3750F, -17.0700F, 0.0700F, 0.0000F},
+            {1.7083F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK_01 = new float[][] {
+            {0.1250F, 0.0000F, 0.0000F, 0.0000F},
+            {0.8750F, -36.0000F, 0.0000F, 0.0000F},
+            {1.6250F, 0.0000F, 0.0000F, 0.0000F},
+            {1.9167F, 8.0000F, 0.0000F, 0.0000F},
+            {2.2083F, 0.0000F, 0.0000F, 0.0000F},
+            {2.4167F, -1.0000F, 0.0000F, 0.0000F},
+            {2.6250F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK_02 = new float[][] {
+            {0.1667F, 0.0000F, 0.0000F, 0.0000F},
+            {0.9167F, -56.0000F, 0.0000F, 0.0000F},
+            {1.7083F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK_03 = new float[][] {
+            {0.2083F, 0.0000F, 0.0000F, 0.0000F},
+            {0.9583F, -74.5000F, 0.0000F, 0.0000F},
+            {1.7500F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK_04 = new float[][] {
+            {0.3333F, 0.0000F, 0.0000F, 0.0000F},
+            {1.0833F, -109.0000F, 0.0000F, 0.0000F},
+            {1.8750F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+    private static final float[][] BB_TRUMPET_TRUNK_05 = new float[][] {
+            {0.2917F, 0.0000F, 0.0000F, 0.0000F},
+            {0.9167F, -98.8750F, 0.0000F, 0.0000F},
+            {1.8333F, 0.0000F, 0.0000F, 0.0000F},
+    };
+
+
     public LOTRRenderMumakilGeo() {
         super(new LOTRGeoModelMumakil());
-        this.shadowSize = 2.0F;
+        this.shadowSize = 5.0F;
+
+        if (!loggedRendererBuild) {
+            loggedRendererBuild = true;
+            System.out.println("[LOTRMoreMobs] Mumakil Geo renderer build loaded: " + RENDERER_BUILD_TAG);
+        }
     }
 
     /**
@@ -177,19 +380,22 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                     limbSwingAmount >= 0.15F,
                     Collections.<Object>singletonList(entityModelData)
             );
+
             this.modelProvider.setLivingAnimations(entity, this.getUniqueID(entity), animationEvent);
 
             GlStateManager.pushMatrix();
             try {
-                GlStateManager.translate(0.0F, 0.01F, 0.0F);
+                // Move the visible Geo model relative to the entity hitbox.
+                // This does NOT change the real hitbox.
+                GlStateManager.translate(0.0F, 0.0F, 3.5F);
 
                 ResourceLocation textureLocation = this.getEntityTexture(entity);
-                if (!this.canLoadResource(textureLocation) && !LOTRGeoModelMumakil.WAR_TEXTURE.equals(textureLocation)) {
+                if (!this.canLoadResource(textureLocation) && !LOTRGeoModelMumakil.WILD_TEXTURE.equals(textureLocation)) {
                     if (!loggedTextureFallback) {
                         loggedTextureFallback = true;
-                        System.out.println("[LOTRMoreMobs] Mumakil plain texture missing, falling back to war texture: " + textureLocation);
+                        System.out.println("[LOTRMoreMobs] Mumakil texture missing, falling back to wild texture: " + textureLocation);
                     }
-                    textureLocation = LOTRGeoModelMumakil.WAR_TEXTURE;
+                    textureLocation = LOTRGeoModelMumakil.WILD_TEXTURE;
                 }
 
                 if (!loggedTextureRequest) {
@@ -203,6 +409,9 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
                 Color renderColor = this.getRenderColor(entity, partialTicks);
 
+                // Direct Java bone animation avoids GeckoLib controller/runtime issues in this 1.7.10 setup.
+                this.applyMumakilBoneAnimations(geoModel, entity, limbSwing, limbSwingAmount, ageInTicks, partialTicks);
+
                 // Apply bone visibility at the last safe point. GeckoLib can rebuild or touch bones during model
                 // setup, so delay hiding/unhiding until immediately before the real Geo render call.
                 this.applyEquipmentVisibility(geoModel, renderSaddle, renderHowdahOrWarEquipment);
@@ -213,6 +422,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                     loggedBeforeGeoRender = true;
                     System.out.println("[LOTRMoreMobs] Mumakil calling GeckoLib render(GeoModel, ...) with modelLoaded=true");
                 }
+
                 this.render(
                         geoModel,
                         entity,
@@ -236,6 +446,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             loggedEquipmentStates[stateIndex] = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo equipment state: isMountSaddled="
                     + entity.isMountSaddled()
+                    + " detectedSaddleState=" + LOTRGeoModelMumakil.getSaddleDebugValue(entity)
                     + " detectedArmorState=" + LOTRGeoModelMumakil.getHowdahOrWarEquipmentDebugValue(entity)
                     + " shouldRenderSaddle=" + renderSaddle
                     + " shouldRenderHowdahOrWarEquipment=" + renderHowdahOrWarEquipment);
@@ -247,38 +458,976 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * independent so normal saddle rendering does not pull in tusk spikes, ankle spikes, ropes, or the howdah.
      */
     private void applyEquipmentVisibility(GeoModel geoModel, boolean renderSaddle, boolean renderHowdahOrWarEquipment) {
-        this.applyBoneVisibility(geoModel, SADDLE_BONES, renderSaddle, false);
-        this.applyBoneVisibility(geoModel, WAR_EQUIPMENT_BONES, renderHowdahOrWarEquipment, true);
+        boolean showSaddle = renderSaddle;
+        boolean showWarEquipment = renderSaddle && renderHowdahOrWarEquipment;
+
+        // First reset every equipment bone to visible.
+        // This clears sticky hidden flags from previous render states.
+        this.applyBoneVisibility(geoModel, ALL_EQUIPMENT_BONES, true, true);
+
+        // Then hide only what this state should not show.
+        if (!showWarEquipment) {
+            this.applyBoneVisibility(geoModel, WAR_EQUIPMENT_BONES, false, true);
+        }
+
+        if (!showSaddle) {
+            this.applyBoneVisibility(geoModel, SADDLE_BONES, false, true);
+        }
     }
 
     private void applyBoneVisibility(GeoModel geoModel, String[] boneNames, boolean visible, boolean logWarBones) {
         boolean hidden = !visible;
         boolean shouldLogThisPass = logWarBones && !loggedWarBoneVisibilityStates[visible ? 1 : 0];
+
         for (int i = 0; i < boneNames.length; ++i) {
             Optional<GeoBone> bone = geoModel.getBone(boneNames[i]);
+
             if (shouldLogThisPass) {
                 System.out.println("[LOTRMoreMobs] Mumakil Geo war bone visibility: bone="
                         + boneNames[i]
                         + " found=" + bone.isPresent()
                         + " requestedVisible=" + visible);
             }
-            if (bone.isPresent()) {
-                GeoBone geoBone = bone.get();
-                geoBone.setHidden(hidden, true);
-                geoBone.setCubesHidden(hidden);
 
-                // When armor is present, explicitly unhide every named howdah/perch/rigging/support child too.
-                // Do not rely only on recursive parent unhiding; some GeckoLib bone flags can remain sticky after
-                // a previous render hid the parent tree.
-                if (visible) {
-                    geoBone.setHidden(false, true);
-                    geoBone.setCubesHidden(false);
-                }
+            if (bone.isPresent()) {
+                this.setBoneTreeVisibility(bone.get(), hidden);
             }
         }
+
         if (shouldLogThisPass) {
             loggedWarBoneVisibilityStates[visible ? 1 : 0] = true;
         }
+    }
+
+    private void setBoneTreeVisibility(GeoBone geoBone, boolean hidden) {
+        if (geoBone == null) {
+            return;
+        }
+
+        geoBone.setHidden(hidden, false);
+        geoBone.setCubesHidden(hidden);
+
+        for (GeoBone childBone : this.getChildBonesSafe(geoBone)) {
+            this.setBoneTreeVisibility(childBone, hidden);
+        }
+    }
+
+    private java.util.List<GeoBone> getChildBonesSafe(GeoBone geoBone) {
+        java.util.List<GeoBone> children = new java.util.ArrayList<GeoBone>();
+
+        try {
+            java.lang.reflect.Method method = geoBone.getClass().getMethod("getChildBones");
+            Object value = method.invoke(geoBone);
+            this.collectGeoBones(value, children);
+        } catch (Exception e) {
+        }
+
+        if (!children.isEmpty()) {
+            return children;
+        }
+
+        String[] childFieldNames = new String[] {
+                "childBones",
+                "children",
+                "childBoneList"
+        };
+
+        for (int i = 0; i < childFieldNames.length; ++i) {
+            try {
+                java.lang.reflect.Field field = geoBone.getClass().getDeclaredField(childFieldNames[i]);
+                field.setAccessible(true);
+                Object value = field.get(geoBone);
+                this.collectGeoBones(value, children);
+            } catch (Exception e) {
+            }
+        }
+
+        return children;
+    }
+
+    private void collectGeoBones(Object value, java.util.List<GeoBone> children) {
+        if (value == null) {
+            return;
+        }
+
+        if (value instanceof GeoBone) {
+            children.add((GeoBone)value);
+            return;
+        }
+
+        if (value instanceof java.util.Collection) {
+            java.util.Collection collection = (java.util.Collection)value;
+            for (Object object : collection) {
+                if (object instanceof GeoBone) {
+                    children.add((GeoBone)object);
+                }
+            }
+            return;
+        }
+
+        if (value instanceof java.util.Map) {
+            java.util.Map map = (java.util.Map)value;
+            for (Object object : map.values()) {
+                if (object instanceof GeoBone) {
+                    children.add((GeoBone)object);
+                }
+            }
+        }
+    }
+
+    private void applyMumakilBoneAnimations(GeoModel geoModel, LOTREntityMumakil entity, float limbSwing, float limbSwingAmount, float ageInTicks, float partialTicks) {
+        if (geoModel == null || entity == null) {
+            return;
+        }
+
+        float moveAmount = clamp(limbSwingAmount, 0.0F, 1.0F);
+        float idleAmount = 1.0F - moveAmount * 0.45F;
+
+        float idleSlow = ageInTicks * 0.055F;
+        float idleMedium = ageInTicks * 0.085F;
+        float walkPhase = limbSwing * 0.55F;
+
+        float tailFlickProgress = getOccasionalProgress(entity, ageInTicks,
+                AMBIENT_TAIL_FLIP_INTERVAL_TICKS,
+                BLOCKBENCH_TAIL_FLIP_DURATION_TICKS,
+                AMBIENT_TAIL_FLIP_CHANCE_MODULO,
+                11);
+        float earFlapProgress = getOccasionalProgress(entity, ageInTicks,
+                AMBIENT_EAR_FLAP_INTERVAL_TICKS,
+                BLOCKBENCH_EAR_FLAP_DURATION_TICKS,
+                AMBIENT_EAR_FLAP_CHANCE_MODULO,
+                71);
+
+
+        /*
+         * V8: trumpet is driven by the Blockbench-authored JSON loaded from resources.
+         *
+         * This deliberately does NOT use the old Java trumpet math. During the active trumpet window,
+         * body_sway, upper_back, head, ears, and trunk bones are set from the Blockbench keyframes only.
+         */
+        float trumpetProgress = DEBUG_FORCE_BLOCKBENCH_TRUMPET_EVERY_CYCLE
+                ? getOccasionalProgress(entity, ageInTicks, AMBIENT_TRUMPET_INTERVAL_TICKS, BLOCKBENCH_TRUMPET_DURATION_TICKS, 1, 37)
+                : getOccasionalProgress(entity, ageInTicks,
+                AMBIENT_TRUMPET_INTERVAL_TICKS,
+                BLOCKBENCH_TRUMPET_DURATION_TICKS,
+                AMBIENT_TRUMPET_CHANCE_MODULO,
+                37);
+        boolean blockbenchTrumpetActive = USE_BLOCKBENCH_TRUMPET
+                && trumpetProgress >= 0.0F
+                && this.getBlockbenchAnimation(BLOCKBENCH_TRUMPET_ANIMATION_NAME) != null;
+
+        boolean blockbenchEarFlapActive = !blockbenchTrumpetActive
+                && USE_BLOCKBENCH_EAR_FLAP
+                && earFlapProgress >= 0.0F
+                && this.getBlockbenchAnimation(BLOCKBENCH_EAR_FLAP_ANIMATION_NAME) != null;
+
+        boolean blockbenchTailFlipActive = USE_BLOCKBENCH_TAIL_FLIP
+                && tailFlickProgress >= 0.0F
+                && this.getBlockbenchAnimation(BLOCKBENCH_TAIL_FLIP_ANIMATION_NAME) != null;
+
+        float strikeProgress = this.getMumakilStrikeProgress(entity, partialTicks);
+        boolean strikeLeft = this.shouldUseLeftStrike(entity, ageInTicks, strikeProgress);
+        String strikeAnimationName = strikeLeft ? BLOCKBENCH_STRIKE_LEFT_ANIMATION_NAME : BLOCKBENCH_STRIKE_RIGHT_ANIMATION_NAME;
+        if (this.getBlockbenchAnimation(strikeAnimationName) == null) {
+            strikeAnimationName = strikeLeft ? BLOCKBENCH_STRIKE_RIGHT_ANIMATION_NAME : BLOCKBENCH_STRIKE_LEFT_ANIMATION_NAME;
+        }
+        boolean blockbenchStrikeActive = USE_BLOCKBENCH_STRIKES
+                && strikeProgress > 0.0F
+                && this.getBlockbenchAnimation(strikeAnimationName) != null;
+
+        /*
+         * Body/head/ear/trunk idle and walk motion.
+         *
+         * When the Blockbench trumpet is active, skip these keyed bones here and let the Blockbench
+         * keyframes set them once, below. This prevents the old Java trumpet from visually bleeding through.
+         */
+        if (!blockbenchTrumpetActive) {
+            float bodySwayZ = sin(idleSlow) * degreesToRadians(1.25F) * idleAmount;
+            float bodySwayX = sin(walkPhase * 2.0F) * degreesToRadians(0.8F) * moveAmount;
+
+            this.setBoneRotation(geoModel, "body_sway", bodySwayX, 0.0F, bodySwayZ);
+            this.setBoneRotation(geoModel, "upper_back", 0.0F, 0.0F, 0.0F);
+
+            float headX = sin(idleMedium + 0.8F) * degreesToRadians(1.0F) * idleAmount
+                    + sin(walkPhase + 0.5F) * degreesToRadians(0.6F) * moveAmount;
+            float headY = sin(idleSlow + 1.2F) * degreesToRadians(1.25F) * idleAmount;
+
+            this.setBoneRotation(geoModel, "head", headX, headY, 0.0F);
+
+            /*
+             * Ear movement.
+             *
+             * Y is the face-fanning axis for the ears.
+             */
+            if (blockbenchEarFlapActive) {
+                if (!loggedBlockbenchEarFlapApplied) {
+                    loggedBlockbenchEarFlapApplied = true;
+                    System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil ear flap keyframes. animation="
+                            + BLOCKBENCH_EAR_FLAP_ANIMATION_NAME
+                            + " build=" + RENDERER_BUILD_TAG);
+                }
+                this.applyJsonBlockbenchAnimation(geoModel, BLOCKBENCH_EAR_FLAP_ANIMATION_NAME, earFlapProgress);
+            } else {
+                float idleEarFan = sin(idleMedium + 1.6F) * degreesToRadians(1.5F) * idleAmount;
+
+                this.setBoneRotation(geoModel, "left_ear", 0.0F, idleEarFan, 0.0F);
+                this.setBoneRotation(geoModel, "right_ear", 0.0F, -idleEarFan, 0.0F);
+            }
+
+            /*
+             * Normal trunk idle/walk motion.
+             *
+             * Keep these positive base values; they were the values that looked correct in-game.
+             */
+            float trunkSwingX = sin(idleSlow + 0.5F) * degreesToRadians(0.8F) * idleAmount
+                    + sin(walkPhase) * degreesToRadians(0.8F) * moveAmount;
+            float trunkSwingY = sin(idleMedium) * degreesToRadians(1.0F) * idleAmount
+                    + sin(walkPhase * 0.75F) * degreesToRadians(0.4F) * moveAmount;
+
+            this.setBoneRotation(geoModel, "trunk",
+                    degreesToRadians(12.5F) + trunkSwingX,
+                    trunkSwingY,
+                    0.0F
+            );
+
+            this.setBoneRotation(geoModel, "trunk_01",
+                    degreesToRadians(7.5F) + trunkSwingX * 0.50F,
+                    -trunkSwingY * 0.20F,
+                    0.0F
+            );
+
+            this.setBoneRotation(geoModel, "trunk_02",
+                    trunkSwingX * 0.35F,
+                    trunkSwingY * 0.16F,
+                    0.0F
+            );
+
+            this.setBoneRotation(geoModel, "trunk_03",
+                    trunkSwingX * 0.22F,
+                    -trunkSwingY * 0.12F,
+                    0.0F
+            );
+
+            this.setBoneRotation(geoModel, "trunk_04",
+                    trunkSwingX * 0.12F,
+                    trunkSwingY * 0.08F,
+                    0.0F
+            );
+
+            this.setBoneRotation(geoModel, "trunk_05",
+                    trunkSwingX * 0.06F,
+                    -trunkSwingY * 0.06F,
+                    0.0F
+            );
+        } else {
+            if (!loggedBlockbenchTrumpetApplied) {
+                loggedBlockbenchTrumpetApplied = true;
+                System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil trumpet keyframes. progress="
+                        + trumpetProgress
+                        + " resource=" + BLOCKBENCH_TRUMPET_RESOURCE
+                        + " animation=" + BLOCKBENCH_TRUMPET_ANIMATION_NAME
+                        + " build=" + RENDERER_BUILD_TAG);
+            }
+
+            this.applyJsonBlockbenchTrumpetAnimation(geoModel, trumpetProgress);
+        }
+
+        /*
+         * Tail idle swish plus rare fly-shooing flick.
+         *
+         * Z is the side-to-side tail axis.
+         * The flick starts with a high-amplitude snap, then decays into smaller
+         * follow-through swings like momentum traveling down the tail.
+         */
+        float tailIdle = sin(idleMedium + 2.4F) * degreesToRadians(2.5F) * idleAmount
+                + sin(walkPhase + 1.5F) * degreesToRadians(1.25F) * moveAmount;
+
+        if (blockbenchTailFlipActive) {
+            if (!loggedBlockbenchTailFlipApplied) {
+                loggedBlockbenchTailFlipApplied = true;
+                System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil tail flip keyframes. animation="
+                        + BLOCKBENCH_TAIL_FLIP_ANIMATION_NAME
+                        + " build=" + RENDERER_BUILD_TAG);
+            }
+            this.applyJsonBlockbenchAnimation(geoModel, BLOCKBENCH_TAIL_FLIP_ANIMATION_NAME, tailFlickProgress);
+        } else {
+            this.setBoneRotation(geoModel, "tail_upper", 0.0F, 0.0F, tailIdle * 0.15F);
+            this.setBoneRotation(geoModel, "tail_middle", 0.0F, 0.0F, tailIdle * 0.40F);
+            this.setBoneRotation(geoModel, "tail_lower", 0.0F, 0.0F, tailIdle * 0.75F);
+        }
+
+        /*
+         * Simple four-leg walking cycle.
+         */
+        float stepA = sin(walkPhase);
+        float stepB = sin(walkPhase + 3.1415927F);
+
+        float frontLegSwing = degreesToRadians(13.0F) * moveAmount;
+        float backLegSwing = degreesToRadians(11.0F) * moveAmount;
+
+        this.setBoneRotation(geoModel, "front_right_leg", stepA * frontLegSwing, 0.0F, 0.0F);
+        this.setBoneRotation(geoModel, "back_left_leg", stepA * backLegSwing, 0.0F, 0.0F);
+
+        this.setBoneRotation(geoModel, "front_left_leg", stepB * frontLegSwing, 0.0F, 0.0F);
+        this.setBoneRotation(geoModel, "back_right_leg", stepB * backLegSwing, 0.0F, 0.0F);
+
+        /*
+         * Strike animations run last so they can override head/body/trunk/leg bones during attack swings.
+         * The selected side alternates per swing. If one side is missing from JSON, the other side is used.
+         */
+        if (blockbenchStrikeActive) {
+            if (!loggedBlockbenchStrikeApplied) {
+                loggedBlockbenchStrikeApplied = true;
+                System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil strike keyframes. animation="
+                        + strikeAnimationName
+                        + " progress=" + strikeProgress
+                        + " build=" + RENDERER_BUILD_TAG);
+            }
+            this.applyJsonBlockbenchAnimation(geoModel, strikeAnimationName, strikeProgress);
+        }
+    }
+
+    private void applyJsonBlockbenchTrumpetAnimation(GeoModel geoModel, float progress) {
+        BlockbenchAnimation animation = this.getBlockbenchTrumpetAnimation();
+        if (animation == null) {
+            /*
+             * Do not fall back to the old Java trumpet here. If the JSON is missing, failing loudly is better
+             * than accidentally testing stale Java motion and thinking the Blockbench file is working.
+             */
+            return;
+        }
+
+        float lengthSeconds = animation.lengthSeconds > 0.0F
+                ? animation.lengthSeconds
+                : BLOCKBENCH_TRUMPET_FALLBACK_LENGTH_SECONDS;
+        float timeSeconds = clamp(progress, 0.0F, 1.0F) * lengthSeconds;
+
+        this.setBlockbenchJsonRotation(geoModel, animation, "body_sway", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "upper_back", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "head", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "left_ear", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "right_ear", timeSeconds, 0.0F, 0.0F, 0.0F);
+
+        /*
+         * The Blockbench keyframes are treated as animation offsets.
+         * These two trunk base values are the in-game-positive values that already looked correct.
+         */
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk", timeSeconds, 12.5F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk_01", timeSeconds, 7.5F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk_02", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk_03", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk_04", timeSeconds, 0.0F, 0.0F, 0.0F);
+        this.setBlockbenchJsonRotation(geoModel, animation, "trunk_05", timeSeconds, 0.0F, 0.0F, 0.0F);
+    }
+
+    private boolean applyJsonBlockbenchAnimation(GeoModel geoModel, String animationName, float progress) {
+        BlockbenchAnimation animation = this.getBlockbenchAnimation(animationName);
+        if (animation == null) {
+            return false;
+        }
+
+        float lengthSeconds = animation.lengthSeconds > 0.0F
+                ? animation.lengthSeconds
+                : 1.0F;
+        float timeSeconds = clamp(progress, 0.0F, 1.0F) * lengthSeconds;
+
+        for (String boneName : animation.boneRotationKeyframes.keySet()) {
+            this.setBlockbenchJsonRotation(
+                    geoModel,
+                    animation,
+                    boneName,
+                    timeSeconds,
+                    this.getDefaultBlockbenchBaseXDegrees(boneName),
+                    0.0F,
+                    0.0F
+            );
+        }
+
+        return true;
+    }
+
+    private float getDefaultBlockbenchBaseXDegrees(String boneName) {
+        if ("trunk".equals(boneName)) {
+            return 12.5F;
+        }
+
+        if ("trunk_01".equals(boneName)) {
+            return 7.5F;
+        }
+
+        return 0.0F;
+    }
+
+    private float getMumakilStrikeProgress(LOTREntityMumakil entity, float partialTicks) {
+        if (entity == null) {
+            return 0.0F;
+        }
+
+        /*
+         * Preferred path: LOTREntityMumakil can provide a synced attack-animation timer.
+         * This lets strike_left / strike_right fire exactly when the Mumakil attacks a mob.
+         */
+        Float entityProgress = this.getEntityProvidedMumakilStrikeProgress(entity, partialTicks);
+        if (entityProgress != null && entityProgress.floatValue() > 0.0F) {
+            return clamp(entityProgress.floatValue(), 0.0F, 1.0F);
+        }
+
+        /*
+         * Fallback path: if the entity attack code calls swingItem(), vanilla swing progress can still drive strikes.
+         */
+        try {
+            return clamp(entity.getSwingProgress(partialTicks), 0.0F, 1.0F);
+        } catch (Exception e) {
+            return 0.0F;
+        }
+    }
+
+    private boolean shouldUseLeftStrike(LOTREntityMumakil entity, float ageInTicks, float strikeProgress) {
+        Boolean entitySide = this.getEntityProvidedMumakilStrikeLeft(entity);
+        if (entitySide != null && strikeProgress > 0.0F) {
+            return entitySide.booleanValue();
+        }
+
+        int entityId = entity == null ? 0 : entity.getEntityId();
+        int estimatedStartTick = (int)(ageInTicks - strikeProgress * (float)BLOCKBENCH_STRIKE_DURATION_TICKS);
+        int strikeIndex = estimatedStartTick / BLOCKBENCH_STRIKE_DURATION_TICKS;
+        return positiveModulo(entityId + strikeIndex, 2) == 0;
+    }
+
+    private Float getEntityProvidedMumakilStrikeProgress(LOTREntityMumakil entity, float partialTicks) {
+        if (entity == null) {
+            return null;
+        }
+
+        try {
+            java.lang.reflect.Method method = entity.getClass().getMethod("getMumakilStrikeAnimationProgress", Float.TYPE);
+            Object value = method.invoke(entity, Float.valueOf(partialTicks));
+            if (value instanceof Number) {
+                return Float.valueOf(((Number)value).floatValue());
+            }
+        } catch (Exception e) {
+        }
+
+        return null;
+    }
+
+    private Boolean getEntityProvidedMumakilStrikeLeft(LOTREntityMumakil entity) {
+        if (entity == null) {
+            return null;
+        }
+
+        try {
+            java.lang.reflect.Method method = entity.getClass().getMethod("isMumakilStrikeAnimationLeft");
+            Object value = method.invoke(entity);
+            if (value instanceof Boolean) {
+                return (Boolean)value;
+            }
+        } catch (Exception e) {
+        }
+
+        return null;
+    }
+
+    private void setBlockbenchJsonRotation(GeoModel geoModel, BlockbenchAnimation animation, String boneName, float timeSeconds,
+                                           float baseXDegrees, float baseYDegrees, float baseZDegrees) {
+        float[][] keyframes = animation.boneRotationKeyframes.get(boneName);
+
+        float xDegrees = baseXDegrees;
+        float yDegrees = baseYDegrees;
+        float zDegrees = baseZDegrees;
+
+        if (keyframes != null && keyframes.length > 0) {
+            xDegrees += sampleBlockbenchKeyframes(keyframes, timeSeconds, 1) * BLOCKBENCH_TRUMPET_X_SIGN;
+            yDegrees += sampleBlockbenchKeyframes(keyframes, timeSeconds, 2);
+            zDegrees += sampleBlockbenchKeyframes(keyframes, timeSeconds, 3);
+        }
+
+        this.setBoneRotation(
+                geoModel,
+                boneName,
+                degreesToRadians(xDegrees),
+                degreesToRadians(yDegrees),
+                degreesToRadians(zDegrees)
+        );
+    }
+
+    private BlockbenchAnimation getBlockbenchTrumpetAnimation() {
+        return this.getBlockbenchAnimation(BLOCKBENCH_TRUMPET_ANIMATION_NAME);
+    }
+
+    private BlockbenchAnimation getBlockbenchAnimation(String animationName) {
+        Map<String, BlockbenchAnimation> animations = this.getBlockbenchAnimations();
+        if (animations == null || animationName == null) {
+            return null;
+        }
+        return animations.get(animationName);
+    }
+
+    private Map<String, BlockbenchAnimation> getBlockbenchAnimations() {
+        if (attemptedLoadBlockbenchAnimationFile) {
+            return loadedBlockbenchAnimations;
+        }
+
+        attemptedLoadBlockbenchAnimationFile = true;
+        loadedBlockbenchAnimations = new LinkedHashMap<String, BlockbenchAnimation>();
+
+        Reader reader = null;
+        try {
+            IResource resource = Minecraft.getMinecraft().getResourceManager().getResource(BLOCKBENCH_TRUMPET_RESOURCE);
+            InputStream inputStream = resource.getInputStream();
+            reader = new InputStreamReader(inputStream, "UTF-8");
+
+            JsonElement rootElement = new JsonParser().parse(reader);
+            if (rootElement == null || !rootElement.isJsonObject()) {
+                System.out.println("[LOTRMoreMobs] Mumakil Blockbench JSON did not contain a root object: resource="
+                        + BLOCKBENCH_TRUMPET_RESOURCE);
+                return loadedBlockbenchAnimations;
+            }
+
+            JsonObject rootObject = rootElement.getAsJsonObject();
+            JsonObject animationsObject = getJsonObject(rootObject, "animations");
+            if (animationsObject == null) {
+                System.out.println("[LOTRMoreMobs] Mumakil Blockbench JSON had no animations object: resource="
+                        + BLOCKBENCH_TRUMPET_RESOURCE);
+                return loadedBlockbenchAnimations;
+            }
+
+            for (Map.Entry<String, JsonElement> animationEntry : animationsObject.entrySet()) {
+                if (animationEntry == null || animationEntry.getKey() == null) {
+                    continue;
+                }
+
+                BlockbenchAnimation animation = parseBlockbenchAnimation(rootObject, animationEntry.getKey());
+                if (animation != null) {
+                    loadedBlockbenchAnimations.put(animationEntry.getKey(), animation);
+                }
+            }
+
+            System.out.println("[LOTRMoreMobs] Loaded Mumakil Blockbench JSON animations: resource="
+                    + BLOCKBENCH_TRUMPET_RESOURCE
+                    + " animationCount=" + loadedBlockbenchAnimations.size()
+                    + " names=" + loadedBlockbenchAnimations.keySet()
+                    + " build=" + RENDERER_BUILD_TAG);
+        } catch (Exception e) {
+            System.out.println("[LOTRMoreMobs] Failed to load Mumakil Blockbench JSON animations: resource="
+                    + BLOCKBENCH_TRUMPET_RESOURCE
+                    + " error=" + e.getClass().getName()
+                    + ": " + e.getMessage());
+        } finally {
+            if (reader != null) {
+                try {
+                    reader.close();
+                } catch (Exception e) {
+                }
+            }
+        }
+
+        return loadedBlockbenchAnimations;
+    }
+
+    private static BlockbenchAnimation parseBlockbenchAnimation(JsonObject rootObject, String animationName) {
+        if (rootObject == null || animationName == null) {
+            return null;
+        }
+
+        JsonObject animationsObject = getJsonObject(rootObject, "animations");
+        if (animationsObject == null || !animationsObject.has(animationName)) {
+            return null;
+        }
+
+        JsonElement animationElement = animationsObject.get(animationName);
+        if (animationElement == null || !animationElement.isJsonObject()) {
+            return null;
+        }
+
+        JsonObject animationObject = animationElement.getAsJsonObject();
+        BlockbenchAnimation animation = new BlockbenchAnimation();
+        animation.lengthSeconds = getJsonFloat(animationObject, "animation_length", BLOCKBENCH_TRUMPET_FALLBACK_LENGTH_SECONDS);
+        animation.boneRotationKeyframes = new LinkedHashMap<String, float[][]>();
+
+        JsonObject bonesObject = getJsonObject(animationObject, "bones");
+        if (bonesObject == null) {
+            return animation;
+        }
+
+        for (Map.Entry<String, JsonElement> boneEntry : bonesObject.entrySet()) {
+            if (boneEntry == null || boneEntry.getKey() == null || boneEntry.getValue() == null
+                    || !boneEntry.getValue().isJsonObject()) {
+                continue;
+            }
+
+            JsonObject boneObject = boneEntry.getValue().getAsJsonObject();
+            JsonElement rotationElement = boneObject.get("rotation");
+            float[][] rotationKeyframes = parseBlockbenchRotationKeyframes(rotationElement);
+            if (rotationKeyframes != null && rotationKeyframes.length > 0) {
+                animation.boneRotationKeyframes.put(boneEntry.getKey(), rotationKeyframes);
+            }
+        }
+
+        return animation;
+    }
+
+    private static float[][] parseBlockbenchRotationKeyframes(JsonElement rotationElement) {
+        if (rotationElement == null || rotationElement.isJsonNull()) {
+            return null;
+        }
+
+        List<float[]> keyframes = new ArrayList<float[]>();
+
+        if (rotationElement.isJsonArray()) {
+            float[] vector = readBlockbenchVector(rotationElement);
+            if (vector != null) {
+                keyframes.add(new float[] {0.0F, vector[0], vector[1], vector[2]});
+            }
+        } else if (rotationElement.isJsonObject()) {
+            JsonObject rotationObject = rotationElement.getAsJsonObject();
+
+            /*
+             * Some Blockbench exports may put a direct vector object here instead of a keyed timeline.
+             */
+            if (rotationObject.has("vector") || rotationObject.has("post") || rotationObject.has("pre")) {
+                float[] vector = readBlockbenchVector(rotationObject);
+                if (vector != null) {
+                    keyframes.add(new float[] {0.0F, vector[0], vector[1], vector[2]});
+                }
+            } else {
+                for (Map.Entry<String, JsonElement> keyframeEntry : rotationObject.entrySet()) {
+                    if (keyframeEntry == null || keyframeEntry.getKey() == null) {
+                        continue;
+                    }
+
+                    float timeSeconds;
+                    try {
+                        timeSeconds = Float.parseFloat(keyframeEntry.getKey());
+                    } catch (Exception e) {
+                        continue;
+                    }
+
+                    float[] vector = readBlockbenchVector(keyframeEntry.getValue());
+                    if (vector != null) {
+                        keyframes.add(new float[] {timeSeconds, vector[0], vector[1], vector[2]});
+                    }
+                }
+            }
+        }
+
+        if (keyframes.isEmpty()) {
+            return null;
+        }
+
+        Collections.sort(keyframes, new Comparator<float[]>() {
+            public int compare(float[] left, float[] right) {
+                if (left[0] < right[0]) {
+                    return -1;
+                }
+                if (left[0] > right[0]) {
+                    return 1;
+                }
+                return 0;
+            }
+        });
+
+        float[][] result = new float[keyframes.size()][4];
+        for (int i = 0; i < keyframes.size(); ++i) {
+            result[i] = keyframes.get(i);
+        }
+        return result;
+    }
+
+    private static float[] readBlockbenchVector(JsonElement element) {
+        if (element == null || element.isJsonNull()) {
+            return null;
+        }
+
+        if (element.isJsonArray()) {
+            return readBlockbenchVectorArray(element.getAsJsonArray());
+        }
+
+        if (!element.isJsonObject()) {
+            return null;
+        }
+
+        JsonObject object = element.getAsJsonObject();
+
+        if (object.has("post")) {
+            float[] vector = readBlockbenchVector(object.get("post"));
+            if (vector != null) {
+                return vector;
+            }
+        }
+
+        if (object.has("vector")) {
+            float[] vector = readBlockbenchVector(object.get("vector"));
+            if (vector != null) {
+                return vector;
+            }
+        }
+
+        if (object.has("pre")) {
+            return readBlockbenchVector(object.get("pre"));
+        }
+
+        return null;
+    }
+
+    private static float[] readBlockbenchVectorArray(JsonArray array) {
+        if (array == null || array.size() <= 0) {
+            return null;
+        }
+
+        float[] vector = new float[] {0.0F, 0.0F, 0.0F};
+        int max = Math.min(array.size(), 3);
+        for (int i = 0; i < max; ++i) {
+            try {
+                vector[i] = array.get(i).getAsFloat();
+            } catch (Exception e) {
+                vector[i] = 0.0F;
+            }
+        }
+        return vector;
+    }
+
+    private static JsonObject getJsonObject(JsonObject object, String key) {
+        if (object == null || key == null || !object.has(key)) {
+            return null;
+        }
+
+        JsonElement element = object.get(key);
+        if (element == null || !element.isJsonObject()) {
+            return null;
+        }
+
+        return element.getAsJsonObject();
+    }
+
+    private static float getJsonFloat(JsonObject object, String key, float fallback) {
+        if (object == null || key == null || !object.has(key)) {
+            return fallback;
+        }
+
+        try {
+            return object.get(key).getAsFloat();
+        } catch (Exception e) {
+            return fallback;
+        }
+    }
+
+    private static float sampleBlockbenchKeyframes(float[][] keyframes, float timeSeconds, int componentIndex) {
+        if (keyframes == null || keyframes.length <= 0) {
+            return 0.0F;
+        }
+
+        if (componentIndex < 1 || componentIndex > 3) {
+            return 0.0F;
+        }
+
+        if (timeSeconds <= keyframes[0][0]) {
+            return keyframes[0][componentIndex];
+        }
+
+        int lastIndex = keyframes.length - 1;
+        if (timeSeconds >= keyframes[lastIndex][0]) {
+            return keyframes[lastIndex][componentIndex];
+        }
+
+        for (int i = 0; i < lastIndex; ++i) {
+            float[] start = keyframes[i];
+            float[] end = keyframes[i + 1];
+
+            float startTime = start[0];
+            float endTime = end[0];
+
+            if (timeSeconds >= startTime && timeSeconds <= endTime) {
+                float duration = endTime - startTime;
+                if (duration <= 0.0001F) {
+                    return end[componentIndex];
+                }
+
+                float localProgress = (timeSeconds - startTime) / duration;
+                localProgress = smoothStep(localProgress);
+
+                return start[componentIndex] + (end[componentIndex] - start[componentIndex]) * localProgress;
+            }
+        }
+
+        return keyframes[lastIndex][componentIndex];
+    }
+
+    private static class BlockbenchAnimation {
+        private float lengthSeconds;
+        private Map<String, float[][]> boneRotationKeyframes;
+    }
+
+    private void setBoneRotation(GeoModel geoModel, String boneName, float rotationX, float rotationY, float rotationZ) {
+        Optional<GeoBone> bone = geoModel.getBone(boneName);
+        if (!bone.isPresent()) {
+            return;
+        }
+
+        GeoBone geoBone = bone.get();
+        this.setGeoBoneFloat(geoBone, "RotationX", "rotationX", rotationX);
+        this.setGeoBoneFloat(geoBone, "RotationY", "rotationY", rotationY);
+        this.setGeoBoneFloat(geoBone, "RotationZ", "rotationZ", rotationZ);
+    }
+
+
+    private void setGeoBoneFloat(GeoBone geoBone, String setterSuffix, String fieldName, float value) {
+        String setterName = "set" + setterSuffix;
+
+        try {
+            java.lang.reflect.Method method = geoBone.getClass().getMethod(setterName, float.class);
+            method.invoke(geoBone, Float.valueOf(value));
+            return;
+        } catch (Exception e) {
+        }
+
+        try {
+            java.lang.reflect.Method method = geoBone.getClass().getMethod(setterName, Float.class);
+            method.invoke(geoBone, Float.valueOf(value));
+            return;
+        } catch (Exception e) {
+        }
+
+        try {
+            java.lang.reflect.Field field = geoBone.getClass().getDeclaredField(fieldName);
+            field.setAccessible(true);
+            field.set(geoBone, Float.valueOf(value));
+        } catch (Exception e) {
+        }
+    }
+
+    private static float degreesToRadians(float degrees) {
+        return degrees * 0.017453292F;
+    }
+
+    private static float sin(float value) {
+        return (float)Math.sin((double)value);
+    }
+
+    private static float clamp(float value, float min, float max) {
+        if (value < min) {
+            return min;
+        }
+
+        if (value > max) {
+            return max;
+        }
+
+        return value;
+    }
+
+    private static float smoothStep(float value) {
+        value = clamp(value, 0.0F, 1.0F);
+        return value * value * (3.0F - 2.0F * value);
+    }
+
+    private static float getDelayedTrumpetValue(float progress, float delay, float riseDuration, float releaseStart) {
+        if (progress < delay) {
+            return 0.0F;
+        }
+
+        float local = clamp((progress - delay) / (1.0F - delay), 0.0F, 1.0F);
+        float rise = smoothStep(local / riseDuration);
+        float release = 1.0F - smoothStep((local - releaseStart) / (1.0F - releaseStart));
+        return rise * release;
+    }
+
+    private static float getDelayedTrumpetFollowThrough(float progress, float delay) {
+        if (progress < delay) {
+            return 0.0F;
+        }
+
+        float local = clamp((progress - delay) / (1.0F - delay), 0.0F, 1.0F);
+
+        /*
+         * One overshoot lobe followed by a smaller recoil lobe. This gives
+         * follow-through/settling without adding a constant sine wobble.
+         */
+        return getWindowedBump(local, 0.18F, 0.42F)
+                - getWindowedBump(local, 0.52F, 0.88F) * 0.42F;
+    }
+
+    private static float getWindowedBump(float progress, float start, float end) {
+        if (end <= start || progress <= start || progress >= end) {
+            return 0.0F;
+        }
+
+        return smoothBump((progress - start) / (end - start));
+    }
+
+    private static float smoothBump(float value) {
+        value = smoothStep(value);
+        return value * (1.0F - value) * 4.0F;
+    }
+
+    private static float cos(float value) {
+        return (float)Math.cos((double)value);
+    }
+
+    private static float getOccasionalProgress(LOTREntityMumakil entity, float ageInTicks, int intervalTicks, int durationTicks, int chanceModulo, int seed) {
+        if (entity == null || intervalTicks <= 0 || durationTicks <= 0 || chanceModulo <= 0) {
+            return -1.0F;
+        }
+
+        int tick = (int)ageInTicks;
+        int cycle = tick / intervalTicks;
+        int localTick = tick % intervalTicks;
+
+        if (localTick >= durationTicks) {
+            return -1.0F;
+        }
+
+        int hash = hashAnimationEvent(entity.getEntityId(), cycle, seed);
+        if (positiveModulo(hash, chanceModulo) != 0) {
+            return -1.0F;
+        }
+
+        return (float)localTick / (float)durationTicks;
+    }
+
+    private static float getOccasionalPulse(LOTREntityMumakil entity, float ageInTicks, int intervalTicks, int durationTicks, int chanceModulo, int seed) {
+        if (entity == null || intervalTicks <= 0 || durationTicks <= 0 || chanceModulo <= 0) {
+            return 0.0F;
+        }
+
+        int tick = (int)ageInTicks;
+        int cycle = tick / intervalTicks;
+        int localTick = tick % intervalTicks;
+
+        if (localTick >= durationTicks) {
+            return 0.0F;
+        }
+
+        int hash = hashAnimationEvent(entity.getEntityId(), cycle, seed);
+        if (positiveModulo(hash, chanceModulo) != 0) {
+            return 0.0F;
+        }
+
+        float progress = (float)localTick / (float)durationTicks;
+
+        /*
+         * Smooth in/out pulse.
+         * 0 at the start, 1 in the middle, 0 at the end.
+         */
+        return sin(progress * 3.1415927F);
+    }
+
+    private static int hashAnimationEvent(int entityId, int cycle, int seed) {
+        int value = entityId;
+        value = value * 31 + cycle;
+        value = value * 31 + seed;
+        value ^= value << 13;
+        value ^= value >> 17;
+        value ^= value << 5;
+        return value;
+    }
+
+    private static int positiveModulo(int value, int modulo) {
+        int result = value % modulo;
+        if (result < 0) {
+            result += modulo;
+        }
+        return result;
     }
 
     /**
@@ -297,7 +1446,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         if (entity instanceof LOTREntityMumakil) {
             return this.modelProvider.getTextureLocation((LOTREntityMumakil)entity);
         }
-        return LOTRGeoModelMumakil.WAR_TEXTURE;
+        return LOTRGeoModelMumakil.WILD_TEXTURE;
     }
 
     public Color getRenderColor(LOTREntityMumakil animatable, float partialTicks) {

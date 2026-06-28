@@ -22,8 +22,10 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
             new ResourceLocation("lotrmoremobs", "geo/entity/mumakil/LOTRMumakilModel.geo.json");
     public static final ResourceLocation WAR_MODEL =
             new ResourceLocation("lotrmoremobs", "geo/entity/mumakil/LOTRMumakilWarModel.geo.json");
-    public static final ResourceLocation PLAIN_TEXTURE =
-            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil.png");
+    public static final ResourceLocation WILD_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_wild.png");
+    public static final ResourceLocation SADDLED_TEXTURE =
+            new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_saddled.png");
     public static final ResourceLocation WAR_TEXTURE =
             new ResourceLocation("lotrmoremobs", "textures/mob/mumakil/mumakil_war.png");
 
@@ -79,7 +81,18 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
 
     @Override
     public ResourceLocation getTextureLocation(LOTREntityMumakil entity) {
-        return shouldRenderSaddle(entity) || shouldRenderHowdahOrWarEquipment(entity) ? WAR_TEXTURE : PLAIN_TEXTURE;
+        boolean saddle = shouldRenderSaddle(entity);
+        boolean warEquipment = shouldRenderHowdahOrWarEquipment(entity);
+
+        if (saddle && warEquipment) {
+            return WAR_TEXTURE;
+        }
+
+        if (saddle) {
+            return SADDLED_TEXTURE;
+        }
+
+        return WILD_TEXTURE;
     }
 
     public static boolean shouldRenderSaddle(LOTREntityMumakil entity) {
@@ -87,7 +100,7 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
     }
 
     public static boolean shouldRenderHowdahOrWarEquipment(LOTREntityMumakil entity) {
-        return detectHowdahOrWarEquipmentState(entity).equipped;
+        return entity != null && entity.isMountSaddled() && detectHowdahOrWarEquipmentState(entity).equipped;
     }
 
     public static String getHowdahOrWarEquipmentDebugValue(LOTREntityMumakil entity) {
