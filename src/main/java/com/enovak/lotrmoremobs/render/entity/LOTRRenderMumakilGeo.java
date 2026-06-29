@@ -97,7 +97,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     private static boolean loggedTextureFallback;
     private static boolean loggedBeforeGeoRender;
 
-    private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V8_AMBIENT_STRIKES_2026_06_28";
+    private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V12_5_SILENT_TAIL_FLIP_2026_06_28";
     private static final boolean USE_BLOCKBENCH_TRUMPET = true;
     private static final boolean USE_BLOCKBENCH_EAR_FLAP = true;
     private static final boolean USE_BLOCKBENCH_TAIL_FLIP = true;
@@ -143,11 +143,24 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "animations/entity/mumakil/mumakil.animations.json"
     );
 
+    /*
+     * V9 sound event names. These are registered in assets/lotrmoremobs/sounds.json.
+     * Strike, step, angry, and death sounds are best played from LOTREntityMumakil.
+     */
+    private static final String SOUND_MUMAKIL_TRUMPET = "lotrmoremobs:mumakil.trumpet";
+    private static final String SOUND_MUMAKIL_EARS = "lotrmoremobs:mumakil.ears";
+
     private static boolean loggedRendererBuild;
     private static boolean loggedBlockbenchTrumpetApplied;
     private static boolean loggedBlockbenchEarFlapApplied;
     private static boolean loggedBlockbenchTailFlipApplied;
     private static boolean loggedBlockbenchStrikeApplied;
+
+    private final Map<Integer, Integer> lastTrumpetSoundCycleByEntity = new LinkedHashMap<Integer, Integer>();
+    private final Map<Integer, Integer> lastEarSoundCycleByEntity = new LinkedHashMap<Integer, Integer>();
+    private final Map<Integer, Boolean> trumpetSoundActiveByEntity = new LinkedHashMap<Integer, Boolean>();
+    private final Map<Integer, Boolean> earSoundActiveByEntity = new LinkedHashMap<Integer, Boolean>();
+
     private static boolean attemptedLoadBlockbenchAnimationFile;
     private static Map<String, BlockbenchAnimation> loadedBlockbenchAnimations;
     private static boolean attemptedLoadBlockbenchTrumpetAnimation;
@@ -271,7 +284,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * RenderManager can enter through the raw Entity signature. Keep this generic path and route only real
      * Mumakil instances into the safe static renderer instead of allowing dispatch to GeoEntityRenderer#doRender.
      */
-    @Override
     public void doRender(Entity entity, double x, double y, double z, float entityYaw, float partialTicks) {
         if (!(entity instanceof LOTREntityMumakil)) {
             return;
@@ -286,7 +298,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * obfuscated EntityLivingBase.func_98034_c(EntityPlayer) invisibility call. Route it through the same safe
      * static helper and never call super.doRender(...).
      */
-    @Override
     public void doRender(EntityLivingBase entity, double x, double y, double z, float entityYaw, float partialTicks) {
         if (!(entity instanceof LOTREntityMumakil)) {
             return;
@@ -616,8 +627,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                 && trumpetProgress >= 0.0F
                 && this.getBlockbenchAnimation(BLOCKBENCH_TRUMPET_ANIMATION_NAME) != null;
 
-        boolean blockbenchEarFlapActive = !blockbenchTrumpetActive
-                && USE_BLOCKBENCH_EAR_FLAP
+        boolean blockbenchEarFlapActive = USE_BLOCKBENCH_EAR_FLAP
                 && earFlapProgress >= 0.0F
                 && this.getBlockbenchAnimation(BLOCKBENCH_EAR_FLAP_ANIMATION_NAME) != null;
 
@@ -634,6 +644,13 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         boolean blockbenchStrikeActive = USE_BLOCKBENCH_STRIKES
                 && strikeProgress > 0.0F
                 && this.getBlockbenchAnimation(strikeAnimationName) != null;
+
+        this.playAmbientSoundOnStart(this.trumpetSoundActiveByEntity, entity, blockbenchTrumpetActive,
+                SOUND_MUMAKIL_TRUMPET, 2.2F, 0.92F, 0.12F);
+
+        this.playAmbientSoundOnStart(this.earSoundActiveByEntity, entity, blockbenchEarFlapActive,
+                SOUND_MUMAKIL_EARS, 1.85F, 0.78F, 0.08F);
+
 
         /*
          * Body/head/ear/trunk idle and walk motion.
@@ -784,6 +801,100 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                         + " build=" + RENDERER_BUILD_TAG);
             }
             this.applyJsonBlockbenchAnimation(geoModel, strikeAnimationName, strikeProgress);
+        }
+    }
+
+    private void playAmbientSoundOnStart(Map<Integer, Boolean> activeByEntity, LOTREntityMumakil entity, boolean active,
+                                         String soundName, float volume, float basePitch, float pitchRange) {
+        if (activeByEntity == null || entity == null || soundName == null) {
+            return;
+        }
+
+        int entityId = entity.getEntityId();
+        Boolean wasActive = activeByEntity.get(Integer.valueOf(entityId));
+
+        if (active) {
+            if (!Boolean.TRUE.equals(wasActive)) {
+                activeByEntity.put(Integer.valueOf(entityId), Boolean.TRUE);
+                this.playEntitySound(entity, soundName, volume, basePitch, pitchRange);
+            }
+        } else if (wasActive != null) {
+            activeByEntity.remove(Integer.valueOf(entityId));
+        }
+    }
+
+    private void playWindowSoundOnce(Map<Integer, Integer> playedCyclesByEntity, LOTREntityMumakil entity, float ageInTicks,
+                                     int intervalTicks, String soundName, float volume, float basePitch, float pitchRange) {
+        if (playedCyclesByEntity == null || entity == null || soundName == null || intervalTicks <= 0) {
+            return;
+        }
+
+        int tick = (int)ageInTicks;
+        int cycle = tick / intervalTicks;
+        int entityId = entity.getEntityId();
+
+        Integer lastCycle = playedCyclesByEntity.get(Integer.valueOf(entityId));
+        if (lastCycle != null && lastCycle.intValue() == cycle) {
+            return;
+        }
+
+        playedCyclesByEntity.put(Integer.valueOf(entityId), Integer.valueOf(cycle));
+        this.playEntitySound(entity, soundName, volume, basePitch, pitchRange);
+    }
+
+    private void playEntitySound(LOTREntityMumakil entity, String soundName, float volume, float basePitch, float pitchRange) {
+        if (entity == null || soundName == null) {
+            return;
+        }
+
+        float randomOffset = 0.0F;
+        try {
+            randomOffset = (entity.getRNG().nextFloat() - entity.getRNG().nextFloat()) * pitchRange;
+        } catch (Exception e) {
+        }
+
+        float pitch = basePitch + randomOffset;
+
+        /*
+         * Renderer-triggered ambient events are client-side only. In 1.7.10, calling
+         * Entity#playSound from the renderer can be swallowed depending on the side/world,
+         * so play directly into the active client World and log the attempt.
+         */
+        try {
+            if (Minecraft.getMinecraft() != null && Minecraft.getMinecraft().theWorld != null) {
+                Minecraft.getMinecraft().theWorld.playSound(
+                        entity.posX,
+                        entity.posY + (double)(entity.height * 0.5F),
+                        entity.posZ,
+                        soundName,
+                        volume,
+                        pitch,
+                        false
+                );
+                System.out.println("[LOTRMoreMobs] Playing Mumakil client animation sound: sound="
+                        + soundName
+                        + " volume=" + volume
+                        + " pitch=" + pitch
+                        + " build=" + RENDERER_BUILD_TAG);
+                return;
+            }
+        } catch (Exception e) {
+            System.out.println("[LOTRMoreMobs] Client World#playSound failed for Mumakil sound "
+                    + soundName
+                    + ": " + e);
+        }
+
+        try {
+            entity.playSound(soundName, volume, pitch);
+            System.out.println("[LOTRMoreMobs] Playing Mumakil fallback entity sound: sound="
+                    + soundName
+                    + " volume=" + volume
+                    + " pitch=" + pitch
+                    + " build=" + RENDERER_BUILD_TAG);
+        } catch (Exception e) {
+            System.out.println("[LOTRMoreMobs] Entity#playSound failed for Mumakil sound "
+                    + soundName
+                    + ": " + e);
         }
     }
 
@@ -1436,12 +1547,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * mob-spawner preview also renders temporary entities, so use the vanilla entity id as a safe per-instance
      * animation key instead of entering the broken func_110124_au call path.
      */
-    @Override
     public Integer getUniqueID(LOTREntityMumakil animatable) {
         return Integer.valueOf(animatable == null ? 0 : animatable.getEntityId());
     }
 
-    @Override
     protected ResourceLocation getEntityTexture(Entity entity) {
         if (entity instanceof LOTREntityMumakil) {
             return this.modelProvider.getTextureLocation((LOTREntityMumakil)entity);

@@ -1,0 +1,38 @@
+{
+  "mumakil.death": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/death"
+    ]
+  },
+  "mumakil.ears": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/ears"
+    ]
+  },
+  "mumakil.step": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/step"
+    ]
+  },
+  "mumakil.strike": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/strike"
+    ]
+  },
+  "mumakil.trumpet": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/trumpet"
+    ]
+  },
+  "mumakil.angry": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/angry"
+    ]
+  }
+}

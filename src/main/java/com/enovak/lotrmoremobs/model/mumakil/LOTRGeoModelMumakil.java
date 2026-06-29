@@ -68,6 +68,28 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
             "horseInventory",
             "inventory"
     };
+    private static final String[] BOOLEAN_SADDLE_METHODS = new String[] {
+            "isMountSaddled",
+            "isHorseSaddled",
+            "isSaddled",
+            "getSaddled",
+            "func_110257_ck"
+    };
+
+    private static final String[] ITEM_SADDLE_METHODS = new String[] {
+            "getSaddle",
+            "getSaddleItem",
+            "getSaddleItemStack",
+            "getMountSaddle",
+            "getHorseSaddle"
+    };
+
+    private static final String[] SADDLE_FIELDS = new String[] {
+            "saddle",
+            "saddleItem",
+            "mountSaddle",
+            "horseSaddle"
+    };
 
     @Override
     public ResourceLocation getAnimationFileLocation(LOTREntityMumakil entity) {
@@ -76,7 +98,7 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
 
     @Override
     public ResourceLocation getModelLocation(LOTREntityMumakil entity) {
-        return shouldRenderSaddle(entity) || shouldRenderHowdahOrWarEquipment(entity) ? WAR_MODEL : PLAIN_MODEL;
+        return PLAIN_MODEL;
     }
 
     @Override
@@ -96,11 +118,43 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
     }
 
     public static boolean shouldRenderSaddle(LOTREntityMumakil entity) {
-        return entity != null && entity.isMountSaddled();
+        return detectSaddleState(entity).equipped;
+    }
+
+    public static String getSaddleDebugValue(LOTREntityMumakil entity) {
+        return detectSaddleState(entity).debugValue;
+    }
+
+    private static ArmorState detectSaddleState(LOTREntityMumakil entity) {
+        if (entity == null) {
+            return new ArmorState(false, "entity=null");
+        }
+
+        ArmorState state = findSaddleStateFromMethods(entity, BOOLEAN_SADDLE_METHODS);
+        if (state.equipped) {
+            return state;
+        }
+
+        state = findSaddleStateFromMethods(entity, ITEM_SADDLE_METHODS);
+        if (state.equipped) {
+            return state;
+        }
+
+        state = findSaddleStateFromFields(entity, SADDLE_FIELDS);
+        if (state.equipped) {
+            return state;
+        }
+
+        state = findSaddleStateFromInventoryFields(entity);
+        if (state.equipped) {
+            return state;
+        }
+
+        return new ArmorState(false, state.debugValue == null ? "none" : state.debugValue);
     }
 
     public static boolean shouldRenderHowdahOrWarEquipment(LOTREntityMumakil entity) {
-        return entity != null && entity.isMountSaddled() && detectHowdahOrWarEquipmentState(entity).equipped;
+        return entity != null && shouldRenderSaddle(entity) && detectHowdahOrWarEquipmentState(entity).equipped;
     }
 
     public static String getHowdahOrWarEquipmentDebugValue(LOTREntityMumakil entity) {
@@ -224,6 +278,122 @@ public class LOTRGeoModelMumakil extends AnimatedGeoModel<LOTREntityMumakil> {
             }
         }
         return new ArmorState(false, firstObservedState);
+    }
+
+    private static ArmorState findSaddleStateFromMethods(LOTREntityMumakil entity, String[] methodNames) {
+        String firstObservedState = null;
+
+        for (int i = 0; i < methodNames.length; ++i) {
+            String methodName = methodNames[i];
+            Method method = findNoArgMethod(entity.getClass(), methodName);
+            if (method != null) {
+                try {
+                    Object value = method.invoke(entity);
+                    ArmorState state = saddleStateFromValue("method " + methodName, value);
+                    if (state.equipped) {
+                        return state;
+                    }
+                    if (firstObservedState == null) {
+                        firstObservedState = state.debugValue;
+                    }
+                } catch (Exception e) {
+                    if (firstObservedState == null) {
+                        firstObservedState = "method " + methodName + "=<error>";
+                    }
+                }
+            }
+        }
+
+        return new ArmorState(false, firstObservedState);
+    }
+
+    private static ArmorState findSaddleStateFromFields(LOTREntityMumakil entity, String[] fieldNames) {
+        String firstObservedState = null;
+
+        for (int i = 0; i < fieldNames.length; ++i) {
+            String fieldName = fieldNames[i];
+            Field field = findField(entity.getClass(), fieldName);
+            if (field != null) {
+                try {
+                    Object value = field.get(entity);
+                    ArmorState state = saddleStateFromValue("field " + fieldName, value);
+                    if (state.equipped) {
+                        return state;
+                    }
+                    if (firstObservedState == null) {
+                        firstObservedState = state.debugValue;
+                    }
+                } catch (Exception e) {
+                    if (firstObservedState == null) {
+                        firstObservedState = "field " + fieldName + "=<error>";
+                    }
+                }
+            }
+        }
+
+        return new ArmorState(false, firstObservedState);
+    }
+
+    private static ArmorState findSaddleStateFromInventoryFields(LOTREntityMumakil entity) {
+        String firstObservedState = null;
+
+        for (int i = 0; i < INVENTORY_FIELDS.length; ++i) {
+            String fieldName = INVENTORY_FIELDS[i];
+            Field field = findField(entity.getClass(), fieldName);
+            if (field != null) {
+                try {
+                    Object value = field.get(entity);
+                    if (value instanceof IInventory) {
+                        IInventory inventory = (IInventory)value;
+
+                        if (inventory.getSizeInventory() > 0) {
+                            ArmorState state = saddleStateFromValue("inventory " + fieldName + "[0]", inventory.getStackInSlot(0));
+                            if (state.equipped) {
+                                return state;
+                            }
+                            if (firstObservedState == null) {
+                                firstObservedState = state.debugValue;
+                            }
+                        }
+                    }
+                } catch (Exception e) {
+                    if (firstObservedState == null) {
+                        firstObservedState = "inventory " + fieldName + "=<error>";
+                    }
+                }
+            }
+        }
+
+        return new ArmorState(false, firstObservedState);
+    }
+
+    private static ArmorState saddleStateFromValue(String source, Object value) {
+        if (value == null) {
+            return new ArmorState(false, source + "=null");
+        }
+
+        if (value instanceof Boolean) {
+            boolean equipped = ((Boolean)value).booleanValue();
+            return new ArmorState(equipped, source + "=" + value);
+        }
+
+        if (value instanceof Number) {
+            int index = ((Number)value).intValue();
+            return new ArmorState(index > 0, source + "=" + index);
+        }
+
+        if (value instanceof ItemStack) {
+            ItemStack stack = (ItemStack)value;
+            boolean equipped = stack != null && stack.getItem() == Items.saddle;
+            return new ArmorState(equipped, source + "=" + describeStack(stack));
+        }
+
+        if (value instanceof Item) {
+            Item item = (Item)value;
+            return new ArmorState(item == Items.saddle, source + "=" + item);
+        }
+
+        return new ArmorState(false, source + "=" + value);
     }
 
     private static ArmorState stateFromValue(String source, Object value) {

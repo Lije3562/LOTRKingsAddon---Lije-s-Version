@@ -45,6 +45,7 @@ import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
 
 public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
+    // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
     private static final double MAX_HEALTH = 120.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
     private static final double KNOCKBACK_RESISTANCE = 1.0D;
@@ -86,6 +87,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private int angerWaveCooldownTicks;
     private int angerWaveActiveTicks;
     private int tuskAttackCooldownTicks;
+
+    private static final int MUMAKIL_STRIKE_ANIMATION_TICKS = 36;
+    private static final byte MUMAKIL_STRIKE_LEFT_STATUS = 80;
+    private static final byte MUMAKIL_STRIKE_RIGHT_STATUS = 81;
+
+    private int mumakilStrikeAnimationTicks;
+    private int prevMumakilStrikeAnimationTicks;
+    private boolean mumakilStrikeAnimationLeft;
+    private int mumakilAngrySoundTriggerCounter;
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -242,6 +252,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     public void onLivingUpdate() {
         super.onLivingUpdate();
         this.stabilizeIdleYaw();
+
+        this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
+
+        if (this.mumakilStrikeAnimationTicks > 0) {
+            --this.mumakilStrikeAnimationTicks;
+        }
+
         if (!this.worldObj.isRemote) {
             if (this.tuskAttackCooldownTicks > 0) {
                 --this.tuskAttackCooldownTicks;
@@ -315,11 +332,31 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         boolean attacked = super.attackEntityAsMob(target);
         if (attacked && !this.worldObj.isRemote) {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
+            this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
-            this.playMumakilHitSound();
         }
 
         return attacked;
+    }
+
+    @Override
+    public boolean attackEntityFrom(DamageSource source, float amount) {
+        boolean damaged = super.attackEntityFrom(source, amount);
+
+        if (damaged && !this.worldObj.isRemote && amount > 0.0F && !this.isDead) {
+            this.playMumakilNormalHitSound();
+        }
+
+        return damaged;
+    }
+
+    private void playMumakilNormalHitSound() {
+        this.worldObj.playSoundAtEntity(
+                this,
+                "game.neutral.hurt",
+                0.9F,
+                0.62F + this.rand.nextFloat() * 0.10F
+        );
     }
 
     @Override
@@ -351,6 +388,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         this.angerWaveActiveTicks = ANGER_WAVE_MIN_DURATION + this.rand.nextInt(ANGER_WAVE_RANDOM_DURATION);
+        this.playMumakilAngrySound();
     }
 
     private void resetAngerWaveCooldown() {
@@ -362,20 +400,31 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private void tryTuskReachAttack() {
+        if (this.tuskAttackCooldownTicks > 0) {
+            return;
+        }
+
         EntityLivingBase target = this.getAttackTarget();
-        if (target == null
-                || this.tuskAttackCooldownTicks > 0
-                || !target.isEntityAlive()
-                || this.getDistanceSqToEntity(target) > TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE
-                || !this.canTuskAttackTarget(target)
-                || !this.isTuskTargetInFront(target)) {
+        if (target == null || !this.canTuskAttackTarget(target)) {
+            return;
+        }
+
+        if (this.getDistanceSqToEntity(target) > TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
+            return;
+        }
+
+        if (!this.isTuskTargetInFront(target)) {
+            return;
+        }
+
+        if (!this.canEntityBeSeen(target)) {
             return;
         }
 
         if (target.attackEntityFrom(DamageSource.causeMobDamage(this), (float)ATTACK_DAMAGE)) {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
+            this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.75F, 0.5F);
-            this.playMumakilHitSound();
         }
     }
 
@@ -574,6 +623,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
+            this.playMumakilAngrySound();
             this.setAttackTarget(bestTarget);
         }
     }
@@ -945,7 +995,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         if (momentum >= CHARGE_STOMP_SOUND_MIN_SPEED && !this.getNavigator().noPath()) {
             this.worldObj.playSoundAtEntity(
                     this,
-                    "mob.irongolem.walk",
+                    "lotrmoremobs:mumakil.step",
                     1.8F,
                     0.45F + this.rand.nextFloat() * 0.1F
             );
@@ -954,12 +1004,30 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    private boolean shouldPlayMumakilAngrySoundThisTrigger() {
+        ++this.mumakilAngrySoundTriggerCounter;
+        return this.mumakilAngrySoundTriggerCounter % 10 == 0;
+    }
+
+    private void playMumakilAngrySound() {
+        if (!this.shouldPlayMumakilAngrySoundThisTrigger()) {
+            return;
+        }
+
+        this.worldObj.playSoundAtEntity(
+                this,
+                "lotrmoremobs:mumakil.angry",
+                1.25F,
+                0.62F + this.rand.nextFloat() * 0.10F
+        );
+    }
+
     private void playMumakilHitSound() {
         this.worldObj.playSoundAtEntity(
                 this,
-                "lotr:troll.ologHai_hammer",
-                0.9F,
-                0.85F + this.rand.nextFloat() * 0.2F
+                "lotrmoremobs:mumakil.step",
+                1.2F,
+                0.75F + this.rand.nextFloat() * 0.15F
         );
     }
 
@@ -976,23 +1044,94 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    @Override
+    protected float getSoundPitch() {
+        return 0.62F + this.rand.nextFloat() * 0.10F;
+    }
+
     protected String getLivingSound() {
-        super.getLivingSound();
-        return "lotr:rhino.say";
+        return null;
     }
 
     protected String getHurtSound() {
-        super.getHurtSound();
-        return "lotr:rhino.hurt";
+        return this.shouldPlayMumakilAngrySoundThisTrigger() ? "lotrmoremobs:mumakil.angry" : null;
     }
 
     protected String getDeathSound() {
-        super.getDeathSound();
-        return "lotr:rhino.death";
+        return "lotrmoremobs:mumakil.death";
     }
 
     protected String getAngrySoundName() {
-        super.getAngrySoundName();
-        return "lotr:rhino.say";
+        return this.shouldPlayMumakilAngrySoundThisTrigger() ? "lotrmoremobs:mumakil.angry" : null;
     }
+
+    private void startMumakilStrikeAnimation() {
+        this.mumakilStrikeAnimationLeft = this.rand.nextBoolean();
+        this.mumakilStrikeAnimationTicks = MUMAKIL_STRIKE_ANIMATION_TICKS;
+        this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
+
+        System.out.println("[LOTRMoreMobs] Starting Mumakil strike animation side="
+                + (this.mumakilStrikeAnimationLeft ? "left" : "right")
+                + " worldRemote=" + this.worldObj.isRemote
+                + " entityId=" + this.getEntityId());
+
+        this.swingItem();
+
+        this.worldObj.playSoundAtEntity(
+                this,
+                "lotrmoremobs:mumakil.strike",
+                1.2F,
+                0.85F + this.rand.nextFloat() * 0.2F
+        );
+
+        if (!this.worldObj.isRemote) {
+            this.worldObj.setEntityState(
+                    this,
+                    this.mumakilStrikeAnimationLeft ? MUMAKIL_STRIKE_LEFT_STATUS : MUMAKIL_STRIKE_RIGHT_STATUS
+            );
+        }
+    }
+
+    @Override
+    public void handleHealthUpdate(byte status) {
+        if (status == MUMAKIL_STRIKE_LEFT_STATUS || status == MUMAKIL_STRIKE_RIGHT_STATUS) {
+            this.mumakilStrikeAnimationLeft = status == MUMAKIL_STRIKE_LEFT_STATUS;
+            this.mumakilStrikeAnimationTicks = MUMAKIL_STRIKE_ANIMATION_TICKS;
+            this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
+
+            System.out.println("[LOTRMoreMobs] Client received Mumakil strike animation side="
+                    + (this.mumakilStrikeAnimationLeft ? "left" : "right")
+                    + " entityId=" + this.getEntityId());
+
+            return;
+        }
+
+        super.handleHealthUpdate(status);
+    }
+
+    public float getMumakilStrikeAnimationProgress(float partialTicks) {
+        if (this.mumakilStrikeAnimationTicks <= 0 && this.prevMumakilStrikeAnimationTicks <= 0) {
+            return 0.0F;
+        }
+
+        float remaining = this.prevMumakilStrikeAnimationTicks
+                + (this.mumakilStrikeAnimationTicks - this.prevMumakilStrikeAnimationTicks) * partialTicks;
+
+        float progress = 1.0F - remaining / (float)MUMAKIL_STRIKE_ANIMATION_TICKS;
+
+        if (progress < 0.0F) {
+            return 0.0F;
+        }
+
+        if (progress > 1.0F) {
+            return 1.0F;
+        }
+
+        return progress;
+    }
+
+    public boolean isMumakilStrikeAnimationLeft() {
+        return this.mumakilStrikeAnimationLeft;
+    }
+
 }
