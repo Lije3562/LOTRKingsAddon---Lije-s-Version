@@ -5,7 +5,6 @@ import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
-import net.minecraft.init.Items;
 import net.minecraft.item.ItemStack;
 
 public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
@@ -24,7 +23,7 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
         }
 
         LOTREntityMumakil mumakil = this.asMumakil(target);
-        if (this.hasWarEquipmentStack(mumakil)) {
+        if (!mumakil.isMountSaddled() || this.hasWarEquipmentStack(mumakil)) {
             return false;
         }
 
@@ -32,9 +31,6 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
             return true;
         }
 
-        // The current renderer intentionally shows war/howdah bones only when the saddle layer is also active.
-        this.setMountSaddled(mumakil, true);
-        this.equipSaddleSlot(mumakil, new ItemStack(Items.saddle));
         this.equipWarEquipmentSlot(mumakil, new ItemStack(Main.mumakilHowdah));
         this.consumeOne(stack, player);
         player.swingItem();
