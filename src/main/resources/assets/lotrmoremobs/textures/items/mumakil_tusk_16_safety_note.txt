@@ -1,0 +1,1 @@
+The active Mumakil tusk item texture is assets/lotrmoremobs/textures/items/mumakil_tusk.png. It should be a transparent 16x16 or 32x32 PNG.
