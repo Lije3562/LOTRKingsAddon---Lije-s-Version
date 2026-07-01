@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
+import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
 import com.enovak.lotrmoremobs.materials.AddonMaterial;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
 import cpw.mods.fml.common.Mod;
@@ -59,9 +60,7 @@ public class Main {
         proxy.registerRenderers();
         proxy.registerEventHandlers();
 
-        mumakilTusk = new Item()
-                .setUnlocalizedName("mumakil_tusk")
-                .setTextureName("lotrmoremobs:mumakil_tusk");
+        mumakilTusk = new LOTRItemMumakilTusk();
         GameRegistry.registerItem(mumakilTusk, "mumakil_tusk");
 
         mumakilShank = new LOTRItemMumakilShank();
