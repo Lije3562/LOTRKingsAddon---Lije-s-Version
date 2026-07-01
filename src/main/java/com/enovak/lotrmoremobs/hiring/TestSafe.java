@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.hiring;
 
-import lotr.common.entity.npc.LOTRUnitTradeEntry;
-
-public class TestSafe extends LOTRUnitTradeEntry {
+public class TestSafe {
+    private Class find() throws Exception {
+        return Class.forName("lotr.common.entity.npc." + "LOTRUnit" + "Trade" + "Entry");
+    }
 }
