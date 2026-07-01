@@ -10,7 +10,7 @@ import net.minecraft.item.ItemStack;
 public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
 
     public LOTRItemMumakilHowdah() {
-        this.setMaxStackSize(8);
+        this.setMaxStackSize(1);
         this.setCreativeTab(CreativeTabs.tabTransport);
         this.setUnlocalizedName("mumakil_howdah");
         this.setTextureName("lotrmoremobs:mumakil_howdah");
@@ -23,7 +23,7 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
         }
 
         LOTREntityMumakil mumakil = this.asMumakil(target);
-        if (!mumakil.isMountSaddled() || this.hasWarEquipmentStack(mumakil)) {
+        if (!mumakil.hasMumakilSaddleEquipped() || this.hasWarEquipmentStack(mumakil)) {
             return false;
         }
 
@@ -32,6 +32,7 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
         }
 
         this.equipWarEquipmentSlot(mumakil, new ItemStack(Main.mumakilHowdah));
+        mumakil.setMumakilHowdahEquipped(true);
         this.consumeOne(stack, player);
         player.swingItem();
 
