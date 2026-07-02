@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.hiring.MumakilUnitTradeInjector;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
@@ -68,6 +69,8 @@ public class Main {
 
         mumakilHowdah = new LOTRItemMumakilHowdah();
         GameRegistry.registerItem(mumakilHowdah, "mumakil_howdah");
+
+        MumakilUnitTradeInjector.inject();
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
                 .setUnlocalizedName("atalcare")
