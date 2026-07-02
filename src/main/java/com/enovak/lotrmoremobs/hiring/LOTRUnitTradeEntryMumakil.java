@@ -3,8 +3,10 @@ package com.enovak.lotrmoremobs.hiring;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
 import lotr.common.entity.npc.LOTRUnitTradeEntry;
+import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
@@ -17,6 +19,9 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
 
     private static final int SADDLE_SLOT = 0;
     private static final int HOWDAH_SLOT = 1;
+    private static final float HIRE_GUI_DISPLAY_WIDTH = 14.0F;
+    private static final float HIRE_GUI_DISPLAY_HEIGHT = 30.0F;
+
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
             "mountInventory",
@@ -47,8 +52,50 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         mumakil.onSpawnWithEgg(null);
         mumakil.setBelongsToNPC(true);
         mumakil.setMountable(true);
+
+        if (world.isRemote) {
+            this.applyHireGuiDisplayScale(mumakil);
+        }
+
         this.equipMumakilForHire(mumakil);
         return mumakil;
+    }
+
+    private void applyHireGuiDisplayScale(LOTREntityMumakil mumakil) {
+        /*
+         * LOTR's hire GUI computes preview size from entity width/height.
+         * This only runs for the temporary client-side GUI preview entity.
+         */
+        Method setSize = this.findMethod(Entity.class, "setSize", new Class[] { Float.TYPE, Float.TYPE });
+        if (setSize == null) {
+            setSize = this.findMethod(Entity.class, "func_70105_a", new Class[] { Float.TYPE, Float.TYPE });
+        }
+
+        if (setSize != null) {
+            try {
+                setSize.invoke(mumakil, new Object[] {
+                        Float.valueOf(HIRE_GUI_DISPLAY_WIDTH),
+                        Float.valueOf(HIRE_GUI_DISPLAY_HEIGHT)
+                });
+            } catch (Exception e) {
+            }
+        }
+    }
+
+    private Method findMethod(Class type, String name, Class[] parameterTypes) {
+        Class current = type;
+        while (current != null && current != Object.class) {
+            try {
+                Method method = current.getDeclaredMethod(name, parameterTypes);
+                method.setAccessible(true);
+                return method;
+            } catch (NoSuchMethodException e) {
+                current = current.getSuperclass();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+        return null;
     }
 
     private void equipMumakilForHire(LOTREntityMumakil mumakil) {
