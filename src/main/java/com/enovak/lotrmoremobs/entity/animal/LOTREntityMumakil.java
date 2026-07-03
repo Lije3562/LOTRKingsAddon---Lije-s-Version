@@ -70,9 +70,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double RIDER_SADDLE_SIDE = 0.0D;
     private static final double RIDER_SADDLE_Y = 16.0D;
 
-    private static final double RIDER_HOWDAH_FORWARD = 9.5D;
+    private static final double RIDER_HOWDAH_FORWARD = 9.8D;
     private static final double RIDER_HOWDAH_SIDE = 0.0D;
-    private static final double RIDER_HOWDAH_Y = 17.0D;
+    private static final double RIDER_HOWDAH_Y = 16.5D;
 
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
     private static final double MAX_HEALTH = 120.0D;
@@ -361,7 +361,18 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
             double verticalOffset = this.getMountedYOffset() + this.riddenByEntity.getYOffset();
 
-            float yawRadians = this.rotationYaw * 3.1415927F / 180.0F;
+            /*
+             * Important:
+             * For howdah riders, use renderYawOffset because that is the yaw used by the
+             * visible Mumakil body/howdah. Using rotationYaw can put the rider beside the
+             * howdah when the body and path-facing yaw disagree.
+             *
+             * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
+             * own look/target logic so his allegiances and aggro can control the mount
+             * normally through LOTR's hired-horse AI.
+             */
+            float placementYaw = hasHowdah ? this.renderYawOffset : this.rotationYaw;
+            float yawRadians = placementYaw * 3.1415927F / 180.0F;
 
             double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
             double forwardZ = MathHelper.cos(yawRadians) * forwardOffset;
@@ -375,9 +386,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     this.posZ + forwardZ + sideZ
             );
 
-            if (hasHowdah) {
-                this.riddenByEntity.rotationYaw = this.rotationYaw;
-                this.riddenByEntity.prevRotationYaw = this.prevRotationYaw;
+            /*
+             * Keep player riding comfortable, but do not force NPC driver rotation.
+             * Forcing the NPC driver's rotation/head yaw was what caused the earlier glitch.
+             */
+            if (hasHowdah && this.riddenByEntity instanceof EntityPlayer) {
+                this.riddenByEntity.rotationYaw = placementYaw;
+                this.riddenByEntity.prevRotationYaw = placementYaw;
             }
         }
     }

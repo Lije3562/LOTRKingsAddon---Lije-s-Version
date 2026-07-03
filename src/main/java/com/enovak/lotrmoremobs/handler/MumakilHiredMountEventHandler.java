@@ -5,12 +5,13 @@ import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
 import java.util.Iterator;
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.EntityLivingBase;
+import lotr.common.entity.npc.LOTREntityNPC;
+import net.minecraft.entity.SharedMonsterAttributes;
+import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
-import net.minecraft.util.MathHelper;
+import net.minecraft.nbt.NBTTagCompound;
 import net.minecraftforge.event.entity.EntityJoinWorldEvent;
 import net.minecraftforge.event.entity.living.LivingEvent.LivingUpdateEvent;
 
@@ -18,9 +19,17 @@ public class MumakilHiredMountEventHandler {
     private static final int SADDLE_SLOT = 0;
     private static final int HOWDAH_SLOT = 1;
 
-    private static final double HOWDAH_RIDER_FORWARD = 9.5D;
-    private static final double HOWDAH_RIDER_SIDE = 0.0D;
-    private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+    private static final float MUMAKIL_MIN_FOLLOW_DIST = 30.0F;
+    private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
+
+    /*
+     * Invasion-style detection range boost.
+     * This only changes the rider's normal NPC followRange.
+     * It does not scan for targets manually.
+     */
+    private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 40.0D;
+    private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
+    private static final String DRIVER_RANGE_BASE_TAG = "LOTRMoreMobsMumakilDriverRangeBase";
 
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
@@ -40,6 +49,7 @@ public class MumakilHiredMountEventHandler {
         }
 
         LOTREntityMumakil mumakil = (LOTREntityMumakil)event.entity;
+
         if (!mumakil.getBelongsToNPC()) {
             return;
         }
@@ -49,20 +59,21 @@ public class MumakilHiredMountEventHandler {
 
     @SubscribeEvent
     public void onLivingUpdate(LivingUpdateEvent event) {
-        if (event == null || !(event.entityLiving instanceof LOTREntityMumakil)) {
+        if (event == null || event.entityLiving == null || event.entityLiving.worldObj == null) {
             return;
         }
 
-        LOTREntityMumakil mumakil = (LOTREntityMumakil)event.entityLiving;
-        if (!mumakil.hasMumakilHowdahEquipped() || mumakil.riddenByEntity == null) {
+        if (event.entityLiving.worldObj.isRemote) {
             return;
         }
 
-        if (!this.isStationaryIdleForHowdahRiderYawLock(mumakil)) {
-            return;
+        /*
+         * Only touch NPCs, and only change their followRange.
+         * No custom target scanning here.
+         */
+        if (event.entityLiving instanceof LOTREntityNPC) {
+            this.updateMumakilDriverRange((LOTREntityNPC)event.entityLiving);
         }
-
-        this.applyHowdahRiderPosition(mumakil, mumakil.renderYawOffset);
     }
 
     private void equipHiredMumakil(LOTREntityMumakil mumakil) {
@@ -71,53 +82,65 @@ public class MumakilHiredMountEventHandler {
         this.setInventoryStack(mumakil, HOWDAH_SLOT, new ItemStack(Main.mumakilHowdah));
         mumakil.setMumakilHowdahEquipped(true);
         this.tuneHiredMumakilFollowDistance(mumakil);
+
         System.out.println("[LOTRMoreMobs] Equipped hired Mumakil with saddle and howdah.");
     }
 
-    private void applyHowdahRiderPosition(LOTREntityMumakil mumakil, float yaw) {
-        Entity rider = mumakil.riddenByEntity;
-        if (rider == null) {
+    private void updateMumakilDriverRange(LOTREntityNPC npc) {
+        if (npc.ridingEntity instanceof LOTREntityMumakil) {
+            LOTREntityMumakil mumakil = (LOTREntityMumakil)npc.ridingEntity;
+
+            if (mumakil.hasMumakilHowdahEquipped()) {
+                this.applyMumakilDriverRange(npc);
+                return;
+            }
+        }
+
+        this.restoreNormalDriverRange(npc);
+    }
+
+    private void applyMumakilDriverRange(LOTREntityNPC npc) {
+        IAttributeInstance followRange = npc.getEntityAttribute(SharedMonsterAttributes.followRange);
+
+        if (followRange == null) {
             return;
         }
 
-        double verticalOffset = mumakil.getMountedYOffset() + rider.getYOffset();
-        float yawRadians = yaw * 3.1415927F / 180.0F;
+        NBTTagCompound data = npc.getEntityData();
 
-        double forwardX = -MathHelper.sin(yawRadians) * HOWDAH_RIDER_FORWARD;
-        double forwardZ = MathHelper.cos(yawRadians) * HOWDAH_RIDER_FORWARD;
+        if (!data.getBoolean(DRIVER_RANGE_APPLIED_TAG)) {
+            double baseRange = followRange.getBaseValue();
+            double newRange = Math.max(baseRange, MUMAKIL_DRIVER_DETECTION_RANGE);
 
-        double sideX = MathHelper.cos(yawRadians) * HOWDAH_RIDER_SIDE;
-        double sideZ = MathHelper.sin(yawRadians) * HOWDAH_RIDER_SIDE;
+            data.setBoolean(DRIVER_RANGE_APPLIED_TAG, true);
+            data.setDouble(DRIVER_RANGE_BASE_TAG, baseRange);
+            followRange.setBaseValue(newRange);
 
-        rider.setPosition(
-                mumakil.posX + forwardX + sideX,
-                mumakil.posY + verticalOffset,
-                mumakil.posZ + forwardZ + sideZ
-        );
-
-        rider.rotationYaw = yaw;
-        rider.prevRotationYaw = yaw;
-
-        if (rider instanceof EntityLivingBase) {
-            EntityLivingBase livingRider = (EntityLivingBase)rider;
-            livingRider.rotationYawHead = yaw;
-            livingRider.prevRotationYawHead = yaw;
-            livingRider.renderYawOffset = yaw;
-            livingRider.prevRenderYawOffset = yaw;
+            System.out.println("[LOTRMoreMobs] Applied Mumakil driver detection range from "
+                    + baseRange
+                    + " to "
+                    + newRange
+                    + ".");
         }
     }
 
-    private boolean isStationaryIdleForHowdahRiderYawLock(LOTREntityMumakil mumakil) {
-        if (mumakil.getAttackTarget() != null
-                || mumakil.isSprinting()
-                || !mumakil.onGround
-                || Math.abs(mumakil.moveForward) > 0.01F
-                || Math.abs(mumakil.moveStrafing) > 0.01F) {
-            return false;
+    private void restoreNormalDriverRange(LOTREntityNPC npc) {
+        NBTTagCompound data = npc.getEntityData();
+
+        if (!data.getBoolean(DRIVER_RANGE_APPLIED_TAG)) {
+            return;
         }
 
-        double horizontalMotionSq = mumakil.motionX * mumakil.motionX + mumakil.motionZ * mumakil.motionZ;
-        return horizontalMotionSq <= IDLE_YAW_MOTION_THRESHOLD_SQ && mumakil.getNavigator().noPath();
+        IAttributeInstance followRange = npc.getEntityAttribute(SharedMonsterAttributes.followRange);
+
+        if (followRange != null) {
+            followRange.setBaseValue(data.getDouble(DRIVER_RANGE_BASE_TAG));
+        }
+
+        data.removeTag(DRIVER_RANGE_APPLIED_TAG);
+        data.removeTag(DRIVER_RANGE_BASE_TAG);
+
+        System.out.println("[LOTRMoreMobs] Restored normal Mumakil driver detection range.");
     }
 
     private void tuneHiredMumakilFollowDistance(LOTREntityMumakil mumakil) {
@@ -127,26 +150,34 @@ public class MumakilHiredMountEventHandler {
 
         boolean tuned = false;
         Iterator iterator = mumakil.tasks.taskEntries.iterator();
+
         while (iterator.hasNext()) {
             Object taskEntry = iterator.next();
             Object aiTask = this.getFieldValue(taskEntry, "action");
+
             if (aiTask == null) {
                 continue;
             }
 
             String aiName = aiTask.getClass().getName();
+
             if (aiName.endsWith("LOTREntityAIHorseFollowHiringPlayer")) {
-                if (this.setFloatField(aiTask, "minFollowDist", 16.0F)) {
+                if (this.setFloatField(aiTask, "minFollowDist", MUMAKIL_MIN_FOLLOW_DIST)) {
                     tuned = true;
                 }
-                if (this.setFloatField(aiTask, "maxNearDist", 12.0F)) {
+
+                if (this.setFloatField(aiTask, "maxNearDist", MUMAKIL_MAX_NEAR_DIST)) {
                     tuned = true;
                 }
             }
         }
 
         if (tuned) {
-            System.out.println("[LOTRMoreMobs] Tuned hired Mumakil follow distance to 16/12 blocks.");
+            System.out.println("[LOTRMoreMobs] Tuned hired Mumakil follow distance to "
+                    + MUMAKIL_MIN_FOLLOW_DIST
+                    + "/"
+                    + MUMAKIL_MAX_NEAR_DIST
+                    + " blocks.");
         }
     }
 
@@ -162,17 +193,20 @@ public class MumakilHiredMountEventHandler {
     private boolean setFloatField(Object object, String name, float value) {
         try {
             Field field = this.findField(object.getClass(), name);
+
             if (field != null) {
                 field.setFloat(object, value);
                 return true;
             }
         } catch (Exception e) {
         }
+
         return false;
     }
 
     private boolean setInventoryStack(LOTREntityMumakil mumakil, int slot, ItemStack stack) {
         IInventory inventory = this.findMountInventory(mumakil);
+
         if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
             System.out.println("[LOTRMoreMobs] Could not set hired Mumakil inventory slot " + slot);
             return false;
@@ -186,9 +220,11 @@ public class MumakilHiredMountEventHandler {
     private IInventory findMountInventory(LOTREntityMumakil mumakil) {
         for (int i = 0; i < INVENTORY_FIELDS.length; ++i) {
             Field field = this.findField(mumakil.getClass(), INVENTORY_FIELDS[i]);
+
             if (field != null) {
                 try {
                     Object value = field.get(mumakil);
+
                     if (value instanceof IInventory) {
                         return (IInventory)value;
                     }
@@ -196,11 +232,13 @@ public class MumakilHiredMountEventHandler {
                 }
             }
         }
+
         return null;
     }
 
     private Field findField(Class type, String name) {
         Class current = type;
+
         while (current != null && current != Object.class) {
             try {
                 Field field = current.getDeclaredField(name);
@@ -212,6 +250,7 @@ public class MumakilHiredMountEventHandler {
                 return null;
             }
         }
+
         return null;
     }
 }
