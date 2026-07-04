@@ -127,7 +127,6 @@ public class LOTREntityAINearestAttackableTargetHighRider extends LOTREntityAINe
     @Override
     public void startExecuting() {
         this.taskOwner.setAttackTarget(this.highRiderTargetEntity);
-        super.startExecuting();
     }
 
     private boolean isRidingHowdahMumakil() {
