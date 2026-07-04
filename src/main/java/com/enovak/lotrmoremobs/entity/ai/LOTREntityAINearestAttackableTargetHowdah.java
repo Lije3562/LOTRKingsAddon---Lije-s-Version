@@ -8,6 +8,7 @@ import net.minecraft.command.IEntitySelector;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.util.AxisAlignedBB;
 
 /**
  * Small howdah-rider target helper.
@@ -16,10 +17,15 @@ import net.minecraft.entity.EntityLivingBase;
  * that method runs the expensive suitability selector on every entity in the box
  * before our candidate cap can help. Instead, it gets a raw list first and caps
  * how many candidates are allowed to reach the expensive LOTR target checks.
+ *
+ * The vertical box is intentionally asymmetric: it searches mostly downward from
+ * the high howdah rider and only slightly upward, because ground enemies are the
+ * problem and there usually should not be valid targets above the Mumakil.
  */
 public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINearestAttackableTargetBasic {
     private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 10.0D;
-    private static final double HOWDAH_VERTICAL_TARGET_RANGE = 20.0D;
+    private static final double HOWDAH_TARGET_RANGE_BELOW = 20.0D;
+    private static final double HOWDAH_TARGET_RANGE_ABOVE = 2.0D;
     private static final int MAX_RAW_ENTITIES_PER_CHECK = 16;
     private static final int MAX_EXPENSIVE_TARGET_CHECKS = 4;
 
@@ -88,14 +94,17 @@ public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINeare
             }
         }
 
-        List list = this.taskOwner.worldObj.getEntitiesWithinAABB(
-                this.targetClassHowdah,
-                this.taskOwner.boundingBox.expand(
-                        HOWDAH_HORIZONTAL_TARGET_RANGE,
-                        HOWDAH_VERTICAL_TARGET_RANGE,
-                        HOWDAH_HORIZONTAL_TARGET_RANGE
-                )
+        AxisAlignedBB riderBox = this.taskOwner.boundingBox;
+        AxisAlignedBB searchBox = AxisAlignedBB.getBoundingBox(
+                riderBox.minX - HOWDAH_HORIZONTAL_TARGET_RANGE,
+                riderBox.minY - HOWDAH_TARGET_RANGE_BELOW,
+                riderBox.minZ - HOWDAH_HORIZONTAL_TARGET_RANGE,
+                riderBox.maxX + HOWDAH_HORIZONTAL_TARGET_RANGE,
+                riderBox.maxY + HOWDAH_TARGET_RANGE_ABOVE,
+                riderBox.maxZ + HOWDAH_HORIZONTAL_TARGET_RANGE
         );
+
+        List list = this.taskOwner.worldObj.getEntitiesWithinAABB(this.targetClassHowdah, searchBox);
 
         EntityLivingBase closest = null;
         double closestDistance = Double.MAX_VALUE;
