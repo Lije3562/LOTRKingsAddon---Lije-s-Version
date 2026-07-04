@@ -185,13 +185,13 @@ public class MumakilHiredMountEventHandler {
                 npc,
                 EntityPlayer.class,
                 MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE,
-                true
+                false
         ));
         npc.targetTasks.addTask(4, new LOTREntityAINearestAttackableTargetHowdah(
                 npc,
                 EntityLiving.class,
                 MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE,
-                true,
+                false,
                 new LOTRNPCTargetSelector(npc)
         ));
 
