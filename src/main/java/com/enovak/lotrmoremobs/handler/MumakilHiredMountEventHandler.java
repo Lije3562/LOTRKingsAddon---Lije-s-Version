@@ -1,11 +1,15 @@
 package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.entity.ai.LOTREntityAIMumakilHowdahRiderTarget;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
 import java.util.Iterator;
+import lotr.common.LOTRMod;
 import lotr.common.entity.npc.LOTREntityNPC;
+import net.minecraft.entity.EntityCreature;
+import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.init.Items;
@@ -25,7 +29,6 @@ public class MumakilHiredMountEventHandler {
     /*
      * Invasion-style detection range boost.
      * This only changes the rider's normal NPC followRange.
-     * It does not scan for targets manually.
      */
     private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 40.0D;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
@@ -68,11 +71,15 @@ public class MumakilHiredMountEventHandler {
         }
 
         /*
-         * Only touch NPCs, and only change their followRange.
-         * No custom target scanning here.
+         * Only touch NPCs.
+         * For normal NPCs, this method just exits or restores a previously boosted range.
+         * For a Southron driver riding a howdah Mumakil, it:
+         * - boosts followRange
+         * - installs one rider-only target assist AI
+         * - mirrors the rider's valid target onto the Mumakil so inherited horse AI/combat can react
          */
         if (event.entityLiving instanceof LOTREntityNPC) {
-            this.updateMumakilDriverRange((LOTREntityNPC)event.entityLiving);
+            this.updateMumakilDriverSupport((LOTREntityNPC)event.entityLiving);
         }
     }
 
@@ -86,12 +93,14 @@ public class MumakilHiredMountEventHandler {
         System.out.println("[LOTRMoreMobs] Equipped hired Mumakil with saddle and howdah.");
     }
 
-    private void updateMumakilDriverRange(LOTREntityNPC npc) {
+    private void updateMumakilDriverSupport(LOTREntityNPC npc) {
         if (npc.ridingEntity instanceof LOTREntityMumakil) {
             LOTREntityMumakil mumakil = (LOTREntityMumakil)npc.ridingEntity;
 
             if (mumakil.hasMumakilHowdahEquipped()) {
                 this.applyMumakilDriverRange(npc);
+                this.ensureMumakilDriverTargetAI(npc);
+                this.syncMumakilTargetToDriver(npc, mumakil);
                 return;
             }
         }
@@ -141,6 +150,56 @@ public class MumakilHiredMountEventHandler {
         data.removeTag(DRIVER_RANGE_BASE_TAG);
 
         System.out.println("[LOTRMoreMobs] Restored normal Mumakil driver detection range.");
+    }
+
+    private void ensureMumakilDriverTargetAI(LOTREntityNPC npc) {
+        if (npc.targetTasks == null || npc.targetTasks.taskEntries == null) {
+            return;
+        }
+
+        Iterator iterator = npc.targetTasks.taskEntries.iterator();
+
+        while (iterator.hasNext()) {
+            Object taskEntry = iterator.next();
+            Object aiTask = this.getFieldValue(taskEntry, "action");
+
+            if (aiTask instanceof LOTREntityAIMumakilHowdahRiderTarget) {
+                return;
+            }
+        }
+
+        npc.targetTasks.addTask(1, new LOTREntityAIMumakilHowdahRiderTarget(npc));
+        System.out.println("[LOTRMoreMobs] Installed Mumakil howdah rider target assist AI on "
+                + npc.getClass().getName()
+                + ".");
+    }
+
+    private void syncMumakilTargetToDriver(LOTREntityNPC npc, LOTREntityMumakil mumakil) {
+        EntityLivingBase riderTarget = npc.getAttackTarget();
+
+        if (riderTarget != null && riderTarget.isEntityAlive() && this.canDriverAttackTarget(npc, riderTarget)) {
+            if (mumakil.getAttackTarget() != riderTarget) {
+                mumakil.setAttackTarget(riderTarget);
+            }
+            return;
+        }
+
+        EntityLivingBase mumakilTarget = mumakil.getAttackTarget();
+        if (mumakilTarget != null && (!mumakilTarget.isEntityAlive() || mumakilTarget == npc)) {
+            mumakil.setAttackTarget(null);
+        }
+    }
+
+    private boolean canDriverAttackTarget(LOTREntityNPC npc, EntityLivingBase target) {
+        if (target == null || target == npc || !target.isEntityAlive()) {
+            return false;
+        }
+
+        if (!(npc instanceof EntityCreature)) {
+            return false;
+        }
+
+        return LOTRMod.canNPCAttackEntity((EntityCreature)npc, target, false);
     }
 
     private void tuneHiredMumakilFollowDistance(LOTREntityMumakil mumakil) {
