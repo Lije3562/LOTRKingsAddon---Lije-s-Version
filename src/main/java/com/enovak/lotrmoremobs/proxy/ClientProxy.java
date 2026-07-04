@@ -4,12 +4,9 @@ import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilGeoInventoryScaled;
-import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilHowdahArcher;
 import cpw.mods.fml.client.registry.RenderingRegistry;
 import cpw.mods.fml.common.FMLCommonHandler;
-import lotr.common.entity.npc.LOTREntityNearHaradrimArcher;
-import net.minecraft.client.renderer.entity.Render;
-import net.minecraft.client.renderer.entity.RenderManager;
+import lotr.client.render.entity.LOTRRenderNearHaradrim;
 import net.minecraftforge.common.MinecraftForge;
 import software.bernie.geckolib3.GeckoLib;
 
@@ -33,20 +30,10 @@ public class ClientProxy extends CommonProxy {
     }
 
     private void registerHowdahArcherRenderer() {
-        Render render = (Render)RenderManager.instance.entityRenderMap.get(LOTREntityNearHaradrimArcher.class);
-
-        if (render != null) {
-            RenderingRegistry.registerEntityRenderingHandler(
-                    LOTREntityMumakilHowdahArcher.class,
-                    render
-            );
-            System.out.println("[LOTRMoreMobs] Registered Mumakil howdah archer renderer from Near Haradrim archer renderer.");
-        } else {
-            RenderingRegistry.registerEntityRenderingHandler(
-                    LOTREntityMumakilHowdahArcher.class,
-                    new LOTRRenderMumakilHowdahArcher()
-            );
-            System.out.println("[LOTRMoreMobs] Registered fallback Mumakil howdah archer renderer.");
-        }
+        RenderingRegistry.registerEntityRenderingHandler(
+                LOTREntityMumakilHowdahArcher.class,
+                new LOTRRenderNearHaradrim()
+        );
+        System.out.println("[LOTRMoreMobs] Registered Mumakil howdah archer renderer as LOTR Near Haradrim renderer.");
     }
 }
