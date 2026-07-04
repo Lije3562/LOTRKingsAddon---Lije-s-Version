@@ -18,14 +18,14 @@ import net.minecraft.util.AxisAlignedBB;
  * before our candidate cap can help. Instead, it gets a raw list first and caps
  * how many candidates are allowed to reach the expensive LOTR target checks.
  *
- * The vertical box is intentionally asymmetric: it searches mostly downward from
- * the high howdah rider and only slightly upward, because ground enemies are the
- * problem and there usually should not be valid targets above the Mumakil.
+ * The search is anchored to the Mumakil body instead of the rider body. The rider
+ * sits high and forward in the howdah, so a small rider-centered box can miss
+ * targets at the Mumakil's side or rear feet.
  */
 public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINearestAttackableTargetBasic {
-    private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 10.0D;
-    private static final double HOWDAH_TARGET_RANGE_BELOW = 20.0D;
-    private static final double HOWDAH_TARGET_RANGE_ABOVE = 2.0D;
+    private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 8.0D;
+    private static final double HOWDAH_TARGET_RANGE_ABOVE_RIDER = 2.0D;
+    private static final double HOWDAH_TARGET_RANGE_BELOW_MUMAKIL = 1.0D;
     private static final int MAX_RAW_ENTITIES_PER_CHECK = 16;
     private static final int MAX_EXPENSIVE_TARGET_CHECKS = 4;
 
@@ -71,7 +71,8 @@ public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINeare
 
     @Override
     public boolean shouldExecute() {
-        if (!this.isRidingHowdahMumakil()) {
+        LOTREntityMumakil mumakil = this.getRiddenHowdahMumakil();
+        if (mumakil == null) {
             return false;
         }
 
@@ -94,14 +95,15 @@ public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINeare
             }
         }
 
+        AxisAlignedBB mumakilBox = mumakil.boundingBox;
         AxisAlignedBB riderBox = this.taskOwner.boundingBox;
         AxisAlignedBB searchBox = AxisAlignedBB.getBoundingBox(
-                riderBox.minX - HOWDAH_HORIZONTAL_TARGET_RANGE,
-                riderBox.minY - HOWDAH_TARGET_RANGE_BELOW,
-                riderBox.minZ - HOWDAH_HORIZONTAL_TARGET_RANGE,
-                riderBox.maxX + HOWDAH_HORIZONTAL_TARGET_RANGE,
-                riderBox.maxY + HOWDAH_TARGET_RANGE_ABOVE,
-                riderBox.maxZ + HOWDAH_HORIZONTAL_TARGET_RANGE
+                mumakilBox.minX - HOWDAH_HORIZONTAL_TARGET_RANGE,
+                mumakilBox.minY - HOWDAH_TARGET_RANGE_BELOW_MUMAKIL,
+                mumakilBox.minZ - HOWDAH_HORIZONTAL_TARGET_RANGE,
+                mumakilBox.maxX + HOWDAH_HORIZONTAL_TARGET_RANGE,
+                riderBox.maxY + HOWDAH_TARGET_RANGE_ABOVE_RIDER,
+                mumakilBox.maxZ + HOWDAH_HORIZONTAL_TARGET_RANGE
         );
 
         List list = this.taskOwner.worldObj.getEntitiesWithinAABB(this.targetClassHowdah, searchBox);
@@ -153,12 +155,12 @@ public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINeare
         this.taskOwner.setAttackTarget(this.targetEntityHowdah);
     }
 
-    private boolean isRidingHowdahMumakil() {
+    private LOTREntityMumakil getRiddenHowdahMumakil() {
         if (!(this.taskOwner.ridingEntity instanceof LOTREntityMumakil)) {
-            return false;
+            return null;
         }
 
         LOTREntityMumakil mumakil = (LOTREntityMumakil)this.taskOwner.ridingEntity;
-        return mumakil.hasMumakilHowdahEquipped();
+        return mumakil.hasMumakilHowdahEquipped() ? mumakil : null;
     }
 }
