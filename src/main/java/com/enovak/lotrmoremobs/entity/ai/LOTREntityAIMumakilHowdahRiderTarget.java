@@ -6,26 +6,24 @@ import lotr.common.LOTRMod;
 import lotr.common.entity.npc.LOTREntityNPC;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLivingBase;
-import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
-import net.minecraft.entity.ai.attributes.IAttributeInstance;
+import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.AxisAlignedBB;
 
 /**
  * Lightweight Mumakil-specific target assist for a howdah driver.
  *
- * Vanilla/LOTR nearest-target AI is centered on the rider's own bounding box.
- * On a Mumakil, the driver is high in the howdah, so enemies near the feet can
- * fall outside the rider's normal vertical search area even when followRange is
- * boosted. This AI keeps the normal LOTR faction/allegiance check, but searches
- * from the Mumakil body box instead of from the rider's high position.
+ * This is deliberately conservative. The normal LOTR target AI still gets first
+ * chance. Only when the rider has no target, this AI occasionally checks a small
+ * area around the Mumakil's lower/body box so enemies at the feet are not missed
+ * purely because the rider is high in the howdah.
  */
 public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
-    private static final int TARGET_CHECK_INTERVAL = 10;
-    private static final double DEFAULT_TARGET_RANGE = 40.0D;
-    private static final double NEAR_FOOT_VISIBILITY_BYPASS_RANGE = 16.0D;
-    private static final double SEARCH_VERTICAL_EXPANSION = 4.0D;
+    private static final int TARGET_CHECK_INTERVAL = 40;
+    private static final double NEAR_FOOT_TARGET_RANGE = 18.0D;
+    private static final double SEARCH_VERTICAL_EXPANSION = 2.0D;
+    private static final int MAX_CANDIDATES_PER_SCAN = 24;
 
     private final LOTREntityNPC rider;
     private EntityLivingBase targetEntity;
@@ -46,7 +44,7 @@ public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
             return false;
         }
 
-        if (this.rider.ticksExisted % TARGET_CHECK_INTERVAL != 0) {
+        if ((this.rider.ticksExisted + this.rider.getEntityId()) % TARGET_CHECK_INTERVAL != 0) {
             return false;
         }
 
@@ -88,22 +86,35 @@ public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
     }
 
     private EntityLivingBase findBestTarget(LOTREntityMumakil mumakil) {
-        double range = this.getTargetRange();
-        AxisAlignedBB searchBox = mumakil.boundingBox.expand(range, SEARCH_VERTICAL_EXPANSION, range);
+        AxisAlignedBB searchBox = mumakil.boundingBox.expand(
+                NEAR_FOOT_TARGET_RANGE,
+                SEARCH_VERTICAL_EXPANSION,
+                NEAR_FOOT_TARGET_RANGE
+        );
         List list = this.rider.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, searchBox);
 
         EntityLivingBase bestTarget = null;
+        int bestPriority = Integer.MAX_VALUE;
         double bestDistanceSq = Double.MAX_VALUE;
+        int checked = 0;
 
         for (int i = 0; i < list.size(); ++i) {
+            if (checked >= MAX_CANDIDATES_PER_SCAN) {
+                break;
+            }
+
             EntityLivingBase candidate = (EntityLivingBase)list.get(i);
             if (!this.isValidTarget(mumakil, candidate)) {
                 continue;
             }
 
+            ++checked;
+            int priority = this.getTargetPriority(candidate);
             double distanceSq = mumakil.getDistanceSqToEntity(candidate);
-            if (distanceSq < bestDistanceSq) {
+
+            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
                 bestTarget = candidate;
+                bestPriority = priority;
                 bestDistanceSq = distanceSq;
             }
         }
@@ -111,13 +122,16 @@ public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
         return bestTarget;
     }
 
-    private double getTargetRange() {
-        IAttributeInstance followRange = this.rider.getEntityAttribute(SharedMonsterAttributes.followRange);
-        if (followRange != null) {
-            return Math.max(DEFAULT_TARGET_RANGE, followRange.getAttributeValue());
+    private int getTargetPriority(EntityLivingBase target) {
+        if (target instanceof IMob) {
+            return 0;
         }
 
-        return DEFAULT_TARGET_RANGE;
+        if (target instanceof LOTREntityNPC) {
+            return 1;
+        }
+
+        return 2;
     }
 
     private boolean isValidTarget(LOTREntityMumakil mumakil, EntityLivingBase target) {
@@ -137,15 +151,6 @@ public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
             return false;
         }
 
-        return this.hasUsefulVisibility(mumakil, target);
-    }
-
-    private boolean hasUsefulVisibility(LOTREntityMumakil mumakil, EntityLivingBase target) {
-        double closeRangeSq = NEAR_FOOT_VISIBILITY_BYPASS_RANGE * NEAR_FOOT_VISIBILITY_BYPASS_RANGE;
-        if (mumakil.getDistanceSqToEntity(target) <= closeRangeSq) {
-            return true;
-        }
-
-        return this.rider.canEntityBeSeen(target) || mumakil.canEntityBeSeen(target);
+        return mumakil.canEntityBeSeen(target) || this.rider.canEntityBeSeen(target);
     }
 }
