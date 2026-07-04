@@ -6,6 +6,7 @@ import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
 import java.util.Iterator;
+import java.util.List;
 import lotr.common.LOTRMod;
 import lotr.common.entity.ai.LOTRNPCTargetSelector;
 import lotr.common.entity.npc.LOTREntityNPC;
@@ -20,6 +21,7 @@ import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.util.AxisAlignedBB;
 import net.minecraftforge.event.entity.EntityJoinWorldEvent;
 import net.minecraftforge.event.entity.living.LivingAttackEvent;
 import net.minecraftforge.event.entity.living.LivingEvent.LivingUpdateEvent;
@@ -40,6 +42,17 @@ public class MumakilHiredMountEventHandler {
     private static final int MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE = 80;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
     private static final String DRIVER_RANGE_BASE_TAG = "LOTRMoreMobsMumakilDriverRangeBase";
+
+    /*
+     * Rider target AI has proven unreliable from the high howdah position. This
+     * tiny Mumakil-side relay checks the feet/body area directly and then gives
+     * any legal target to both the Southron driver and the Mumakil.
+     */
+    private static final int MUMAKIL_FOOT_TARGET_RELAY_INTERVAL = 20;
+    private static final double MUMAKIL_FOOT_TARGET_HORIZONTAL_RANGE = 4.0D;
+    private static final double MUMAKIL_FOOT_TARGET_BELOW = 1.0D;
+    private static final double MUMAKIL_FOOT_TARGET_HEIGHT = 5.0D;
+    private static final int MUMAKIL_FOOT_TARGET_MAX_CANDIDATES = 8;
 
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
@@ -78,11 +91,14 @@ public class MumakilHiredMountEventHandler {
         }
 
         /*
-         * Only Mumakil drivers get real work. Other NPCs only perform a cheap tag
-         * check so previously boosted riders can be restored if they dismount.
+         * Only Mumakil drivers get real rider-side work. The Mumakil itself also
+         * runs a very small foot-level target relay for enemies the rider cannot
+         * see from the high howdah position.
          */
         if (event.entityLiving instanceof LOTREntityNPC) {
             this.updateMumakilDriverSupport((LOTREntityNPC)event.entityLiving);
+        } else if (event.entityLiving instanceof LOTREntityMumakil) {
+            this.updateMumakilFootTargetRelay((LOTREntityMumakil)event.entityLiving);
         }
     }
 
@@ -136,6 +152,93 @@ public class MumakilHiredMountEventHandler {
         this.applyMumakilDriverRange(npc);
         this.ensureMumakilDriverHowdahTargetAI(npc);
         this.syncMumakilAndDriverTargets(npc, mumakil);
+    }
+
+    private void updateMumakilFootTargetRelay(LOTREntityMumakil mumakil) {
+        if (!mumakil.hasMumakilHowdahEquipped()) {
+            return;
+        }
+
+        LOTREntityNPC driver = this.getMumakilDriver(mumakil);
+
+        if (driver == null) {
+            return;
+        }
+
+        this.syncMumakilAndDriverTargets(driver, mumakil);
+
+        EntityLivingBase currentTarget = mumakil.getAttackTarget();
+
+        if (currentTarget != null && currentTarget.isEntityAlive()) {
+            return;
+        }
+
+        long worldTime = mumakil.worldObj.getTotalWorldTime();
+
+        if ((worldTime + mumakil.getEntityId()) % MUMAKIL_FOOT_TARGET_RELAY_INTERVAL != 0L) {
+            return;
+        }
+
+        EntityLivingBase footTarget = this.findMumakilFootTarget(mumakil, driver);
+
+        if (footTarget != null) {
+            this.shareMumakilTargetWithDriver(mumakil, driver, footTarget);
+            System.out.println("[LOTRMoreMobs] Relayed Mumakil foot target to driver: mumakilId="
+                    + mumakil.getEntityId()
+                    + " driver="
+                    + driver.getClass().getName()
+                    + " target="
+                    + footTarget.getClass().getName()
+                    + " targetId="
+                    + footTarget.getEntityId()
+                    + ".");
+        }
+    }
+
+    private EntityLivingBase findMumakilFootTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver) {
+        AxisAlignedBB box = mumakil.boundingBox;
+        AxisAlignedBB searchBox = AxisAlignedBB.getBoundingBox(
+                box.minX - MUMAKIL_FOOT_TARGET_HORIZONTAL_RANGE,
+                box.minY - MUMAKIL_FOOT_TARGET_BELOW,
+                box.minZ - MUMAKIL_FOOT_TARGET_HORIZONTAL_RANGE,
+                box.maxX + MUMAKIL_FOOT_TARGET_HORIZONTAL_RANGE,
+                box.minY + MUMAKIL_FOOT_TARGET_HEIGHT,
+                box.maxZ + MUMAKIL_FOOT_TARGET_HORIZONTAL_RANGE
+        );
+
+        List list = mumakil.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, searchBox);
+        EntityLivingBase closest = null;
+        double closestDistance = Double.MAX_VALUE;
+        int checked = 0;
+
+        for (int i = 0; i < list.size() && checked < MUMAKIL_FOOT_TARGET_MAX_CANDIDATES; ++i) {
+            Object value = list.get(i);
+
+            if (!(value instanceof EntityLivingBase)) {
+                continue;
+            }
+
+            EntityLivingBase candidate = (EntityLivingBase)value;
+
+            if (candidate == mumakil || candidate == driver || candidate == driver.ridingEntity || !candidate.isEntityAlive()) {
+                continue;
+            }
+
+            ++checked;
+
+            if (!this.canDriverAttackTarget(driver, candidate)) {
+                continue;
+            }
+
+            double distance = mumakil.getDistanceSqToEntity(candidate);
+
+            if (distance < closestDistance) {
+                closest = candidate;
+                closestDistance = distance;
+            }
+        }
+
+        return closest;
     }
 
     private void applyMumakilDriverRange(LOTREntityNPC npc) {
