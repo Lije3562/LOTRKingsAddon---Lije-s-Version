@@ -24,6 +24,7 @@ import net.minecraftforge.event.entity.living.LivingEvent;
  * howdah offsets each tick.
  */
 public class MumakilHowdahArcherEventHandler {
+    private static final String MUMAKIL_ARCHER_CARRIER_KEY = "LOTRMoreMobsHiredHowdahArcherCarrier";
     private static final String MUMAKIL_ARCHERS_SPAWNED_KEY = "LOTRMoreMobsHowdahArchersSpawned";
     private static final String ARCHER_TAG_KEY = "LOTRMoreMobsHowdahArcher";
     private static final String ARCHER_SLOT_KEY = "LOTRMoreMobsHowdahArcherSlot";
@@ -32,6 +33,7 @@ public class MumakilHowdahArcherEventHandler {
 
     private static final String[] SOUTHON_ARCHER_CLASS_NAMES = new String[] {
             "lotr.common.entity.npc.LOTREntitySouthronArcher",
+            "lotr.common.entity.npc.LOTREntityNearHaradrimArcher",
             "lotr.common.entity.npc.LOTREntityNearHaradArcher",
             "lotr.common.entity.npc.LOTREntityHaradrimArcher"
     };
@@ -39,15 +41,44 @@ public class MumakilHowdahArcherEventHandler {
     /**
      * Each row is: forward offset, side offset, vertical offset, yaw offset.
      * Forward = toward Mumakil head. Side = positive to Mumakil right.
+     *
+     * There are 15 slots, arranged around the howdah edges while leaving the
+     * central driver lane mostly open for the existing Southron Champion rider.
      */
     private static final double[][] HOWDAH_ARCHER_OFFSETS = new double[][] {
-            { 6.2D, -2.7D, 16.75D,   0.0D },
-            { 6.2D,  2.7D, 16.75D,   0.0D },
-            {13.1D, -2.7D, 16.75D, 180.0D },
-            {13.1D,  2.7D, 16.75D, 180.0D }
+            { 5.7D, -2.9D, 16.75D,   0.0D },
+            { 5.7D,  0.0D, 16.75D,   0.0D },
+            { 5.7D,  2.9D, 16.75D,   0.0D },
+
+            { 7.6D, -3.1D, 16.75D, -25.0D },
+            { 7.6D,  0.0D, 16.75D,   0.0D },
+            { 7.6D,  3.1D, 16.75D,  25.0D },
+
+            { 9.7D, -3.4D, 16.75D, -90.0D },
+            { 9.7D, -1.7D, 16.75D, -45.0D },
+            { 9.7D,  1.7D, 16.75D,  45.0D },
+            { 9.7D,  3.4D, 16.75D,  90.0D },
+
+            {11.8D, -3.1D, 16.75D, 205.0D },
+            {11.8D,  0.0D, 16.75D, 180.0D },
+            {11.8D,  3.1D, 16.75D, 155.0D },
+
+            {13.7D, -2.9D, 16.75D, 180.0D },
+            {13.7D,  2.9D, 16.75D, 180.0D }
     };
 
-    private boolean loggedMissingArcherClass;
+    private static boolean loggedMissingArcherClass;
+    private static boolean loggedResolvedArcherClass;
+
+    public static void markHiredHowdahArcherCarrier(LOTREntityMumakil mumakil) {
+        if (mumakil == null || mumakil.worldObj == null || mumakil.worldObj.isRemote) {
+            return;
+        }
+
+        NBTTagCompound data = mumakil.getEntityData();
+        data.setBoolean(MUMAKIL_ARCHER_CARRIER_KEY, true);
+        data.setBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY, false);
+    }
 
     @SubscribeEvent
     public void onEntityJoinWorld(EntityJoinWorldEvent event) {
@@ -55,8 +86,8 @@ public class MumakilHowdahArcherEventHandler {
             return;
         }
 
-        if (this.isTaggedHowdahArcher(event.entity) && event.entity instanceof EntityLiving) {
-            this.makeArcherPassive((EntityLiving)event.entity);
+        if (isTaggedHowdahArcher(event.entity) && event.entity instanceof EntityLiving) {
+            makeArcherPassive((EntityLiving)event.entity);
         }
     }
 
@@ -69,21 +100,26 @@ public class MumakilHowdahArcherEventHandler {
         EntityLivingBase living = event.entityLiving;
 
         if (living instanceof LOTREntityMumakil) {
-            this.updateHiredMumakilArchers((LOTREntityMumakil)living);
+            updateHiredMumakilArchers((LOTREntityMumakil)living);
             return;
         }
 
-        if (living instanceof EntityLiving && this.isTaggedHowdahArcher(living)) {
-            this.updateTaggedArcher((EntityLiving)living);
+        if (living instanceof EntityLiving && isTaggedHowdahArcher(living)) {
+            updateTaggedArcher((EntityLiving)living);
         }
     }
 
-    private void updateHiredMumakilArchers(LOTREntityMumakil mumakil) {
+    private static void updateHiredMumakilArchers(LOTREntityMumakil mumakil) {
+        NBTTagCompound data = mumakil.getEntityData();
+
+        if (!data.getBoolean(MUMAKIL_ARCHER_CARRIER_KEY)) {
+            return;
+        }
+
         if (!mumakil.getBelongsToNPC() || !mumakil.hasMumakilHowdahEquipped()) {
             return;
         }
 
-        NBTTagCompound data = mumakil.getEntityData();
         if (data.getBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY)) {
             return;
         }
@@ -97,25 +133,29 @@ public class MumakilHowdahArcherEventHandler {
             return;
         }
 
-        data.setBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY, true);
-        this.spawnPassiveHowdahArchers(mumakil);
+        int spawned = spawnPassiveHowdahArchers(mumakil);
+        if (spawned > 0) {
+            data.setBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY, true);
+        }
     }
 
-    private void spawnPassiveHowdahArchers(LOTREntityMumakil mumakil) {
+    private static int spawnPassiveHowdahArchers(LOTREntityMumakil mumakil) {
         World world = mumakil.worldObj;
-        String mountUuid = this.getEntityPersistentIdString(mumakil);
+        String mountUuid = getEntityPersistentIdString(mumakil);
         int spawned = 0;
 
+        System.out.println("[LOTRMoreMobs] Attempting to spawn " + HOWDAH_ARCHER_OFFSETS.length + " passive Mumakil howdah archers.");
+
         for (int slot = 0; slot < HOWDAH_ARCHER_OFFSETS.length; ++slot) {
-            EntityLiving archer = this.createSouthronArcher(world);
+            EntityLiving archer = createSouthronArcher(world);
             if (archer == null) {
-                return;
+                break;
             }
 
             archer.onSpawnWithEgg(null);
-            this.tagArcher(archer, mumakil, mountUuid, slot);
-            this.makeArcherPassive(archer);
-            this.placeArcherOnHowdah(archer, mumakil, slot);
+            tagArcher(archer, mumakil, mountUuid, slot);
+            makeArcherPassive(archer);
+            placeArcherOnHowdah(archer, mumakil, slot);
 
             if (world.spawnEntityInWorld(archer)) {
                 ++spawned;
@@ -123,9 +163,10 @@ public class MumakilHowdahArcherEventHandler {
         }
 
         System.out.println("[LOTRMoreMobs] Spawned " + spawned + " passive Mumakil howdah archers.");
+        return spawned;
     }
 
-    private EntityLiving createSouthronArcher(World world) {
+    private static EntityLiving createSouthronArcher(World world) {
         for (int i = 0; i < SOUTHON_ARCHER_CLASS_NAMES.length; ++i) {
             try {
                 Class archerClass = Class.forName(SOUTHON_ARCHER_CLASS_NAMES[i]);
@@ -133,21 +174,27 @@ public class MumakilHowdahArcherEventHandler {
                 Object created = constructor.newInstance(new Object[] { world });
 
                 if (created instanceof EntityLiving) {
+                    if (!loggedResolvedArcherClass) {
+                        loggedResolvedArcherClass = true;
+                        System.out.println("[LOTRMoreMobs] Using howdah archer class: " + SOUTHON_ARCHER_CLASS_NAMES[i]);
+                    }
+
                     return (EntityLiving)created;
                 }
             } catch (Exception e) {
             }
         }
 
-        if (!this.loggedMissingArcherClass) {
-            this.loggedMissingArcherClass = true;
+        if (!loggedMissingArcherClass) {
+            loggedMissingArcherClass = true;
             System.out.println("[LOTRMoreMobs] Could not find a Southron archer entity class for passive Mumakil howdah archers.");
+            System.out.println("[LOTRMoreMobs] Tried: LOTREntitySouthronArcher, LOTREntityNearHaradrimArcher, LOTREntityNearHaradArcher, LOTREntityHaradrimArcher");
         }
 
         return null;
     }
 
-    private void tagArcher(EntityLiving archer, LOTREntityMumakil mumakil, String mountUuid, int slot) {
+    private static void tagArcher(EntityLiving archer, LOTREntityMumakil mumakil, String mountUuid, int slot) {
         NBTTagCompound data = archer.getEntityData();
         data.setBoolean(ARCHER_TAG_KEY, true);
         data.setInteger(ARCHER_SLOT_KEY, slot);
@@ -155,12 +202,12 @@ public class MumakilHowdahArcherEventHandler {
         data.setString(ARCHER_MOUNT_UUID_KEY, mountUuid);
     }
 
-    private void updateTaggedArcher(EntityLiving archer) {
+    private static void updateTaggedArcher(EntityLiving archer) {
         NBTTagCompound data = archer.getEntityData();
-        LOTREntityMumakil mumakil = this.findMountForArcher(archer, data);
+        LOTREntityMumakil mumakil = findMountForArcher(archer, data);
 
         if (mumakil == null || !mumakil.isEntityAlive() || !mumakil.hasMumakilHowdahEquipped()) {
-            this.makeArcherPassive(archer);
+            makeArcherPassive(archer);
 
             /*
              * If the mount is not loaded yet during chunk-load ordering, give it
@@ -176,11 +223,11 @@ public class MumakilHowdahArcherEventHandler {
         int slot = MathHelper.clamp_int(data.getInteger(ARCHER_SLOT_KEY), 0, HOWDAH_ARCHER_OFFSETS.length - 1);
         data.setInteger(ARCHER_MOUNT_ID_KEY, mumakil.getEntityId());
 
-        this.makeArcherPassive(archer);
-        this.placeArcherOnHowdah(archer, mumakil, slot);
+        makeArcherPassive(archer);
+        placeArcherOnHowdah(archer, mumakil, slot);
     }
 
-    private LOTREntityMumakil findMountForArcher(EntityLiving archer, NBTTagCompound data) {
+    private static LOTREntityMumakil findMountForArcher(EntityLiving archer, NBTTagCompound data) {
         int mountId = data.getInteger(ARCHER_MOUNT_ID_KEY);
         Entity byId = mountId > 0 ? archer.worldObj.getEntityByID(mountId) : null;
 
@@ -202,7 +249,7 @@ public class MumakilHowdahArcherEventHandler {
             Object object = loaded.get(i);
             if (object instanceof LOTREntityMumakil) {
                 LOTREntityMumakil candidate = (LOTREntityMumakil)object;
-                if (mountUuid.equals(this.getEntityPersistentIdString(candidate))) {
+                if (mountUuid.equals(getEntityPersistentIdString(candidate))) {
                     return candidate;
                 }
             }
@@ -211,7 +258,7 @@ public class MumakilHowdahArcherEventHandler {
         return null;
     }
 
-    private void placeArcherOnHowdah(EntityLiving archer, LOTREntityMumakil mumakil, int slot) {
+    private static void placeArcherOnHowdah(EntityLiving archer, LOTREntityMumakil mumakil, int slot) {
         double[] offset = HOWDAH_ARCHER_OFFSETS[slot];
         double forwardOffset = offset[0];
         double sideOffset = offset[1];
@@ -249,7 +296,7 @@ public class MumakilHowdahArcherEventHandler {
         archer.prevRotationYawHead = archerYaw;
     }
 
-    private void makeArcherPassive(EntityLiving archer) {
+    private static void makeArcherPassive(EntityLiving archer) {
         if (archer.tasks != null && archer.tasks.taskEntries != null) {
             archer.tasks.taskEntries.clear();
         }
@@ -273,22 +320,22 @@ public class MumakilHowdahArcherEventHandler {
         archer.motionZ = 0.0D;
         archer.fallDistance = 0.0F;
         archer.onGround = true;
-        this.invokeNoArgMethod(archer, "enablePersistence", "func_110163_bv");
+        invokeNoArgMethod(archer, "enablePersistence", "func_110163_bv");
     }
 
-    private boolean isTaggedHowdahArcher(Entity entity) {
+    private static boolean isTaggedHowdahArcher(Entity entity) {
         return entity != null && entity.getEntityData().getBoolean(ARCHER_TAG_KEY);
     }
 
-    private String getEntityPersistentIdString(Entity entity) {
-        Object id = this.invokeNoArgMethod(entity, "getPersistentID", "getUniqueID", "func_110124_au");
+    private static String getEntityPersistentIdString(Entity entity) {
+        Object id = invokeNoArgMethod(entity, "getPersistentID", "getUniqueID", "func_110124_au");
         return id == null ? "" : id.toString();
     }
 
-    private Object invokeNoArgMethod(Object target, String... methodNames) {
+    private static Object invokeNoArgMethod(Object target, String... methodNames) {
         for (int i = 0; i < methodNames.length; ++i) {
             try {
-                Method method = this.findNoArgMethod(target.getClass(), methodNames[i]);
+                Method method = findNoArgMethod(target.getClass(), methodNames[i]);
                 if (method != null) {
                     return method.invoke(target, new Object[0]);
                 }
@@ -299,7 +346,7 @@ public class MumakilHowdahArcherEventHandler {
         return null;
     }
 
-    private Method findNoArgMethod(Class type, String name) {
+    private static Method findNoArgMethod(Class type, String name) {
         Class current = type;
         while (current != null && current != Object.class) {
             try {
