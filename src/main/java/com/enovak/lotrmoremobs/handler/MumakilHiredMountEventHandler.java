@@ -11,6 +11,8 @@ import lotr.common.entity.npc.LOTREntityNPC;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.SharedMonsterAttributes;
+import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -23,7 +25,14 @@ public class MumakilHiredMountEventHandler {
 
     private static final float MUMAKIL_MIN_FOLLOW_DIST = 30.0F;
     private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
-    private static final int DRIVEN_MUMAKIL_TARGET_CHANCE = 80;
+
+    /*
+     * This is vanilla-style target AI chance, not the old custom relay interval.
+     * Lower numbers make the Mumakil notice enemies more consistently. Keep it
+     * above 1 so we do not turn this into an every-tick scan.
+     */
+    private static final int DRIVEN_MUMAKIL_TARGET_CHANCE = 8;
+    private static final double DRIVEN_MUMAKIL_COMBAT_FOLLOW_RANGE = 36.0D;
 
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
@@ -49,6 +58,7 @@ public class MumakilHiredMountEventHandler {
         }
 
         this.equipHiredMumakil(mumakil);
+        this.applyDrivenMumakilCombatRange(mumakil);
         this.ensureDrivenMumakilTargetAI(mumakil);
     }
 
@@ -87,6 +97,21 @@ public class MumakilHiredMountEventHandler {
         System.out.println("[LOTRMoreMobs] Equipped hired Mumakil with saddle and howdah.");
     }
 
+    private void applyDrivenMumakilCombatRange(LOTREntityMumakil mumakil) {
+        IAttributeInstance followRange = mumakil.getEntityAttribute(SharedMonsterAttributes.followRange);
+
+        if (followRange == null) {
+            return;
+        }
+
+        if (followRange.getBaseValue() != DRIVEN_MUMAKIL_COMBAT_FOLLOW_RANGE) {
+            followRange.setBaseValue(DRIVEN_MUMAKIL_COMBAT_FOLLOW_RANGE);
+            System.out.println("[LOTRMoreMobs] Applied driven Mumakil combat follow range "
+                    + DRIVEN_MUMAKIL_COMBAT_FOLLOW_RANGE
+                    + ".");
+        }
+    }
+
     private void ensureDrivenMumakilTargetAI(LOTREntityMumakil mumakil) {
         if (mumakil.targetTasks == null || mumakil.targetTasks.taskEntries == null) {
             return;
@@ -108,7 +133,9 @@ public class MumakilHiredMountEventHandler {
                 DRIVEN_MUMAKIL_TARGET_CHANCE
         ));
 
-        System.out.println("[LOTRMoreMobs] Installed driven Mumakil Southron target AI.");
+        System.out.println("[LOTRMoreMobs] Installed driven Mumakil Southron target AI. targetChance="
+                + DRIVEN_MUMAKIL_TARGET_CHANCE
+                + ".");
     }
 
     private LOTREntityNPC getMumakilDriver(LOTREntityMumakil mumakil) {
