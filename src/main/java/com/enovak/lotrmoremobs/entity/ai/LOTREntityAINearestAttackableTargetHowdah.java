@@ -12,14 +12,16 @@ import net.minecraft.entity.EntityLivingBase;
 /**
  * Small howdah-rider target helper.
  *
- * This is not a wide invasion-style scan. It deliberately caps horizontal range
- * to a small NPC-sized bubble while allowing a taller Y box so a Southron rider
- * sitting high on a Mumakil can notice enemies at ground level.
+ * This deliberately avoids World.selectEntitiesWithinAABB(..., selector), because
+ * that method runs the expensive suitability selector on every entity in the box
+ * before our candidate cap can help. Instead, it gets a raw list first and caps
+ * how many candidates are allowed to reach the expensive LOTR target checks.
  */
 public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINearestAttackableTargetBasic {
     private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 10.0D;
-    private static final double HOWDAH_VERTICAL_TARGET_RANGE = 24.0D;
-    private static final int MAX_CANDIDATES_PER_CHECK = 6;
+    private static final double HOWDAH_VERTICAL_TARGET_RANGE = 20.0D;
+    private static final int MAX_RAW_ENTITIES_PER_CHECK = 16;
+    private static final int MAX_EXPENSIVE_TARGET_CHECKS = 4;
 
     private final Class targetClassHowdah;
     private final int targetChanceHowdah;
@@ -86,28 +88,41 @@ public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINeare
             }
         }
 
-        List list = this.taskOwner.worldObj.selectEntitiesWithinAABB(
+        List list = this.taskOwner.worldObj.getEntitiesWithinAABB(
                 this.targetClassHowdah,
                 this.taskOwner.boundingBox.expand(
                         HOWDAH_HORIZONTAL_TARGET_RANGE,
                         HOWDAH_VERTICAL_TARGET_RANGE,
                         HOWDAH_HORIZONTAL_TARGET_RANGE
-                ),
-                this.targetSelectorHowdah
+                )
         );
 
         EntityLivingBase closest = null;
         double closestDistance = Double.MAX_VALUE;
-        int checked = 0;
+        int rawChecked = 0;
+        int expensiveChecked = 0;
 
-        for (int i = 0; i < list.size() && checked < MAX_CANDIDATES_PER_CHECK; ++i) {
+        for (int i = 0; i < list.size() && rawChecked < MAX_RAW_ENTITIES_PER_CHECK
+                && expensiveChecked < MAX_EXPENSIVE_TARGET_CHECKS; ++i) {
             Object value = list.get(i);
+            ++rawChecked;
+
             if (!(value instanceof EntityLivingBase)) {
                 continue;
             }
 
-            ++checked;
             EntityLivingBase candidate = (EntityLivingBase)value;
+
+            if (candidate == this.taskOwner || candidate == this.taskOwner.ridingEntity || !candidate.isEntityAlive()) {
+                continue;
+            }
+
+            ++expensiveChecked;
+
+            if (!this.targetSelectorHowdah.isEntityApplicable(candidate)) {
+                continue;
+            }
+
             double distance = this.taskOwner.getDistanceSqToEntity(candidate);
 
             if (distance < closestDistance) {
