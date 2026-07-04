@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.hiring;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
 import java.lang.reflect.Field;
 import java.lang.reflect.Method;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
@@ -58,6 +59,7 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         }
 
         this.equipMumakilForHire(mumakil);
+        MumakilHowdahArcherEventHandler.markHiredHowdahArcherCarrier(mumakil);
         return mumakil;
     }
 
