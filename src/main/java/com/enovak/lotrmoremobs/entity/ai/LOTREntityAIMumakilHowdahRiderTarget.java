@@ -20,10 +20,10 @@ import net.minecraft.util.AxisAlignedBB;
  * purely because the rider is high in the howdah.
  */
 public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
-    private static final int TARGET_CHECK_INTERVAL = 40;
-    private static final double NEAR_FOOT_TARGET_RANGE = 18.0D;
+    private static final int TARGET_CHECK_INTERVAL = 60;
+    private static final double NEAR_FOOT_TARGET_RANGE = 14.0D;
     private static final double SEARCH_VERTICAL_EXPANSION = 2.0D;
-    private static final int MAX_CANDIDATES_PER_SCAN = 24;
+    private static final int MAX_CANDIDATES_PER_SCAN = 16;
 
     private final LOTREntityNPC rider;
     private EntityLivingBase targetEntity;
@@ -103,12 +103,13 @@ public class LOTREntityAIMumakilHowdahRiderTarget extends EntityAIBase {
                 break;
             }
 
+            ++checked;
+
             EntityLivingBase candidate = (EntityLivingBase)list.get(i);
             if (!this.isValidTarget(mumakil, candidate)) {
                 continue;
             }
 
-            ++checked;
             int priority = this.getTargetPriority(candidate);
             double distanceSq = mumakil.getDistanceSqToEntity(candidate);
 
