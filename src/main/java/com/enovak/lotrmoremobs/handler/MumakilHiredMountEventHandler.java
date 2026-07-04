@@ -40,7 +40,6 @@ public class MumakilHiredMountEventHandler {
     private static final int MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE = 80;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
     private static final String DRIVER_RANGE_BASE_TAG = "LOTRMoreMobsMumakilDriverRangeBase";
-    private static final String DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG = "LOTRMoreMobsMumakilCappedHowdahTargetAIInstalled";
 
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
@@ -170,17 +169,14 @@ public class MumakilHiredMountEventHandler {
     }
 
     private void ensureMumakilDriverHowdahTargetAI(LOTREntityNPC npc) {
-        NBTTagCompound data = npc.getEntityData();
-
-        if (data.getBoolean(DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG)) {
-            return;
-        }
-
         if (npc.targetTasks == null) {
             return;
         }
 
-        data.setBoolean(DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG, true);
+        if (this.hasMumakilDriverHowdahTargetAI(npc)) {
+            return;
+        }
+
         npc.targetTasks.addTask(4, new LOTREntityAINearestAttackableTargetHowdah(
                 npc,
                 EntityPlayer.class,
@@ -198,6 +194,21 @@ public class MumakilHiredMountEventHandler {
         System.out.println("[LOTRMoreMobs] Installed capped Mumakil howdah rider target AI on "
                 + npc.getClass().getName()
                 + ".");
+    }
+
+    private boolean hasMumakilDriverHowdahTargetAI(LOTREntityNPC npc) {
+        Iterator iterator = npc.targetTasks.taskEntries.iterator();
+
+        while (iterator.hasNext()) {
+            Object taskEntry = iterator.next();
+            Object aiTask = this.getFieldValue(taskEntry, "action");
+
+            if (aiTask instanceof LOTREntityAINearestAttackableTargetHowdah) {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void restoreNormalDriverRange(LOTREntityNPC npc) {
