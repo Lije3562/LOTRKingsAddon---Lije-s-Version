@@ -1,0 +1,350 @@
+package com.enovak.lotrmoremobs.handler;
+
+import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import java.util.List;
+import lotr.common.LOTRMod;
+import lotr.common.entity.ai.LOTRNPCTargetSelector;
+import lotr.common.entity.npc.LOTREntityNPC;
+import lotr.common.fac.LOTRFaction;
+import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.nbt.NBTTagCompound;
+import net.minecraft.pathfinding.PathNavigate;
+import net.minecraft.util.MathHelper;
+import net.minecraftforge.event.entity.living.LivingEvent;
+
+/**
+ * Lightweight NPC driver steering for hired Southron Mumakil.
+ *
+ * This does not add target AI to howdah archers or replace the Mumakil's own
+ * combat. It only gives an active Near Harad NPC rider a shared target and
+ * nudges the mount toward that target so existing tusk/trample attacks can fire.
+ */
+public class MumakilDriverControlEventHandler {
+    private static final String DRIVER_TARGET_ID_KEY = "LOTRMoreMobsMumakilDriverTargetId";
+    private static final String DRIVER_NEXT_SCAN_KEY = "LOTRMoreMobsMumakilDriverNextScan";
+    private static final String DRIVER_NEXT_PATH_KEY = "LOTRMoreMobsMumakilDriverNextPath";
+    private static final String DRIVER_NEXT_FALLBACK_KEY = "LOTRMoreMobsMumakilDriverNextFallback";
+    private static final String DRIVER_NEXT_STUCK_CHECK_KEY = "LOTRMoreMobsMumakilDriverNextStuckCheck";
+    private static final String DRIVER_LAST_TARGET_X_KEY = "LOTRMoreMobsMumakilDriverLastTargetX";
+    private static final String DRIVER_LAST_TARGET_Y_KEY = "LOTRMoreMobsMumakilDriverLastTargetY";
+    private static final String DRIVER_LAST_TARGET_Z_KEY = "LOTRMoreMobsMumakilDriverLastTargetZ";
+    private static final String DRIVER_LAST_MUMAKIL_X_KEY = "LOTRMoreMobsMumakilDriverLastMumakilX";
+    private static final String DRIVER_LAST_MUMAKIL_Z_KEY = "LOTRMoreMobsMumakilDriverLastMumakilZ";
+
+    private static final int TARGET_SCAN_MIN_INTERVAL = 20;
+    private static final int TARGET_SCAN_RANDOM_INTERVAL = 21;
+    private static final int PATH_REFRESH_INTERVAL = 50;
+    private static final int FALLBACK_MOTION_INTERVAL = 10;
+    private static final int STUCK_CHECK_INTERVAL = 40;
+    private static final double TARGET_SCAN_RANGE = 42.0D;
+    private static final double TARGET_SCAN_VERTICAL_RANGE = 34.0D;
+    private static final double TARGET_RETAIN_RANGE = 48.0D;
+    private static final double APPROACH_STOP_RANGE = 5.75D;
+    private static final double TARGET_REPATH_DISTANCE_SQ = 9.0D;
+    private static final double STUCK_MOVEMENT_DISTANCE_SQ = 0.36D;
+    private static final double NAVIGATOR_SPEED = 1.25D;
+    private static final double FALLBACK_ACCELERATION = 0.045D;
+    private static final double FALLBACK_MAX_SPEED = 0.23D;
+    private static final double FALLBACK_CLOSE_MAX_SPEED = 0.15D;
+    private static final float FALLBACK_TURN_STEP = 9.0F;
+
+    @SubscribeEvent
+    public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
+        if (event == null
+                || event.entityLiving == null
+                || event.entityLiving.worldObj == null
+                || event.entityLiving.worldObj.isRemote
+                || !(event.entityLiving instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        this.updateDriverControl((LOTREntityMumakil)event.entityLiving);
+    }
+
+    private void updateDriverControl(LOTREntityMumakil mumakil) {
+        LOTREntityNPC driver = this.getValidNearHaradDriver(mumakil);
+        if (driver == null) {
+            this.clearDriverControl(mumakil, null);
+            return;
+        }
+
+        NBTTagCompound data = mumakil.getEntityData();
+        long worldTime = mumakil.worldObj.getTotalWorldTime();
+        this.clearDriverNavigator(driver);
+
+        LOTRNPCTargetSelector targetSelector = new LOTRNPCTargetSelector(driver);
+        EntityLivingBase target = this.getStoredDriverTarget(mumakil);
+
+        if (!this.canDriverTarget(mumakil, driver, target, targetSelector)
+                || mumakil.getDistanceSqToEntity(target) > TARGET_RETAIN_RANGE * TARGET_RETAIN_RANGE) {
+            target = null;
+        }
+
+        long nextScan = data.getLong(DRIVER_NEXT_SCAN_KEY);
+        if (target == null && nextScan <= worldTime) {
+            target = this.findBestDriverTarget(mumakil, driver, targetSelector);
+            data.setLong(
+                    DRIVER_NEXT_SCAN_KEY,
+                    worldTime + TARGET_SCAN_MIN_INTERVAL + mumakil.worldObj.rand.nextInt(TARGET_SCAN_RANDOM_INTERVAL)
+            );
+        }
+
+        if (target == null) {
+            this.clearDriverControl(mumakil, driver);
+            return;
+        }
+
+        data.setInteger(DRIVER_TARGET_ID_KEY, target.getEntityId());
+        this.driveMumakilTowardTarget(mumakil, driver, target, worldTime);
+    }
+
+    private LOTREntityNPC getValidNearHaradDriver(LOTREntityMumakil mumakil) {
+        Entity rider = mumakil.riddenByEntity;
+        if (rider instanceof EntityPlayer || !(rider instanceof LOTREntityNPC)) {
+            return null;
+        }
+
+        LOTREntityNPC driver = (LOTREntityNPC)rider;
+        if (!driver.isEntityAlive()
+                || driver instanceof LOTREntityMumakilHowdahArcher
+                || driver.ridingEntity != mumakil
+                || !driver.hiredNPCInfo.isActive) {
+            return null;
+        }
+
+        return LOTRMod.getNPCFaction(driver) == LOTRFaction.NEAR_HARAD ? driver : null;
+    }
+
+    private EntityLivingBase getStoredDriverTarget(LOTREntityMumakil mumakil) {
+        int targetId = mumakil.getEntityData().getInteger(DRIVER_TARGET_ID_KEY);
+        if (targetId == 0) {
+            return null;
+        }
+
+        Entity target = mumakil.worldObj.getEntityByID(targetId);
+        return target instanceof EntityLivingBase ? (EntityLivingBase)target : null;
+    }
+
+    private EntityLivingBase findBestDriverTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver, LOTRNPCTargetSelector targetSelector) {
+        List nearby = mumakil.worldObj.getEntitiesWithinAABB(
+                EntityLivingBase.class,
+                mumakil.boundingBox.expand(TARGET_SCAN_RANGE, TARGET_SCAN_VERTICAL_RANGE, TARGET_SCAN_RANGE)
+        );
+
+        EntityLivingBase bestTarget = null;
+        int bestPriority = Integer.MAX_VALUE;
+        double bestDistanceSq = Double.MAX_VALUE;
+
+        for (int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
+            if (!this.canDriverTarget(mumakil, driver, candidate, targetSelector)) {
+                continue;
+            }
+
+            int priority = this.getTargetPriority(candidate);
+            double distanceSq = mumakil.getDistanceSqToEntity(candidate);
+            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
+                bestTarget = candidate;
+                bestPriority = priority;
+                bestDistanceSq = distanceSq;
+            }
+        }
+
+        return bestTarget;
+    }
+
+    private boolean canDriverTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver, EntityLivingBase target, LOTRNPCTargetSelector targetSelector) {
+        if (target == null
+                || target == mumakil
+                || target == driver
+                || target instanceof LOTREntityMumakil
+                || target instanceof LOTREntityMumakilHowdahArcher
+                || !target.isEntityAlive()
+                || target.riddenByEntity != null) {
+            return false;
+        }
+
+        if (target instanceof EntityPlayer) {
+            EntityPlayer player = (EntityPlayer)target;
+            return !player.capabilities.isCreativeMode
+                    && targetSelector.isEntityApplicable(target)
+                    && LOTRMod.canNPCAttackEntity(driver, target, false);
+        }
+
+        if (!(target instanceof LOTREntityNPC)) {
+            return false;
+        }
+
+        LOTREntityNPC npc = (LOTREntityNPC)target;
+        return !npc.hiredNPCInfo.isActive
+                && targetSelector.isEntityApplicable(target)
+                && LOTRMod.canNPCAttackEntity(driver, target, false);
+    }
+
+    private int getTargetPriority(EntityLivingBase target) {
+        if (target instanceof LOTREntityNPC) {
+            return 0;
+        }
+
+        if (target instanceof EntityPlayer) {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    private void driveMumakilTowardTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver, EntityLivingBase target, long worldTime) {
+        this.clearDriverNavigator(driver);
+        mumakil.setAttackTarget(target);
+        mumakil.getLookHelper().setLookPositionWithEntity(target, 30.0F, 30.0F);
+        this.faceTarget(mumakil, target);
+
+        double distanceSq = mumakil.getDistanceSqToEntity(target);
+        PathNavigate navigator = mumakil.getNavigator();
+
+        if (distanceSq <= APPROACH_STOP_RANGE * APPROACH_STOP_RANGE) {
+            if (navigator != null) {
+                navigator.clearPathEntity();
+            }
+
+            mumakil.moveForward = 0.0F;
+            mumakil.moveStrafing = 0.0F;
+            mumakil.motionX *= 0.65D;
+            mumakil.motionZ *= 0.65D;
+            return;
+        }
+
+        NBTTagCompound data = mumakil.getEntityData();
+        boolean navigatorHasNoPath = navigator == null || navigator.noPath();
+        boolean pathFailed = false;
+
+        if (navigator != null
+                && data.getLong(DRIVER_NEXT_PATH_KEY) <= worldTime
+                && (navigatorHasNoPath
+                || this.hasTargetMovedForRepath(data, target)
+                || this.isMumakilStuckForRepath(data, mumakil, worldTime, distanceSq))) {
+            boolean pathAccepted = navigator.tryMoveToEntityLiving(target, NAVIGATOR_SPEED);
+            pathFailed = !pathAccepted;
+            navigatorHasNoPath = !pathAccepted || navigator.noPath();
+            data.setLong(DRIVER_NEXT_PATH_KEY, worldTime + PATH_REFRESH_INTERVAL);
+            this.rememberTargetPosition(data, target);
+        }
+
+        if ((navigatorHasNoPath || pathFailed) && data.getLong(DRIVER_NEXT_FALLBACK_KEY) <= worldTime) {
+            this.applyFallbackDrivenMotion(mumakil, target, distanceSq);
+            data.setLong(DRIVER_NEXT_FALLBACK_KEY, worldTime + FALLBACK_MOTION_INTERVAL);
+        }
+    }
+
+    private boolean hasTargetMovedForRepath(NBTTagCompound data, EntityLivingBase target) {
+        if (!data.hasKey(DRIVER_LAST_TARGET_X_KEY)
+                || !data.hasKey(DRIVER_LAST_TARGET_Y_KEY)
+                || !data.hasKey(DRIVER_LAST_TARGET_Z_KEY)) {
+            return true;
+        }
+
+        double dx = target.posX - data.getDouble(DRIVER_LAST_TARGET_X_KEY);
+        double dy = target.posY - data.getDouble(DRIVER_LAST_TARGET_Y_KEY);
+        double dz = target.posZ - data.getDouble(DRIVER_LAST_TARGET_Z_KEY);
+        return dx * dx + dy * dy + dz * dz >= TARGET_REPATH_DISTANCE_SQ;
+    }
+
+    private void rememberTargetPosition(NBTTagCompound data, EntityLivingBase target) {
+        data.setDouble(DRIVER_LAST_TARGET_X_KEY, target.posX);
+        data.setDouble(DRIVER_LAST_TARGET_Y_KEY, target.posY);
+        data.setDouble(DRIVER_LAST_TARGET_Z_KEY, target.posZ);
+    }
+
+    private boolean isMumakilStuckForRepath(NBTTagCompound data, LOTREntityMumakil mumakil, long worldTime, double distanceSq) {
+        if (distanceSq <= APPROACH_STOP_RANGE * APPROACH_STOP_RANGE
+                || data.getLong(DRIVER_NEXT_STUCK_CHECK_KEY) > worldTime) {
+            return false;
+        }
+
+        boolean hasPreviousPosition = data.hasKey(DRIVER_LAST_MUMAKIL_X_KEY)
+                && data.hasKey(DRIVER_LAST_MUMAKIL_Z_KEY);
+        double previousX = data.getDouble(DRIVER_LAST_MUMAKIL_X_KEY);
+        double previousZ = data.getDouble(DRIVER_LAST_MUMAKIL_Z_KEY);
+
+        data.setDouble(DRIVER_LAST_MUMAKIL_X_KEY, mumakil.posX);
+        data.setDouble(DRIVER_LAST_MUMAKIL_Z_KEY, mumakil.posZ);
+        data.setLong(DRIVER_NEXT_STUCK_CHECK_KEY, worldTime + STUCK_CHECK_INTERVAL);
+
+        if (!hasPreviousPosition) {
+            return false;
+        }
+
+        double dx = mumakil.posX - previousX;
+        double dz = mumakil.posZ - previousZ;
+        return dx * dx + dz * dz <= STUCK_MOVEMENT_DISTANCE_SQ;
+    }
+
+    private void faceTarget(LOTREntityMumakil mumakil, EntityLivingBase target) {
+        double deltaX = target.posX - mumakil.posX;
+        double deltaZ = target.posZ - mumakil.posZ;
+        float desiredYaw = (float)(Math.atan2(deltaZ, deltaX) * 180.0D / Math.PI) - 90.0F;
+
+        mumakil.rotationYaw = this.updateRotation(mumakil.rotationYaw, desiredYaw, FALLBACK_TURN_STEP);
+        mumakil.renderYawOffset = this.updateRotation(mumakil.renderYawOffset, mumakil.rotationYaw, FALLBACK_TURN_STEP);
+        mumakil.rotationYawHead = mumakil.renderYawOffset;
+    }
+
+    private float updateRotation(float current, float desired, float maxStep) {
+        float delta = MathHelper.wrapAngleTo180_float(desired - current);
+        return current + MathHelper.clamp_float(delta, -maxStep, maxStep);
+    }
+
+    private void applyFallbackDrivenMotion(LOTREntityMumakil mumakil, EntityLivingBase target, double distanceSq) {
+        if (mumakil.riddenByEntity instanceof EntityPlayer
+                || distanceSq <= APPROACH_STOP_RANGE * APPROACH_STOP_RANGE) {
+            return;
+        }
+
+        float yawRadians = mumakil.rotationYaw * (float)Math.PI / 180.0F;
+        double forwardX = -MathHelper.sin(yawRadians);
+        double forwardZ = MathHelper.cos(yawRadians);
+
+        mumakil.motionX += forwardX * FALLBACK_ACCELERATION;
+        mumakil.motionZ += forwardZ * FALLBACK_ACCELERATION;
+        mumakil.moveForward = 1.0F;
+        mumakil.moveStrafing = 0.0F;
+
+        double maxSpeed = distanceSq < 144.0D ? FALLBACK_CLOSE_MAX_SPEED : FALLBACK_MAX_SPEED;
+        double horizontalSpeedSq = mumakil.motionX * mumakil.motionX + mumakil.motionZ * mumakil.motionZ;
+        if (horizontalSpeedSq > maxSpeed * maxSpeed) {
+            double horizontalSpeed = MathHelper.sqrt_double(horizontalSpeedSq);
+            mumakil.motionX = mumakil.motionX / horizontalSpeed * maxSpeed;
+            mumakil.motionZ = mumakil.motionZ / horizontalSpeed * maxSpeed;
+        }
+    }
+
+    private void clearDriverNavigator(LOTREntityNPC driver) {
+        if (driver == null || driver.getNavigator() == null || driver.getNavigator().noPath()) {
+            return;
+        }
+
+        driver.getNavigator().clearPathEntity();
+    }
+
+    private void clearDriverControl(LOTREntityMumakil mumakil, LOTREntityNPC driver) {
+        NBTTagCompound data = mumakil.getEntityData();
+        data.setInteger(DRIVER_TARGET_ID_KEY, 0);
+
+        if (mumakil.getAttackTarget() != null) {
+            mumakil.setAttackTarget(null);
+        }
+
+        PathNavigate navigator = mumakil.getNavigator();
+        if (navigator != null && !navigator.noPath()) {
+            navigator.clearPathEntity();
+        }
+
+        if (driver != null && driver.ridingEntity == mumakil) {
+            this.clearDriverNavigator(driver);
+        }
+    }
+}

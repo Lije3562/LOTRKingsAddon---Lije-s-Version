@@ -98,6 +98,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     private static boolean loggedBeforeGeoRender;
 
     private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V12_5_SILENT_TAIL_FLIP_2026_06_28";
+    private static final boolean DEBUG_LOGS = false;
     private static final boolean USE_BLOCKBENCH_TRUMPET = true;
     private static final boolean USE_BLOCKBENCH_EAR_FLAP = true;
     private static final boolean USE_BLOCKBENCH_TAIL_FLIP = true;
@@ -274,7 +275,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         super(new LOTRGeoModelMumakil());
         this.shadowSize = 5.0F;
 
-        if (!loggedRendererBuild) {
+        if (DEBUG_LOGS && !loggedRendererBuild) {
             loggedRendererBuild = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo renderer build loaded: " + RENDERER_BUILD_TAG);
         }
@@ -311,7 +312,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             return;
         }
 
-        if (!loggedSafeRenderStart) {
+        if (DEBUG_LOGS && !loggedSafeRenderStart) {
             loggedSafeRenderStart = true;
             System.out.println("[LOTRMoreMobs] Mumakil safe Geo render path started for entityId=" + entity.getEntityId());
         }
@@ -326,14 +327,14 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
         ResourceLocation modelLocation = this.modelProvider.getModelLocation(entity);
         if (!this.canLoadResource(modelLocation) && !LOTRGeoModelMumakil.PLAIN_MODEL.equals(modelLocation)) {
-            if (!loggedModelFallback) {
+            if (DEBUG_LOGS && !loggedModelFallback) {
                 loggedModelFallback = true;
                 System.out.println("[LOTRMoreMobs] Mumakil Geo model missing, falling back to plain export: " + modelLocation);
             }
             modelLocation = LOTRGeoModelMumakil.PLAIN_MODEL;
         }
 
-        if (!loggedModelRequest) {
+        if (DEBUG_LOGS && !loggedModelRequest) {
             loggedModelRequest = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo model requested: " + modelLocation
                     + " resourceFound=" + this.canLoadResource(modelLocation)
@@ -343,7 +344,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
         GeoModel geoModel = this.modelProvider.getModel(modelLocation);
         if (geoModel == null) {
-            if (!loggedMissingGeoModel) {
+            if (DEBUG_LOGS && !loggedMissingGeoModel) {
                 loggedMissingGeoModel = true;
                 System.out.println("[LOTRMoreMobs] Mumakil Geo renderer could not load model: " + modelLocation);
             }
@@ -402,14 +403,14 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
                 ResourceLocation textureLocation = this.getEntityTexture(entity);
                 if (!this.canLoadResource(textureLocation) && !LOTRGeoModelMumakil.WILD_TEXTURE.equals(textureLocation)) {
-                    if (!loggedTextureFallback) {
+                    if (DEBUG_LOGS && !loggedTextureFallback) {
                         loggedTextureFallback = true;
                         System.out.println("[LOTRMoreMobs] Mumakil texture missing, falling back to wild texture: " + textureLocation);
                     }
                     textureLocation = LOTRGeoModelMumakil.WILD_TEXTURE;
                 }
 
-                if (!loggedTextureRequest) {
+                if (DEBUG_LOGS && !loggedTextureRequest) {
                     loggedTextureRequest = true;
                     System.out.println("[LOTRMoreMobs] Mumakil Geo texture requested: " + textureLocation
                             + " resourceFound=" + this.canLoadResource(textureLocation)
@@ -429,7 +430,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
                 // Deliberately skip GeckoLib's EntityLivingBase.isInvisibleToPlayer(...) branch; in this
                 // 1.7.10 dev runtime it dispatches to the missing obfuscated func_98034_c method.
-                if (!loggedBeforeGeoRender) {
+                if (DEBUG_LOGS && !loggedBeforeGeoRender) {
                     loggedBeforeGeoRender = true;
                     System.out.println("[LOTRMoreMobs] Mumakil calling GeckoLib render(GeoModel, ...) with modelLoaded=true");
                 }
@@ -453,7 +454,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
     private void logEquipmentState(LOTREntityMumakil entity, boolean renderSaddle, boolean renderHowdahOrWarEquipment) {
         int stateIndex = (renderSaddle ? 1 : 0) | (renderHowdahOrWarEquipment ? 2 : 0);
-        if (!loggedEquipmentStates[stateIndex]) {
+        if (DEBUG_LOGS && !loggedEquipmentStates[stateIndex]) {
             loggedEquipmentStates[stateIndex] = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo equipment state: isMountSaddled="
                     + entity.isMountSaddled()
@@ -488,7 +489,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
     private void applyBoneVisibility(GeoModel geoModel, String[] boneNames, boolean visible, boolean logWarBones) {
         boolean hidden = !visible;
-        boolean shouldLogThisPass = logWarBones && !loggedWarBoneVisibilityStates[visible ? 1 : 0];
+        boolean shouldLogThisPass = DEBUG_LOGS && logWarBones && !loggedWarBoneVisibilityStates[visible ? 1 : 0];
 
         for (int i = 0; i < boneNames.length; ++i) {
             Optional<GeoBone> bone = geoModel.getBone(boneNames[i]);
@@ -677,7 +678,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
              * Y is the face-fanning axis for the ears.
              */
             if (blockbenchEarFlapActive) {
-                if (!loggedBlockbenchEarFlapApplied) {
+                if (DEBUG_LOGS && !loggedBlockbenchEarFlapApplied) {
                     loggedBlockbenchEarFlapApplied = true;
                     System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil ear flap keyframes. animation="
                             + BLOCKBENCH_EAR_FLAP_ANIMATION_NAME
@@ -737,7 +738,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                     0.0F
             );
         } else {
-            if (!loggedBlockbenchTrumpetApplied) {
+            if (DEBUG_LOGS && !loggedBlockbenchTrumpetApplied) {
                 loggedBlockbenchTrumpetApplied = true;
                 System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil trumpet keyframes. progress="
                         + trumpetProgress
@@ -760,7 +761,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                 + sin(walkPhase + 1.5F) * degreesToRadians(1.25F) * moveAmount;
 
         if (blockbenchTailFlipActive) {
-            if (!loggedBlockbenchTailFlipApplied) {
+            if (DEBUG_LOGS && !loggedBlockbenchTailFlipApplied) {
                 loggedBlockbenchTailFlipApplied = true;
                 System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil tail flip keyframes. animation="
                         + BLOCKBENCH_TAIL_FLIP_ANIMATION_NAME
@@ -793,7 +794,7 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
          * The selected side alternates per swing. If one side is missing from JSON, the other side is used.
          */
         if (blockbenchStrikeActive) {
-            if (!loggedBlockbenchStrikeApplied) {
+            if (DEBUG_LOGS && !loggedBlockbenchStrikeApplied) {
                 loggedBlockbenchStrikeApplied = true;
                 System.out.println("[LOTRMoreMobs] Applying JSON Blockbench Mumakil strike keyframes. animation="
                         + strikeAnimationName
@@ -871,30 +872,38 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                         pitch,
                         false
                 );
-                System.out.println("[LOTRMoreMobs] Playing Mumakil client animation sound: sound="
-                        + soundName
-                        + " volume=" + volume
-                        + " pitch=" + pitch
-                        + " build=" + RENDERER_BUILD_TAG);
+                if (DEBUG_LOGS) {
+                    System.out.println("[LOTRMoreMobs] Playing Mumakil client animation sound: sound="
+                            + soundName
+                            + " volume=" + volume
+                            + " pitch=" + pitch
+                            + " build=" + RENDERER_BUILD_TAG);
+                }
                 return;
             }
         } catch (Exception e) {
-            System.out.println("[LOTRMoreMobs] Client World#playSound failed for Mumakil sound "
-                    + soundName
-                    + ": " + e);
+            if (DEBUG_LOGS) {
+                System.out.println("[LOTRMoreMobs] Client World#playSound failed for Mumakil sound "
+                        + soundName
+                        + ": " + e);
+            }
         }
 
         try {
             entity.playSound(soundName, volume, pitch);
-            System.out.println("[LOTRMoreMobs] Playing Mumakil fallback entity sound: sound="
-                    + soundName
-                    + " volume=" + volume
-                    + " pitch=" + pitch
-                    + " build=" + RENDERER_BUILD_TAG);
+            if (DEBUG_LOGS) {
+                System.out.println("[LOTRMoreMobs] Playing Mumakil fallback entity sound: sound="
+                        + soundName
+                        + " volume=" + volume
+                        + " pitch=" + pitch
+                        + " build=" + RENDERER_BUILD_TAG);
+            }
         } catch (Exception e) {
-            System.out.println("[LOTRMoreMobs] Entity#playSound failed for Mumakil sound "
-                    + soundName
-                    + ": " + e);
+            if (DEBUG_LOGS) {
+                System.out.println("[LOTRMoreMobs] Entity#playSound failed for Mumakil sound "
+                        + soundName
+                        + ": " + e);
+            }
         }
     }
 

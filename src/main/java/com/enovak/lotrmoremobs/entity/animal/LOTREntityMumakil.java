@@ -58,6 +58,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float CHARGE_STOMP_SOUND_MIN_SPEED = 0.13F;
     private static final int CHARGE_STOMP_SOUND_MIN_COOLDOWN = 10;
     private static final int CHARGE_STOMP_SOUND_RANDOM_COOLDOWN = 7;
+    private static final boolean DEBUG_COMBAT_LOGS = false;
 
     // Rider position tuning.
 // Forward = positive value moves rider toward Mumakil head.
@@ -544,6 +545,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                         if (obj instanceof EntityLivingBase) {
                             EntityLivingBase entity = (EntityLivingBase)obj;
                             if (entity != rider
+                                    && entity.riddenByEntity == null
                                     && (!(rider instanceof EntityPlayer) || LOTRMod.canPlayerAttackEntity((EntityPlayer)rider, entity, false))
                                     && (!(rider instanceof EntityCreature) || LOTRMod.canNPCAttackEntity((EntityCreature)rider, entity, false))) {
                                 boolean flag = entity.attackEntityFrom(DamageSource.causeMobDamage(this), strength);
@@ -715,8 +717,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 || target == this.riddenByEntity
                 || target instanceof LOTREntityMumakil
                 || !target.isEntityAlive()
-                || target.riddenByEntity != null
-                || target.ridingEntity != null) {
+                || target.riddenByEntity != null) {
             return false;
         }
 
@@ -1013,6 +1014,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         if (target == this
                 || target == this.riddenByEntity
                 || target instanceof LOTREntityMumakil
+                || target.riddenByEntity != null
                 || !target.isEntityAlive()) {
             return false;
         }
@@ -1364,10 +1366,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.mumakilStrikeAnimationTicks = MUMAKIL_STRIKE_ANIMATION_TICKS;
         this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
 
-        System.out.println("[LOTRMoreMobs] Starting Mumakil strike animation side="
-                + (this.mumakilStrikeAnimationLeft ? "left" : "right")
-                + " worldRemote=" + this.worldObj.isRemote
-                + " entityId=" + this.getEntityId());
+        if (DEBUG_COMBAT_LOGS) {
+            System.out.println("[LOTRMoreMobs] Starting Mumakil strike animation side="
+                    + (this.mumakilStrikeAnimationLeft ? "left" : "right")
+                    + " worldRemote=" + this.worldObj.isRemote
+                    + " entityId=" + this.getEntityId());
+        }
 
         this.swingItem();
 
@@ -1393,9 +1397,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.mumakilStrikeAnimationTicks = MUMAKIL_STRIKE_ANIMATION_TICKS;
             this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
 
-            System.out.println("[LOTRMoreMobs] Client received Mumakil strike animation side="
-                    + (this.mumakilStrikeAnimationLeft ? "left" : "right")
-                    + " entityId=" + this.getEntityId());
+            if (DEBUG_COMBAT_LOGS) {
+                System.out.println("[LOTRMoreMobs] Client received Mumakil strike animation side="
+                        + (this.mumakilStrikeAnimationLeft ? "left" : "right")
+                        + " entityId=" + this.getEntityId());
+            }
 
             return;
         }
