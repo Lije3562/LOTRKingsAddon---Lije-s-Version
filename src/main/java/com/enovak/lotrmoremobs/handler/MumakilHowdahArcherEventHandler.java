@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
+import cpw.mods.fml.common.gameevent.TickEvent;
 import java.lang.reflect.Constructor;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -20,8 +21,8 @@ import net.minecraftforge.event.entity.living.LivingEvent;
  *
  * This deliberately does not add target AI, attack AI, arrow shooting, downward
  * AABB searches, or combat relays. The archers are ordinary LOTR Southron archer
- * entities that are tagged, stripped of AI tasks, and repositioned onto fixed
- * howdah offsets each tick.
+ * entities that are tagged, stripped of AI tasks, and hard-positioned onto fixed
+ * howdah offsets at the end of each world tick.
  */
 public class MumakilHowdahArcherEventHandler {
     private static final String MUMAKIL_ARCHER_CARRIER_KEY = "LOTRMoreMobsHiredHowdahArcherCarrier";
@@ -42,29 +43,40 @@ public class MumakilHowdahArcherEventHandler {
      * Each row is: forward offset, side offset, vertical offset, yaw offset.
      * Forward = toward Mumakil head. Side = positive to Mumakil right.
      *
-     * There are 15 slots, arranged around the howdah edges while leaving the
-     * central driver lane mostly open for the existing Southron Champion rider.
+     * Requested 15-slot starting layout:
+     * - slots 0-5:  three on each side of the wide howdah body
+     * - slots 6-9:  two on each lower side perch
+     * - slots 10-13: four on the middle perch
+     * - slot 14:    one on the top perch
+     *
+     * These are intentionally all in one table so visual tuning only requires
+     * changing numbers here. No combat or scanning logic is tied to the slots.
      */
     private static final double[][] HOWDAH_ARCHER_OFFSETS = new double[][] {
-            { 5.7D, -2.9D, 16.75D,   0.0D },
-            { 5.7D,  0.0D, 16.75D,   0.0D },
-            { 5.7D,  2.9D, 16.75D,   0.0D },
+            // Wide howdah body: left side, front to rear.
+            { 7.3D, -4.35D, 16.85D, -90.0D },
+            { 9.7D, -4.55D, 16.85D, -90.0D },
+            {12.1D, -4.35D, 16.85D, -90.0D },
 
-            { 7.6D, -3.1D, 16.75D, -25.0D },
-            { 7.6D,  0.0D, 16.75D,   0.0D },
-            { 7.6D,  3.1D, 16.75D,  25.0D },
+            // Wide howdah body: right side, front to rear.
+            { 7.3D,  4.35D, 16.85D,  90.0D },
+            { 9.7D,  4.55D, 16.85D,  90.0D },
+            {12.1D,  4.35D, 16.85D,  90.0D },
 
-            { 9.7D, -3.4D, 16.75D, -90.0D },
-            { 9.7D, -1.7D, 16.75D, -45.0D },
-            { 9.7D,  1.7D, 16.75D,  45.0D },
-            { 9.7D,  3.4D, 16.75D,  90.0D },
+            // Lower side perches: two on each lower perch.
+            { 8.2D, -5.45D, 14.45D, -90.0D },
+            {11.6D, -5.45D, 14.45D, -90.0D },
+            { 8.2D,  5.45D, 14.45D,  90.0D },
+            {11.6D,  5.45D, 14.45D,  90.0D },
 
-            {11.8D, -3.1D, 16.75D, 205.0D },
-            {11.8D,  0.0D, 16.75D, 180.0D },
-            {11.8D,  3.1D, 16.75D, 155.0D },
+            // Middle perch: four across the middle upper perch/bridge area.
+            { 6.3D, -1.8D, 18.35D,   0.0D },
+            { 7.8D, -0.6D, 18.35D,   0.0D },
+            { 7.8D,  0.6D, 18.35D,   0.0D },
+            { 6.3D,  1.8D, 18.35D,   0.0D },
 
-            {13.7D, -2.9D, 16.75D, 180.0D },
-            {13.7D,  2.9D, 16.75D, 180.0D }
+            // Top perch: one lookout.
+            { 9.8D,  0.0D, 21.35D,   0.0D }
     };
 
     private static boolean loggedMissingArcherClass;
@@ -105,7 +117,28 @@ public class MumakilHowdahArcherEventHandler {
         }
 
         if (living instanceof EntityLiving && isTaggedHowdahArcher(living)) {
-            updateTaggedArcher((EntityLiving)living);
+            makeArcherPassive((EntityLiving)living);
+        }
+    }
+
+    @SubscribeEvent
+    public void onWorldTick(TickEvent.WorldTickEvent event) {
+        if (event == null || event.world == null || event.world.isRemote || event.phase != TickEvent.Phase.END) {
+            return;
+        }
+
+        updateAllTaggedArchersAtEndOfTick(event.world);
+    }
+
+    private static void updateAllTaggedArchersAtEndOfTick(World world) {
+        List loaded = world.loadedEntityList;
+
+        for (int i = 0; i < loaded.size(); ++i) {
+            Object object = loaded.get(i);
+
+            if (object instanceof EntityLiving && isTaggedHowdahArcher((Entity)object)) {
+                updateTaggedArcher((EntityLiving)object);
+            }
         }
     }
 
@@ -280,11 +313,15 @@ public class MumakilHowdahArcherEventHandler {
         archer.prevPosX = x;
         archer.prevPosY = y;
         archer.prevPosZ = z;
+        archer.lastTickPosX = x;
+        archer.lastTickPosY = y;
+        archer.lastTickPosZ = z;
         archer.motionX = 0.0D;
         archer.motionY = 0.0D;
         archer.motionZ = 0.0D;
         archer.fallDistance = 0.0F;
         archer.onGround = true;
+        archer.isAirBorne = false;
 
         archer.rotationYaw = archerYaw;
         archer.prevRotationYaw = archerYaw;
@@ -320,6 +357,7 @@ public class MumakilHowdahArcherEventHandler {
         archer.motionZ = 0.0D;
         archer.fallDistance = 0.0F;
         archer.onGround = true;
+        archer.isAirBorne = false;
         invokeNoArgMethod(archer, "enablePersistence", "func_110163_bv");
     }
 
