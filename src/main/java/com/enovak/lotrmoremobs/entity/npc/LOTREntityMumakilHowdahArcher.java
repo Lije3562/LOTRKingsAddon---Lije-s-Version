@@ -14,8 +14,8 @@ import net.minecraft.world.World;
  * Visual/passive howdah passenger for the custom hired Mumakil.
  *
  * This is intentionally a subclass of the normal Near Haradrim archer so it can
- * reuse the LOTR archer renderer/model/texture, but it disables normal gravity,
- * pathing, knockback, and combat while attached to its Mumakil.
+ * inherit normal LOTR NPC behavior/data, but it disables normal gravity, pathing,
+ * knockback, and combat while attached to its Mumakil.
  */
 public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher implements IEntityAdditionalSpawnData {
     private static final String NBT_MOUNT_ID = "LOTRMoreMobsHowdahMountId";
@@ -36,6 +36,15 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         this.howdahSlot = slot;
         this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
         this.getEntityData().setInteger(NBT_SLOT, this.howdahSlot);
+
+        /*
+         * Important: position before world.spawnEntityInWorld(). If the entity is
+         * still at the default 0,0,0 position, Minecraft may reject the spawn
+         * because that chunk is not loaded.
+         */
+        if (mumakil != null) {
+            this.placeOnHowdah(mumakil, slot);
+        }
     }
 
     public int getHowdahMountEntityId() {
