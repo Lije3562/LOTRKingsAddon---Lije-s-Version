@@ -48,7 +48,6 @@ public class MumakilHiredMountEventHandler {
         this.setInventoryStack(mumakil, SADDLE_SLOT, new ItemStack(Items.saddle));
         this.setInventoryStack(mumakil, HOWDAH_SLOT, new ItemStack(Main.mumakilHowdah));
         mumakil.setMumakilHowdahEquipped(true);
-        MumakilHowdahArcherEventHandler.markHiredHowdahArcherCarrier(mumakil);
         this.tuneHiredMumakilFollowDistance(mumakil);
 
         System.out.println("[LOTRMoreMobs] Equipped hired Mumakil with saddle and howdah.");
