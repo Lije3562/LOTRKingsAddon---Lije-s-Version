@@ -4,6 +4,7 @@ import com.enovak.lotrmoremobs.handler.MumakilEquipmentEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilFearEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilHireEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilHiredMountEventHandler;
+import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
 import net.minecraftforge.common.MinecraftForge;
 
 public class CommonProxy {
@@ -15,5 +16,6 @@ public class CommonProxy {
         MinecraftForge.EVENT_BUS.register(new MumakilEquipmentEventHandler());
         MinecraftForge.EVENT_BUS.register(new MumakilHireEventHandler());
         MinecraftForge.EVENT_BUS.register(new MumakilHiredMountEventHandler());
+        MinecraftForge.EVENT_BUS.register(new MumakilHowdahArcherEventHandler());
     }
 }
