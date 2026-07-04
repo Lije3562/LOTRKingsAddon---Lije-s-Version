@@ -4,6 +4,7 @@ import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilGeoInventoryScaled;
+import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilHowdahArcher;
 import cpw.mods.fml.client.registry.RenderingRegistry;
 import cpw.mods.fml.common.FMLCommonHandler;
 import lotr.common.entity.npc.LOTREntityNearHaradrimArcher;
@@ -41,7 +42,11 @@ public class ClientProxy extends CommonProxy {
             );
             System.out.println("[LOTRMoreMobs] Registered Mumakil howdah archer renderer from Near Haradrim archer renderer.");
         } else {
-            System.out.println("[LOTRMoreMobs] Could not find Near Haradrim archer renderer for Mumakil howdah archers.");
+            RenderingRegistry.registerEntityRenderingHandler(
+                    LOTREntityMumakilHowdahArcher.class,
+                    new LOTRRenderMumakilHowdahArcher()
+            );
+            System.out.println("[LOTRMoreMobs] Registered fallback Mumakil howdah archer renderer.");
         }
     }
 }
