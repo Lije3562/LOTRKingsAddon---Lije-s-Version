@@ -6,6 +6,8 @@ import lotr.common.LOTRMod;
 import lotr.common.entity.npc.LOTREntityNPC;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.monster.IMob;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.AxisAlignedBB;
 
 /**
@@ -69,6 +71,10 @@ public final class LOTRHowdahTargeting {
                 continue;
             }
 
+            if (!isUsefulHowdahCombatTarget(candidate)) {
+                continue;
+            }
+
             ++checked;
 
             if (!canNPCAttackTarget(howdahNPC, candidate)) {
@@ -86,8 +92,23 @@ public final class LOTRHowdahTargeting {
         return closest;
     }
 
+    /**
+     * Keep the howdah relay focused on actual combatants. This avoids wasting
+     * server time on nearby birds/ambient animals that LOTR faction checks may
+     * technically allow but that are not useful war targets.
+     */
+    public static boolean isUsefulHowdahCombatTarget(EntityLivingBase target) {
+        return target instanceof LOTREntityNPC
+                || target instanceof EntityPlayer
+                || target instanceof IMob;
+    }
+
     public static boolean canNPCAttackTarget(LOTREntityNPC npc, EntityLivingBase target) {
         if (npc == null || target == null || target == npc || !target.isEntityAlive()) {
+            return false;
+        }
+
+        if (!isUsefulHowdahCombatTarget(target)) {
             return false;
         }
 
