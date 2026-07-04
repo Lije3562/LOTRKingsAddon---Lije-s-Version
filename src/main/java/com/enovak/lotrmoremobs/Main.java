@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.hiring.MumakilUnitTradeInjector;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
@@ -58,6 +59,7 @@ public class Main {
     @EventHandler
     public void init(FMLInitializationEvent event) {
         LOTREntities.registerCreature(LOTREntityMumakil.class, "Mumakil", 811, 6118481, 12171165);
+        LOTREntities.registerCreature(LOTREntityMumakilHowdahArcher.class, "MumakilHowdahArcher", 812, 12171165, 6118481);
         proxy.registerRenderers();
         proxy.registerEventHandlers();
 
