@@ -1,7 +1,6 @@
 package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.Main;
-import com.enovak.lotrmoremobs.entity.ai.LOTREntityAIMumakilHowdahRiderTarget;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
@@ -27,8 +26,9 @@ public class MumakilHiredMountEventHandler {
     private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
 
     /*
-     * Invasion-style detection range boost.
-     * This only changes the rider's normal NPC followRange.
+     * Matches the vanilla LOTR invasion-spawn behavior:
+     * invasion NPCs have their followRange raised to at least 40.0 after spawn.
+     * This is intentionally only an attribute boost, not a custom target scanner.
      */
     private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 40.0D;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
@@ -71,12 +71,8 @@ public class MumakilHiredMountEventHandler {
         }
 
         /*
-         * Only touch NPCs.
-         * For normal NPCs, this method just exits or restores a previously boosted range.
-         * For a Southron driver riding a howdah Mumakil, it:
-         * - boosts followRange
-         * - installs one rider-only target assist AI
-         * - mirrors the rider's valid target onto the Mumakil so inherited horse AI/combat can react
+         * Keep this lightweight: only touch the mounted NPC's followRange and mirror
+         * any target that vanilla/LOTR AI already found. Do not scan for targets here.
          */
         if (event.entityLiving instanceof LOTREntityNPC) {
             this.updateMumakilDriverSupport((LOTREntityNPC)event.entityLiving);
@@ -99,7 +95,6 @@ public class MumakilHiredMountEventHandler {
 
             if (mumakil.hasMumakilHowdahEquipped()) {
                 this.applyMumakilDriverRange(npc);
-                this.ensureMumakilDriverTargetAI(npc);
                 this.syncMumakilTargetToDriver(npc, mumakil);
                 return;
             }
@@ -150,28 +145,6 @@ public class MumakilHiredMountEventHandler {
         data.removeTag(DRIVER_RANGE_BASE_TAG);
 
         System.out.println("[LOTRMoreMobs] Restored normal Mumakil driver detection range.");
-    }
-
-    private void ensureMumakilDriverTargetAI(LOTREntityNPC npc) {
-        if (npc.targetTasks == null || npc.targetTasks.taskEntries == null) {
-            return;
-        }
-
-        Iterator iterator = npc.targetTasks.taskEntries.iterator();
-
-        while (iterator.hasNext()) {
-            Object taskEntry = iterator.next();
-            Object aiTask = this.getFieldValue(taskEntry, "action");
-
-            if (aiTask instanceof LOTREntityAIMumakilHowdahRiderTarget) {
-                return;
-            }
-        }
-
-        npc.targetTasks.addTask(1, new LOTREntityAIMumakilHowdahRiderTarget(npc));
-        System.out.println("[LOTRMoreMobs] Installed Mumakil howdah rider target assist AI on "
-                + npc.getClass().getName()
-                + ".");
     }
 
     private void syncMumakilTargetToDriver(LOTREntityNPC npc, LOTREntityMumakil mumakil) {
