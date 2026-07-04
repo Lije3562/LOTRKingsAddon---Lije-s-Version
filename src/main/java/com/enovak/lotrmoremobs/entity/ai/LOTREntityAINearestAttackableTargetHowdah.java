@@ -13,13 +13,13 @@ import net.minecraft.entity.EntityLivingBase;
  * Small howdah-rider target helper.
  *
  * This is not a wide invasion-style scan. It deliberately caps horizontal range
- * to a normal NPC-sized bubble while allowing a taller Y box so a Southron rider
+ * to a small NPC-sized bubble while allowing a taller Y box so a Southron rider
  * sitting high on a Mumakil can notice enemies at ground level.
  */
 public class LOTREntityAINearestAttackableTargetHowdah extends LOTREntityAINearestAttackableTargetBasic {
-    private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 18.0D;
+    private static final double HOWDAH_HORIZONTAL_TARGET_RANGE = 10.0D;
     private static final double HOWDAH_VERTICAL_TARGET_RANGE = 24.0D;
-    private static final int MAX_CANDIDATES_PER_CHECK = 12;
+    private static final int MAX_CANDIDATES_PER_CHECK = 6;
 
     private final Class targetClassHowdah;
     private final int targetChanceHowdah;
