@@ -32,12 +32,12 @@ public class MumakilHiredMountEventHandler {
     private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
 
     /*
-     * Keep the Southron driver near normal NPC detection distance horizontally.
-     * The howdah-specific target AI handles only the vertical problem with its
-     * own small, capped search box instead of using an invasion-wide 40 block box.
+     * Force the howdah driver's normal followRange down while mounted. Some LOTR
+     * NPCs start at 36.0, so Math.max(base, 18) did not actually reduce them.
+     * The howdah-specific AI below handles the vertical issue with its own tiny box.
      */
-    private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 18.0D;
-    private static final int MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE = 40;
+    private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 10.0D;
+    private static final int MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE = 80;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
     private static final String DRIVER_RANGE_BASE_TAG = "LOTRMoreMobsMumakilDriverRangeBase";
     private static final String DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG = "LOTRMoreMobsMumakilCappedHowdahTargetAIInstalled";
@@ -157,7 +157,7 @@ public class MumakilHiredMountEventHandler {
             baseRange = data.getDouble(DRIVER_RANGE_BASE_TAG);
         }
 
-        double newRange = Math.max(baseRange, MUMAKIL_DRIVER_DETECTION_RANGE);
+        double newRange = MUMAKIL_DRIVER_DETECTION_RANGE;
 
         if (followRange.getBaseValue() != newRange) {
             followRange.setBaseValue(newRange);
