@@ -48,6 +48,13 @@ public class MumakilHiredMountEventHandler {
         this.setInventoryStack(mumakil, SADDLE_SLOT, new ItemStack(Items.saddle));
         this.setInventoryStack(mumakil, HOWDAH_SLOT, new ItemStack(Main.mumakilHowdah));
         mumakil.setMumakilHowdahEquipped(true);
+
+        /*
+         * This marker is intentionally set here because this join-world handler is
+         * the reliable server-side path confirmed by the logs. The marker method no
+         * longer resets the spawned flag, so this does not recreate duplicate sets.
+         */
+        MumakilHowdahArcherEventHandler.markHiredHowdahArcherCarrier(mumakil);
         this.tuneHiredMumakilFollowDistance(mumakil);
 
         System.out.println("[LOTRMoreMobs] Equipped hired Mumakil with saddle and howdah.");
