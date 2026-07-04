@@ -232,32 +232,32 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     /**
      * Same grouping as the handler: 6 wide-body, 4 lower-perch, 4 mid-perch, 1 top-perch.
-     * These are slightly higher and closer to the Mumakil center than the previous pass.
+     * Shifted farther back from the Mumakil head after the first visible screenshot.
      */
     private static final double[][] HOWDAH_ARCHER_OFFSETS = new double[][] {
             // Wide howdah body: left side, front to rear.
-            { 7.5D, -3.35D, 17.65D, -90.0D },
-            { 9.7D, -3.55D, 17.65D, -90.0D },
-            {11.9D, -3.35D, 17.65D, -90.0D },
+            {10.2D, -3.05D, 17.65D, -90.0D },
+            {12.2D, -3.25D, 17.65D, -90.0D },
+            {14.2D, -3.05D, 17.65D, -90.0D },
 
             // Wide howdah body: right side, front to rear.
-            { 7.5D,  3.35D, 17.65D,  90.0D },
-            { 9.7D,  3.55D, 17.65D,  90.0D },
-            {11.9D,  3.35D, 17.65D,  90.0D },
+            {10.2D,  3.05D, 17.65D,  90.0D },
+            {12.2D,  3.25D, 17.65D,  90.0D },
+            {14.2D,  3.05D, 17.65D,  90.0D },
 
             // Lower side perches: two on each lower perch.
-            { 8.4D, -4.25D, 15.55D, -90.0D },
-            {11.2D, -4.25D, 15.55D, -90.0D },
-            { 8.4D,  4.25D, 15.55D,  90.0D },
-            {11.2D,  4.25D, 15.55D,  90.0D },
+            {10.6D, -3.85D, 15.55D, -90.0D },
+            {13.0D, -3.85D, 15.55D, -90.0D },
+            {10.6D,  3.85D, 15.55D,  90.0D },
+            {13.0D,  3.85D, 15.55D,  90.0D },
 
             // Middle perch: four across the upper middle area.
-            { 6.7D, -1.25D, 19.25D,   0.0D },
-            { 8.1D, -0.4D, 19.25D,   0.0D },
-            { 8.1D,  0.4D, 19.25D,   0.0D },
-            { 6.7D,  1.25D, 19.25D,   0.0D },
+            { 9.2D, -1.15D, 19.25D,   0.0D },
+            {10.7D, -0.35D, 19.25D,   0.0D },
+            {10.7D,  0.35D, 19.25D,   0.0D },
+            { 9.2D,  1.15D, 19.25D,   0.0D },
 
             // Top perch: one lookout.
-            { 9.8D,  0.0D, 22.35D,   0.0D }
+            {12.0D,  0.0D, 22.35D,   0.0D }
     };
 }
