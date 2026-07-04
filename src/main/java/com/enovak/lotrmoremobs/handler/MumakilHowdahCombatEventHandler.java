@@ -17,15 +17,16 @@ import net.minecraftforge.event.entity.living.LivingEvent.LivingUpdateEvent;
  * reuse the same LOTRHowdahTargeting helper without forcing the Mumakil to charge.
  */
 public class MumakilHowdahCombatEventHandler {
-    private static final int TARGET_RELAY_INTERVAL = 10;
-    private static final int DEBUG_INTERVAL = 80;
+    private static final int TARGET_RELAY_INTERVAL = 40;
+    private static final int DEBUG_INTERVAL = 400;
 
-    private static final double DRIVER_TARGET_HORIZONTAL_RANGE = 6.0D;
+    private static final double DRIVER_TARGET_HORIZONTAL_RANGE = 5.0D;
     private static final double DRIVER_TARGET_BELOW = 1.0D;
-    private static final double DRIVER_TARGET_HEIGHT = 7.0D;
-    private static final int DRIVER_TARGET_MAX_CANDIDATES = 12;
+    private static final double DRIVER_TARGET_HEIGHT = 6.0D;
+    private static final int DRIVER_TARGET_MAX_CANDIDATES = 6;
 
     private boolean loggedFirstMumakilUpdate;
+    private boolean loggedFirstAssignedTarget;
 
     public MumakilHowdahCombatEventHandler() {
         System.out.println("[LOTRMoreMobs] Registered Mumakil howdah combat event handler.");
@@ -58,16 +59,11 @@ public class MumakilHowdahCombatEventHandler {
     }
 
     private void updateMumakilHowdahCombat(LOTREntityMumakil mumakil) {
-        long worldTime = mumakil.worldObj.getTotalWorldTime();
-
         if (!mumakil.hasMumakilHowdahEquipped()) {
-            this.debugOccasionally(mumakil, worldTime,
-                    "[LOTRMoreMobs] Howdah combat relay skipped: Mumakil has no howdah equipped. mumakilId="
-                            + mumakil.getEntityId()
-                            + ".");
             return;
         }
 
+        long worldTime = mumakil.worldObj.getTotalWorldTime();
         LOTREntityNPC driver = this.getMumakilDriver(mumakil);
 
         if (driver == null) {
@@ -84,13 +80,6 @@ public class MumakilHowdahCombatEventHandler {
         if (currentMumakilTarget != null && currentMumakilTarget.isEntityAlive()) {
             if (driver.getAttackTarget() == null && LOTRHowdahTargeting.canNPCAttackTarget(driver, currentMumakilTarget)) {
                 driver.setAttackTarget(currentMumakilTarget);
-                System.out.println("[LOTRMoreMobs] Howdah combat relay copied existing Mumakil target to driver: mumakilId="
-                        + mumakil.getEntityId()
-                        + " target="
-                        + currentMumakilTarget.getClass().getName()
-                        + " targetId="
-                        + currentMumakilTarget.getEntityId()
-                        + ".");
             }
             return;
         }
@@ -99,13 +88,6 @@ public class MumakilHowdahCombatEventHandler {
         if (currentDriverTarget != null && currentDriverTarget.isEntityAlive()
                 && LOTRHowdahTargeting.canNPCAttackTarget(driver, currentDriverTarget)) {
             mumakil.setAttackTarget(currentDriverTarget);
-            System.out.println("[LOTRMoreMobs] Howdah combat relay copied existing driver target to Mumakil: mumakilId="
-                    + mumakil.getEntityId()
-                    + " target="
-                    + currentDriverTarget.getClass().getName()
-                    + " targetId="
-                    + currentDriverTarget.getEntityId()
-                    + ".");
             return;
         }
 
@@ -133,6 +115,15 @@ public class MumakilHowdahCombatEventHandler {
         }
 
         LOTRHowdahTargeting.assignTargetToNPCAndMumakil(mumakil, driver, target);
+        this.logFirstAssignedTarget(mumakil, driver, target);
+    }
+
+    private void logFirstAssignedTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver, EntityLivingBase target) {
+        if (this.loggedFirstAssignedTarget) {
+            return;
+        }
+
+        this.loggedFirstAssignedTarget = true;
         System.out.println("[LOTRMoreMobs] Howdah combat relay assigned target: mumakilId="
                 + mumakil.getEntityId()
                 + " driver="
@@ -141,7 +132,7 @@ public class MumakilHowdahCombatEventHandler {
                 + target.getClass().getName()
                 + " targetId="
                 + target.getEntityId()
-                + ".");
+                + ". Further assignment logs suppressed for performance.");
     }
 
     private LOTREntityNPC getMumakilDriver(LOTREntityMumakil mumakil) {
