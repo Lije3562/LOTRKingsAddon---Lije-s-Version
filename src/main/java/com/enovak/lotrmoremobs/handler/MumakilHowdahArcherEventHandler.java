@@ -5,13 +5,19 @@ import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Method;
 import java.util.List;
+import lotr.common.LOTRMod;
+import lotr.common.entity.ai.LOTRNPCTargetSelector;
+import lotr.common.entity.npc.LOTREntityNPC;
+import lotr.common.fac.LOTRFaction;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.world.World;
 import net.minecraftforge.event.entity.EntityJoinWorldEvent;
+import net.minecraftforge.event.entity.living.LivingDeathEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
 
 /**
@@ -22,19 +28,30 @@ import net.minecraftforge.event.entity.living.LivingEvent;
  * custom passive passenger entities tagged to a Mumakil and slot. The custom
  * archer entity handles no-gravity attachment on both server and client.
  *
- * This deliberately does not add target AI, attack AI, arrow shooting, downward
- * AABB searches, or combat relays.
+ * Combat is deliberately lightweight: one slow target scan per Mumakil, no pathing,
+ * no chase AI, and fixed passengers decide only whether to look/fire.
  */
 public class MumakilHowdahArcherEventHandler {
     private static final String MUMAKIL_ARCHER_CARRIER_KEY = "LOTRMoreMobsHiredHowdahArcherCarrier";
+    private static final String MUMAKIL_ARCHER_CARRIER_VERSION_KEY = "LOTRMoreMobsHiredHowdahArcherCarrierVersion";
     private static final String MUMAKIL_ARCHERS_SPAWNED_KEY = "LOTRMoreMobsHowdahArchersSpawned";
+    private static final String MUMAKIL_ARCHERS_NEXT_CHECK_KEY = "LOTRMoreMobsHowdahArchersNextCheck";
+    private static final String MUMAKIL_ARCHERS_NEXT_REPAIR_KEY = "LOTRMoreMobsHowdahArchersNextRepair";
+    private static final String MUMAKIL_ARCHERS_NEXT_TARGET_SCAN_KEY = "LOTRMoreMobsHowdahArchersNextTargetScan";
     private static final String ARCHER_TAG_KEY = "LOTRMoreMobsHowdahArcher";
     private static final String ARCHER_SLOT_KEY = "LOTRMoreMobsHowdahArcherSlot";
+    private static final String LEGACY_ARCHER_SLOT_KEY = "LOTRMoreMobsHowdahSlot";
     private static final String ARCHER_MOUNT_ID_KEY = "LOTRMoreMobsHowdahMountId";
     private static final String ARCHER_MOUNT_UUID_KEY = "LOTRMoreMobsHowdahMountUuid";
 
-    private static final int HOWDAH_ARCHER_COUNT = 15;
-    private static final int ARCHER_COUNT_CHECK_INTERVAL = 40;
+    private static final int HOWDAH_ARCHER_COUNT = LOTREntityMumakilHowdahArcher.getHowdahArcherSlotCount();
+    private static final int CURRENT_CARRIER_VERSION = 2;
+    private static final int ARCHER_COUNT_CHECK_INTERVAL = 200;
+    private static final int ARCHER_REPAIR_COOLDOWN = 400;
+    private static final int TARGET_SCAN_MIN_INTERVAL = 40;
+    private static final int TARGET_SCAN_RANDOM_INTERVAL = 21;
+    private static final double TARGET_SCAN_RANGE = 36.0D;
+    private static final double TARGET_SCAN_VERTICAL_RANGE = 28.0D;
 
     public static void markHiredHowdahArcherCarrier(LOTREntityMumakil mumakil) {
         if (mumakil == null || mumakil.worldObj == null || mumakil.worldObj.isRemote) {
@@ -47,6 +64,7 @@ public class MumakilHowdahArcherEventHandler {
          * full archer set when a world/chunk reloaded.
          */
         mumakil.getEntityData().setBoolean(MUMAKIL_ARCHER_CARRIER_KEY, true);
+        mumakil.getEntityData().setInteger(MUMAKIL_ARCHER_CARRIER_VERSION_KEY, CURRENT_CARRIER_VERSION);
     }
 
     @SubscribeEvent
@@ -55,14 +73,37 @@ public class MumakilHowdahArcherEventHandler {
             return;
         }
 
+        if (event.entity instanceof LOTREntityMumakilHowdahArcher) {
+            LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)event.entity;
+            if (!archer.isRuntimeHowdahPassenger()) {
+                archer.setDead();
+                return;
+            }
+
+            makeArcherPassive(archer);
+            return;
+        }
+
         if (isTaggedHowdahArcher(event.entity) && event.entity instanceof EntityLiving) {
-            makeArcherPassive((EntityLiving)event.entity);
+            ((EntityLiving)event.entity).setDead();
         }
     }
 
     @SubscribeEvent
     public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
-        if (event == null || event.entityLiving == null || event.entityLiving.worldObj == null || event.entityLiving.worldObj.isRemote) {
+        if (event == null || event.entityLiving == null || event.entityLiving.worldObj == null) {
+            return;
+        }
+
+        if (event.entityLiving.worldObj.isRemote) {
+            if (event.entityLiving instanceof LOTREntityMumakil
+                    && ((LOTREntityMumakil)event.entityLiving).hasMumakilHowdahEquipped()) {
+                updateHowdahArcherSharedTarget(
+                        (LOTREntityMumakil)event.entityLiving,
+                        event.entityLiving.worldObj.getTotalWorldTime()
+                );
+            }
+
             return;
         }
 
@@ -70,6 +111,13 @@ public class MumakilHowdahArcherEventHandler {
 
         if (living instanceof LOTREntityMumakil) {
             updateHiredMumakilArchers((LOTREntityMumakil)living);
+            return;
+        }
+
+        if (living instanceof LOTREntityMumakilHowdahArcher
+                && !((LOTREntityMumakilHowdahArcher)living).isRuntimeHowdahPassenger()
+                && !((LOTREntityMumakilHowdahArcher)living).isDetachedFromDeadMumakil()) {
+            living.setDead();
             return;
         }
 
@@ -81,31 +129,49 @@ public class MumakilHowdahArcherEventHandler {
              */
             if (!(living instanceof LOTREntityMumakilHowdahArcher)) {
                 living.setDead();
-                return;
+            }
+        }
+    }
+
+    @SubscribeEvent
+    public void onLivingDeath(LivingDeathEvent event) {
+        if (event == null
+                || event.entityLiving == null
+                || event.entityLiving.worldObj == null
+                || event.entityLiving.worldObj.isRemote
+                || !(event.entityLiving instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        detachHowdahArchersForDeadMumakil((LOTREntityMumakil)event.entityLiving);
+    }
+
+    private static void detachHowdahArchersForDeadMumakil(LOTREntityMumakil mumakil) {
+        List loaded = mumakil.worldObj.loadedEntityList;
+
+        for (int i = 0; i < loaded.size(); ++i) {
+            Object object = loaded.get(i);
+            if (!(object instanceof LOTREntityMumakilHowdahArcher)) {
+                continue;
             }
 
-            makeArcherPassive((EntityLiving)living);
+            LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)object;
+            if (!archer.isDead && archer.isRuntimeHowdahPassenger() && isArcherAssignedToMount(archer, mumakil)) {
+                archer.detachFromHowdahForMumakilDeath(mumakil);
+            }
         }
     }
 
     private static void updateHiredMumakilArchers(LOTREntityMumakil mumakil) {
         NBTTagCompound data = mumakil.getEntityData();
 
-        if (!data.getBoolean(MUMAKIL_ARCHER_CARRIER_KEY)) {
+        if (!data.getBoolean(MUMAKIL_ARCHER_CARRIER_KEY)
+                || data.getInteger(MUMAKIL_ARCHER_CARRIER_VERSION_KEY) != CURRENT_CARRIER_VERSION) {
             return;
         }
 
-        if (!mumakil.getBelongsToNPC() || !mumakil.hasMumakilHowdahEquipped()) {
-            return;
-        }
-
-        if (data.getBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY)) {
-            if (mumakil.ticksExisted % ARCHER_COUNT_CHECK_INTERVAL == 0) {
-                int valid = normalizeExistingArchersForMumakil(mumakil);
-                if (valid < HOWDAH_ARCHER_COUNT) {
-                    data.setBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY, false);
-                }
-            }
+        if (!mumakil.hasMumakilHowdahEquipped()) {
+            LOTREntityMumakilHowdahArcher.setSharedHowdahTarget(mumakil, null);
             return;
         }
 
@@ -118,75 +184,223 @@ public class MumakilHowdahArcherEventHandler {
             return;
         }
 
-        int existing = countExistingArchersForMumakil(mumakil);
-        if (existing > 0) {
-            int removed = removeExistingArchersForMumakil(mumakil);
-            System.out.println("[LOTRMoreMobs] Removed " + removed + " old passive Mumakil howdah archers before respawn.");
+        long worldTime = mumakil.worldObj.getTotalWorldTime();
+        updateHowdahArcherSharedTarget(mumakil, worldTime);
+
+        if (!mumakil.getBelongsToNPC()) {
+            return;
         }
 
-        int spawned = spawnPassiveHowdahArchers(mumakil);
-        if (spawned > 0) {
+        if (!data.getBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY)) {
+            SlotScanResult result = normalizeExistingArchersForMumakil(mumakil);
+            int spawned = spawnMissingHowdahArchers(mumakil, result.seenSlots, true);
+
             data.setBoolean(MUMAKIL_ARCHERS_SPAWNED_KEY, true);
+            data.setLong(MUMAKIL_ARCHERS_NEXT_CHECK_KEY, worldTime + ARCHER_COUNT_CHECK_INTERVAL);
+            data.setLong(MUMAKIL_ARCHERS_NEXT_REPAIR_KEY, worldTime + ARCHER_REPAIR_COOLDOWN);
+
+            System.out.println("[LOTRMoreMobs] Initial Mumakil howdah archer set for mount="
+                    + mumakil.getEntityId()
+                    + ": kept="
+                    + result.valid
+                    + ", spawned="
+                    + spawned
+                    + ".");
+            return;
+        }
+
+        long nextCheck = data.getLong(MUMAKIL_ARCHERS_NEXT_CHECK_KEY);
+        if (nextCheck > worldTime) {
+            return;
+        }
+
+        data.setLong(MUMAKIL_ARCHERS_NEXT_CHECK_KEY, worldTime + ARCHER_COUNT_CHECK_INTERVAL);
+        SlotScanResult result = normalizeExistingArchersForMumakil(mumakil);
+
+        if (result.valid >= HOWDAH_ARCHER_COUNT) {
+            data.setLong(MUMAKIL_ARCHERS_NEXT_REPAIR_KEY, 0L);
+            return;
+        }
+
+        long nextRepair = data.getLong(MUMAKIL_ARCHERS_NEXT_REPAIR_KEY);
+        if (nextRepair <= worldTime) {
+            spawnMissingHowdahArchers(mumakil, result.seenSlots, false);
+            data.setLong(MUMAKIL_ARCHERS_NEXT_REPAIR_KEY, worldTime + ARCHER_REPAIR_COOLDOWN);
         }
     }
 
-    private static int spawnPassiveHowdahArchers(LOTREntityMumakil mumakil) {
-        World world = mumakil.worldObj;
-        String mountUuid = getEntityPersistentIdString(mumakil);
-        int spawned = 0;
+    private static void updateHowdahArcherSharedTarget(LOTREntityMumakil mumakil, long worldTime) {
+        NBTTagCompound data = mumakil.getEntityData();
+        long nextScan = data.getLong(MUMAKIL_ARCHERS_NEXT_TARGET_SCAN_KEY);
+        if (nextScan > worldTime) {
+            return;
+        }
 
-        System.out.println("[LOTRMoreMobs] Attempting to spawn " + HOWDAH_ARCHER_COUNT + " gravity-proof Mumakil howdah archers for mount=" + mumakil.getEntityId() + ".");
+        data.setLong(
+                MUMAKIL_ARCHERS_NEXT_TARGET_SCAN_KEY,
+                worldTime + TARGET_SCAN_MIN_INTERVAL + mumakil.worldObj.rand.nextInt(TARGET_SCAN_RANDOM_INTERVAL)
+        );
 
-        for (int slot = 0; slot < HOWDAH_ARCHER_COUNT; ++slot) {
-            LOTREntityMumakilHowdahArcher archer = new LOTREntityMumakilHowdahArcher(world);
-            archer.onSpawnWithEgg(null);
-            archer.setHowdahAttachment(mumakil, slot);
-            tagArcher(archer, mumakil, mountUuid, slot);
-            makeArcherPassive(archer);
+        EntityLivingBase target = findBestHowdahArcherTarget(mumakil);
+        LOTREntityMumakilHowdahArcher.setSharedHowdahTarget(mumakil, target);
+    }
 
-            if (world.spawnEntityInWorld(archer)) {
-                ++spawned;
+    private static EntityLivingBase findBestHowdahArcherTarget(LOTREntityMumakil mumakil) {
+        List nearby = mumakil.worldObj.getEntitiesWithinAABB(
+                EntityLivingBase.class,
+                mumakil.boundingBox.expand(TARGET_SCAN_RANGE, TARGET_SCAN_VERTICAL_RANGE, TARGET_SCAN_RANGE)
+        );
+        EntityLiving selectorOwner = findHowdahTargetSelectorOwner(mumakil);
+        LOTRNPCTargetSelector targetSelector = selectorOwner == null ? null : new LOTRNPCTargetSelector(selectorOwner);
+
+        EntityLivingBase bestTarget = null;
+        int bestPriority = Integer.MAX_VALUE;
+        double bestDistanceSq = Double.MAX_VALUE;
+
+        for (int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
+            if (!canHowdahArchersTarget(mumakil, candidate, targetSelector)) {
+                continue;
+            }
+
+            int priority = getHowdahTargetPriority(candidate);
+            double distanceSq = mumakil.getDistanceSqToEntity(candidate);
+            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
+                bestTarget = candidate;
+                bestPriority = priority;
+                bestDistanceSq = distanceSq;
             }
         }
 
-        System.out.println("[LOTRMoreMobs] Spawned " + spawned + " gravity-proof Mumakil howdah archers for mount=" + mumakil.getEntityId() + ".");
+        return bestTarget;
+    }
+
+    private static EntityLiving findHowdahTargetSelectorOwner(LOTREntityMumakil mumakil) {
+        List loaded = mumakil.worldObj.loadedEntityList;
+        for (int i = 0; i < loaded.size(); ++i) {
+            Object object = loaded.get(i);
+            if (!(object instanceof LOTREntityMumakilHowdahArcher)) {
+                continue;
+            }
+
+            LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)object;
+            if (!archer.isDead && archer.isRuntimeHowdahPassenger() && isArcherAssignedToMount(archer, mumakil)) {
+                return archer;
+            }
+        }
+
+        return mumakil.riddenByEntity instanceof EntityLiving ? (EntityLiving)mumakil.riddenByEntity : null;
+    }
+
+    private static boolean canHowdahArchersTarget(LOTREntityMumakil mumakil, EntityLivingBase target, LOTRNPCTargetSelector targetSelector) {
+        if (target == null
+                || target == mumakil
+                || target == mumakil.riddenByEntity
+                || target instanceof LOTREntityMumakil
+                || target instanceof LOTREntityMumakilHowdahArcher
+                || !target.isEntityAlive()
+                || target.riddenByEntity != null
+                || target.ridingEntity != null) {
+            return false;
+        }
+
+        if (target instanceof EntityPlayer) {
+            return !((EntityPlayer)target).capabilities.isCreativeMode
+                    && targetSelector != null
+                    && targetSelector.isEntityApplicable(target);
+        }
+
+        if (!(target instanceof LOTREntityNPC)) {
+            return false;
+        }
+
+        LOTREntityNPC npc = (LOTREntityNPC)target;
+        if (npc.hiredNPCInfo.isActive) {
+            return false;
+        }
+
+        if (targetSelector != null) {
+            return targetSelector.isEntityApplicable(target);
+        }
+
+        LOTRFaction targetFaction = LOTRMod.getNPCFaction(npc);
+        if (targetFaction == null || !LOTRFaction.NEAR_HARAD.isBadRelation(targetFaction)) {
+            return false;
+        }
+
+        if (mumakil.riddenByEntity instanceof EntityCreature
+                && !LOTRMod.canNPCAttackEntity((EntityCreature)mumakil.riddenByEntity, target, false)) {
+            return false;
+        }
+
+        return true;
+    }
+
+    private static int getHowdahTargetPriority(EntityLivingBase target) {
+        if (target instanceof LOTREntityNPC) {
+            return 0;
+        }
+
+        if (target instanceof EntityPlayer) {
+            return 1;
+        }
+
+        return 2;
+    }
+
+    private static int spawnMissingHowdahArchers(LOTREntityMumakil mumakil, boolean[] seenSlots, boolean initialSpawn) {
+        int spawned = 0;
+        StringBuilder resultSlots = new StringBuilder();
+
+        for (int slot = 0; slot < HOWDAH_ARCHER_COUNT; ++slot) {
+            if (seenSlots[slot]) {
+                continue;
+            }
+
+            if (spawnPassiveHowdahArcher(mumakil, slot)) {
+                seenSlots[slot] = true;
+                ++spawned;
+
+                if (!initialSpawn) {
+                    resultSlots.append(resultSlots.length() == 0 ? "" : ",").append(slot);
+                }
+            }
+        }
+
+        if (!initialSpawn && spawned > 0) {
+            System.out.println("[LOTRMoreMobs] Spawned "
+                    + spawned
+                    + " missing howdah archer slots for mount="
+                    + mumakil.getEntityId()
+                    + " slots="
+                    + resultSlots
+                    + ".");
+        }
+
         return spawned;
     }
 
-    private static int countExistingArchersForMumakil(LOTREntityMumakil mumakil) {
-        int count = 0;
-        List loaded = mumakil.worldObj.loadedEntityList;
+    private static boolean spawnPassiveHowdahArcher(LOTREntityMumakil mumakil, int slot) {
+        World world = mumakil.worldObj;
+        String mountUuid = getEntityPersistentIdString(mumakil);
 
-        for (int i = 0; i < loaded.size(); ++i) {
-            Object object = loaded.get(i);
-            if (object instanceof EntityLiving && isTaggedHowdahArcher((Entity)object) && isArcherAssignedToMount((EntityLiving)object, mumakil)) {
-                ++count;
-            }
-        }
+        LOTREntityMumakilHowdahArcher archer = new LOTREntityMumakilHowdahArcher(world);
+        archer.onSpawnWithEgg(null);
+        archer.setRuntimeHowdahPassenger(true);
+        archer.setHowdahAttachment(mumakil, slot);
+        tagArcher(archer, mumakil, mountUuid, slot);
+        makeArcherPassive(archer);
 
-        return count;
+        return world.spawnEntityInWorld(archer);
     }
 
-    private static int removeExistingArchersForMumakil(LOTREntityMumakil mumakil) {
-        int removed = 0;
+    private static SlotScanResult normalizeExistingArchersForMumakil(LOTREntityMumakil mumakil) {
+        SlotScanResult result = new SlotScanResult();
         List loaded = mumakil.worldObj.loadedEntityList;
-
-        for (int i = 0; i < loaded.size(); ++i) {
-            Object object = loaded.get(i);
-            if (object instanceof EntityLiving && isTaggedHowdahArcher((Entity)object) && isArcherAssignedToMount((EntityLiving)object, mumakil)) {
-                ((EntityLiving)object).setDead();
-                ++removed;
-            }
-        }
-
-        return removed;
-    }
-
-    private static int normalizeExistingArchersForMumakil(LOTREntityMumakil mumakil) {
-        boolean[] seenSlots = new boolean[HOWDAH_ARCHER_COUNT];
-        int valid = 0;
-        int removed = 0;
-        List loaded = mumakil.worldObj.loadedEntityList;
+        String mountUuid = getEntityPersistentIdString(mumakil);
+        int invalidRemoved = 0;
+        int duplicateRemoved = 0;
+        int staleRemoved = 0;
 
         for (int i = 0; i < loaded.size(); ++i) {
             Object object = loaded.get(i);
@@ -195,29 +409,54 @@ public class MumakilHowdahArcherEventHandler {
             }
 
             EntityLiving archer = (EntityLiving)object;
+            if (archer.isDead) {
+                continue;
+            }
+
             if (!isArcherAssignedToMount(archer, mumakil)) {
                 continue;
             }
 
-            int slot = archer.getEntityData().getInteger(ARCHER_SLOT_KEY);
-            if (slot < 0 || slot >= HOWDAH_ARCHER_COUNT || seenSlots[slot] || !(archer instanceof LOTREntityMumakilHowdahArcher)) {
+            if (archer instanceof LOTREntityMumakilHowdahArcher
+                    && !((LOTREntityMumakilHowdahArcher)archer).isRuntimeHowdahPassenger()) {
                 archer.setDead();
-                ++removed;
+                ++staleRemoved;
                 continue;
             }
 
-            seenSlots[slot] = true;
-            ++valid;
-            archer.getEntityData().setInteger(ARCHER_MOUNT_ID_KEY, mumakil.getEntityId());
+            int slot = getArcherSlot(archer);
+            if (slot < 0 || slot >= HOWDAH_ARCHER_COUNT || !(archer instanceof LOTREntityMumakilHowdahArcher)) {
+                archer.setDead();
+                ++invalidRemoved;
+                continue;
+            }
+
+            if (result.seenSlots[slot]) {
+                archer.setDead();
+                ++duplicateRemoved;
+                continue;
+            }
+
+            result.seenSlots[slot] = true;
+            ++result.valid;
+            tagArcher((LOTREntityMumakilHowdahArcher)archer, mumakil, mountUuid, slot);
             ((LOTREntityMumakilHowdahArcher)archer).setHowdahAttachment(mumakil, slot);
             makeArcherPassive(archer);
         }
 
-        if (removed > 0) {
-            System.out.println("[LOTRMoreMobs] Removed " + removed + " duplicate/legacy passive Mumakil howdah archers for mount=" + mumakil.getEntityId() + ".");
+        if (invalidRemoved > 0 || duplicateRemoved > 0 || staleRemoved > 0) {
+            System.out.println("[LOTRMoreMobs] Cleaned passive Mumakil howdah archers for mount="
+                    + mumakil.getEntityId()
+                    + ": stale="
+                    + staleRemoved
+                    + ", invalid="
+                    + invalidRemoved
+                    + ", duplicate="
+                    + duplicateRemoved
+                    + ".");
         }
 
-        return valid;
+        return result;
     }
 
     private static boolean isArcherAssignedToMount(EntityLiving archer, LOTREntityMumakil mumakil) {
@@ -241,12 +480,27 @@ public class MumakilHowdahArcherEventHandler {
         data.setString(ARCHER_MOUNT_UUID_KEY, mountUuid);
     }
 
+    private static int getArcherSlot(EntityLiving archer) {
+        NBTTagCompound data = archer.getEntityData();
+        if (data.hasKey(ARCHER_SLOT_KEY)) {
+            return data.getInteger(ARCHER_SLOT_KEY);
+        }
+
+        if (data.hasKey(LEGACY_ARCHER_SLOT_KEY)) {
+            int slot = data.getInteger(LEGACY_ARCHER_SLOT_KEY);
+            data.setInteger(ARCHER_SLOT_KEY, slot);
+            return slot;
+        }
+
+        return -1;
+    }
+
     private static void makeArcherPassive(EntityLiving archer) {
-        if (archer.tasks != null && archer.tasks.taskEntries != null) {
+        if (archer.tasks != null && archer.tasks.taskEntries != null && !archer.tasks.taskEntries.isEmpty()) {
             archer.tasks.taskEntries.clear();
         }
 
-        if (archer.targetTasks != null && archer.targetTasks.taskEntries != null) {
+        if (archer.targetTasks != null && archer.targetTasks.taskEntries != null && !archer.targetTasks.taskEntries.isEmpty()) {
             archer.targetTasks.taskEntries.clear();
         }
 
@@ -254,7 +508,7 @@ public class MumakilHowdahArcherEventHandler {
             EntityCreature creature = (EntityCreature)archer;
             creature.setAttackTarget(null);
 
-            if (creature.getNavigator() != null) {
+            if (!(archer instanceof LOTREntityMumakilHowdahArcher) && creature.getNavigator() != null) {
                 creature.getNavigator().clearPathEntity();
             }
         }
@@ -266,7 +520,10 @@ public class MumakilHowdahArcherEventHandler {
         archer.fallDistance = 0.0F;
         archer.onGround = true;
         archer.isAirBorne = false;
-        invokeNoArgMethod(archer, "enablePersistence", "func_110163_bv");
+
+        if (!(archer instanceof LOTREntityMumakilHowdahArcher)) {
+            invokeNoArgMethod(archer, "enablePersistence", "func_110163_bv");
+        }
     }
 
     private static boolean isTaggedHowdahArcher(Entity entity) {
@@ -307,5 +564,10 @@ public class MumakilHowdahArcherEventHandler {
         }
 
         return null;
+    }
+
+    private static class SlotScanResult {
+        private final boolean[] seenSlots = new boolean[HOWDAH_ARCHER_COUNT];
+        private int valid;
     }
 }
