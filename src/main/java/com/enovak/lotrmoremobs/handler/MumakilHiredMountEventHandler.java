@@ -1,17 +1,21 @@
 package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.entity.ai.LOTREntityAINearestAttackableTargetHowdah;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
 import java.util.Iterator;
 import lotr.common.LOTRMod;
+import lotr.common.entity.ai.LOTRNPCTargetSelector;
 import lotr.common.entity.npc.LOTREntityNPC;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
+import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.attributes.IAttributeInstance;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -28,14 +32,15 @@ public class MumakilHiredMountEventHandler {
     private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
 
     /*
-     * Matches the vanilla LOTR invasion-spawn behavior:
-     * invasion NPCs have their followRange raised to at least 40.0 after spawn.
-     * Keep this as an attribute boost only. Do not install custom target scans here;
-     * both high-vertical target-scan experiments caused server tick lag in testing.
+     * Keep the Southron driver near normal NPC detection distance horizontally.
+     * The howdah-specific target AI handles only the vertical problem with its
+     * own small, capped search box instead of using an invasion-wide 40 block box.
      */
-    private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 40.0D;
+    private static final double MUMAKIL_DRIVER_DETECTION_RANGE = 18.0D;
+    private static final int MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE = 40;
     private static final String DRIVER_RANGE_APPLIED_TAG = "LOTRMoreMobsMumakilDriverRangeApplied";
     private static final String DRIVER_RANGE_BASE_TAG = "LOTRMoreMobsMumakilDriverRangeBase";
+    private static final String DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG = "LOTRMoreMobsMumakilCappedHowdahTargetAIInstalled";
 
     private static final String[] INVENTORY_FIELDS = new String[] {
             "horseChest",
@@ -74,8 +79,8 @@ public class MumakilHiredMountEventHandler {
         }
 
         /*
-         * Lightweight only: do no area scans. Only handle NPCs that are currently
-         * mounted on a howdah Mumakil, then mirror already-known targets both ways.
+         * Only Mumakil drivers get real work. Other NPCs only perform a cheap tag
+         * check so previously boosted riders can be restored if they dismount.
          */
         if (event.entityLiving instanceof LOTREntityNPC) {
             this.updateMumakilDriverSupport((LOTREntityNPC)event.entityLiving);
@@ -118,16 +123,19 @@ public class MumakilHiredMountEventHandler {
 
     private void updateMumakilDriverSupport(LOTREntityNPC npc) {
         if (!(npc.ridingEntity instanceof LOTREntityMumakil)) {
+            this.restoreNormalDriverRange(npc);
             return;
         }
 
         LOTREntityMumakil mumakil = (LOTREntityMumakil)npc.ridingEntity;
 
         if (!mumakil.hasMumakilHowdahEquipped()) {
+            this.restoreNormalDriverRange(npc);
             return;
         }
 
         this.applyMumakilDriverRange(npc);
+        this.ensureMumakilDriverHowdahTargetAI(npc);
         this.syncMumakilAndDriverTargets(npc, mumakil);
     }
 
@@ -139,21 +147,57 @@ public class MumakilHiredMountEventHandler {
         }
 
         NBTTagCompound data = npc.getEntityData();
+        double baseRange;
 
         if (!data.getBoolean(DRIVER_RANGE_APPLIED_TAG)) {
-            double baseRange = followRange.getBaseValue();
-            double newRange = Math.max(baseRange, MUMAKIL_DRIVER_DETECTION_RANGE);
-
+            baseRange = followRange.getBaseValue();
             data.setBoolean(DRIVER_RANGE_APPLIED_TAG, true);
             data.setDouble(DRIVER_RANGE_BASE_TAG, baseRange);
-            followRange.setBaseValue(newRange);
+        } else {
+            baseRange = data.getDouble(DRIVER_RANGE_BASE_TAG);
+        }
 
+        double newRange = Math.max(baseRange, MUMAKIL_DRIVER_DETECTION_RANGE);
+
+        if (followRange.getBaseValue() != newRange) {
+            followRange.setBaseValue(newRange);
             System.out.println("[LOTRMoreMobs] Applied Mumakil driver detection range from "
                     + baseRange
                     + " to "
                     + newRange
                     + ".");
         }
+    }
+
+    private void ensureMumakilDriverHowdahTargetAI(LOTREntityNPC npc) {
+        NBTTagCompound data = npc.getEntityData();
+
+        if (data.getBoolean(DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG)) {
+            return;
+        }
+
+        if (npc.targetTasks == null) {
+            return;
+        }
+
+        data.setBoolean(DRIVER_HOWDAH_TARGET_AI_INSTALLED_TAG, true);
+        npc.targetTasks.addTask(4, new LOTREntityAINearestAttackableTargetHowdah(
+                npc,
+                EntityPlayer.class,
+                MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE,
+                true
+        ));
+        npc.targetTasks.addTask(4, new LOTREntityAINearestAttackableTargetHowdah(
+                npc,
+                EntityLiving.class,
+                MUMAKIL_DRIVER_HOWDAH_TARGET_CHANCE,
+                true,
+                new LOTRNPCTargetSelector(npc)
+        ));
+
+        System.out.println("[LOTRMoreMobs] Installed capped Mumakil howdah rider target AI on "
+                + npc.getClass().getName()
+                + ".");
     }
 
     private void restoreNormalDriverRange(LOTREntityNPC npc) {
