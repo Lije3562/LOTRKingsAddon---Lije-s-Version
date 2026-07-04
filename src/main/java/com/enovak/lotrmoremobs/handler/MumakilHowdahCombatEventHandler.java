@@ -25,6 +25,12 @@ public class MumakilHowdahCombatEventHandler {
     private static final double DRIVER_TARGET_HEIGHT = 7.0D;
     private static final int DRIVER_TARGET_MAX_CANDIDATES = 12;
 
+    private boolean loggedFirstMumakilUpdate;
+
+    public MumakilHowdahCombatEventHandler() {
+        System.out.println("[LOTRMoreMobs] Registered Mumakil howdah combat event handler.");
+    }
+
     @SubscribeEvent
     public void onLivingUpdate(LivingUpdateEvent event) {
         if (event == null || event.entityLiving == null || event.entityLiving.worldObj == null) {
@@ -35,16 +41,34 @@ public class MumakilHowdahCombatEventHandler {
             return;
         }
 
-        this.updateMumakilHowdahCombat((LOTREntityMumakil)event.entityLiving);
+        LOTREntityMumakil mumakil = (LOTREntityMumakil)event.entityLiving;
+
+        if (!this.loggedFirstMumakilUpdate) {
+            this.loggedFirstMumakilUpdate = true;
+            System.out.println("[LOTRMoreMobs] Howdah combat handler saw Mumakil update: mumakilId="
+                    + mumakil.getEntityId()
+                    + " hasHowdah="
+                    + mumakil.hasMumakilHowdahEquipped()
+                    + " riddenBy="
+                    + this.getEntityDebugName(mumakil.riddenByEntity)
+                    + ".");
+        }
+
+        this.updateMumakilHowdahCombat(mumakil);
     }
 
     private void updateMumakilHowdahCombat(LOTREntityMumakil mumakil) {
+        long worldTime = mumakil.worldObj.getTotalWorldTime();
+
         if (!mumakil.hasMumakilHowdahEquipped()) {
+            this.debugOccasionally(mumakil, worldTime,
+                    "[LOTRMoreMobs] Howdah combat relay skipped: Mumakil has no howdah equipped. mumakilId="
+                            + mumakil.getEntityId()
+                            + ".");
             return;
         }
 
         LOTREntityNPC driver = this.getMumakilDriver(mumakil);
-        long worldTime = mumakil.worldObj.getTotalWorldTime();
 
         if (driver == null) {
             this.debugOccasionally(mumakil, worldTime,
@@ -60,6 +84,13 @@ public class MumakilHowdahCombatEventHandler {
         if (currentMumakilTarget != null && currentMumakilTarget.isEntityAlive()) {
             if (driver.getAttackTarget() == null && LOTRHowdahTargeting.canNPCAttackTarget(driver, currentMumakilTarget)) {
                 driver.setAttackTarget(currentMumakilTarget);
+                System.out.println("[LOTRMoreMobs] Howdah combat relay copied existing Mumakil target to driver: mumakilId="
+                        + mumakil.getEntityId()
+                        + " target="
+                        + currentMumakilTarget.getClass().getName()
+                        + " targetId="
+                        + currentMumakilTarget.getEntityId()
+                        + ".");
             }
             return;
         }
@@ -68,6 +99,13 @@ public class MumakilHowdahCombatEventHandler {
         if (currentDriverTarget != null && currentDriverTarget.isEntityAlive()
                 && LOTRHowdahTargeting.canNPCAttackTarget(driver, currentDriverTarget)) {
             mumakil.setAttackTarget(currentDriverTarget);
+            System.out.println("[LOTRMoreMobs] Howdah combat relay copied existing driver target to Mumakil: mumakilId="
+                    + mumakil.getEntityId()
+                    + " target="
+                    + currentDriverTarget.getClass().getName()
+                    + " targetId="
+                    + currentDriverTarget.getEntityId()
+                    + ".");
             return;
         }
 
