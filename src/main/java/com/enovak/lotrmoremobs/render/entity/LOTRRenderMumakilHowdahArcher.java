@@ -1,28 +1,60 @@
 package com.enovak.lotrmoremobs.render.entity;
 
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import lotr.common.entity.npc.LOTREntityNearHaradrimArcher;
 import net.minecraft.client.model.ModelBiped;
+import net.minecraft.client.renderer.entity.Render;
 import net.minecraft.client.renderer.entity.RenderBiped;
+import net.minecraft.client.renderer.entity.RenderManager;
 import net.minecraft.entity.Entity;
 import net.minecraft.util.ResourceLocation;
 
 /**
- * Simple fallback renderer for the custom howdah archer passenger.
+ * Renderer for the custom howdah archer passenger.
  *
- * The ideal renderer is LOTR's own Near Haradrim archer renderer, but it is not
- * available in RenderManager's map during our renderer registration point in the
- * current dev environment. This fallback keeps the entity visible while we tune
- * the attachment/positioning system.
+ * It first tries to delegate to LOTR's normal Near Haradrim archer renderer at
+ * actual render time. If that renderer is still unavailable, it falls back to a
+ * biped renderer using a LOTR Southron/Near Harad texture path instead of Steve.
  */
 public class LOTRRenderMumakilHowdahArcher extends RenderBiped {
-    private static final ResourceLocation FALLBACK_TEXTURE = new ResourceLocation("textures/entity/steve.png");
+    private static final ResourceLocation SOUTHON_FALLBACK_TEXTURE = new ResourceLocation("lotr:mob/nearHarad/southron.png");
+
+    private Render deferredNearHaradrimRenderer;
+    private boolean attemptedDeferredLookup;
 
     public LOTRRenderMumakilHowdahArcher() {
         super(new ModelBiped(), 0.5F);
     }
 
+    @Override
+    public void doRender(Entity entity, double x, double y, double z, float yaw, float partialTicks) {
+        Render lotrRenderer = this.getDeferredNearHaradrimRenderer();
+
+        if (lotrRenderer != null && lotrRenderer != this) {
+            lotrRenderer.doRender(entity, x, y, z, yaw, partialTicks);
+            return;
+        }
+
+        super.doRender(entity, x, y, z, yaw, partialTicks);
+    }
+
+    private Render getDeferredNearHaradrimRenderer() {
+        if (!this.attemptedDeferredLookup) {
+            this.attemptedDeferredLookup = true;
+            this.deferredNearHaradrimRenderer = (Render)RenderManager.instance.entityRenderMap.get(LOTREntityNearHaradrimArcher.class);
+
+            if (this.deferredNearHaradrimRenderer != null) {
+                System.out.println("[LOTRMoreMobs] Deferred Mumakil howdah archer renderer lookup found LOTR Near Haradrim renderer.");
+            } else {
+                System.out.println("[LOTRMoreMobs] Deferred Mumakil howdah archer renderer lookup using Southron texture fallback.");
+            }
+        }
+
+        return this.deferredNearHaradrimRenderer;
+    }
+
     protected ResourceLocation getHowdahArcherTexture(LOTREntityMumakilHowdahArcher entity) {
-        return FALLBACK_TEXTURE;
+        return SOUTHON_FALLBACK_TEXTURE;
     }
 
     @Override
