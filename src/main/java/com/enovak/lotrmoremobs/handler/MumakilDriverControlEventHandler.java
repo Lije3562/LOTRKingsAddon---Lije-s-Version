@@ -16,6 +16,7 @@ import net.minecraft.pathfinding.PathNavigate;
 import net.minecraft.util.MathHelper;
 import net.minecraftforge.event.entity.living.LivingEvent;
 
+
 /**
  * Lightweight NPC driver steering for hired Southron Mumakil.
  *
@@ -52,6 +53,14 @@ public class MumakilDriverControlEventHandler {
     private static final double FALLBACK_CLOSE_MAX_SPEED = 0.15D;
     private static final float FALLBACK_TURN_STEP = 9.0F;
 
+    private static final String DRIVER_NEXT_HOSTILE_REDIRECT_SCAN_KEY = "LOTRMoreMobsMumakilDriverNextHostileRedirectScan";
+
+    private static final int HOSTILE_REDIRECT_SCAN_MIN_INTERVAL = 60;
+    private static final int HOSTILE_REDIRECT_SCAN_RANDOM_INTERVAL = 41;
+
+    private static final double HOSTILE_REDIRECT_SCAN_RANGE = 36.0D;
+    private static final double HOSTILE_REDIRECT_VERTICAL_RANGE = 24.0D;
+
     @SubscribeEvent
     public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
         if (event == null
@@ -75,6 +84,7 @@ public class MumakilDriverControlEventHandler {
         NBTTagCompound data = mumakil.getEntityData();
         long worldTime = mumakil.worldObj.getTotalWorldTime();
         this.clearDriverNavigator(driver);
+        this.updateHostileNPCRedirectsToMumakil(mumakil, driver, worldTime);
 
         LOTRNPCTargetSelector targetSelector = new LOTRNPCTargetSelector(driver);
         EntityLivingBase target = this.getStoredDriverTarget(mumakil);
@@ -195,6 +205,79 @@ public class MumakilDriverControlEventHandler {
         }
 
         return 2;
+    }
+
+    private void updateHostileNPCRedirectsToMumakil(LOTREntityMumakil mumakil, LOTREntityNPC driver, long worldTime) {
+        if (!mumakil.getBelongsToNPC()
+                || mumakil.riddenByEntity instanceof EntityPlayer
+                || driver == null
+                || driver.ridingEntity != mumakil) {
+            return;
+        }
+
+        NBTTagCompound data = mumakil.getEntityData();
+        if (data.getLong(DRIVER_NEXT_HOSTILE_REDIRECT_SCAN_KEY) > worldTime) {
+            return;
+        }
+
+        data.setLong(
+                DRIVER_NEXT_HOSTILE_REDIRECT_SCAN_KEY,
+                worldTime + HOSTILE_REDIRECT_SCAN_MIN_INTERVAL + mumakil.worldObj.rand.nextInt(HOSTILE_REDIRECT_SCAN_RANDOM_INTERVAL)
+        );
+
+        List nearbyNPCs = mumakil.worldObj.getEntitiesWithinAABB(
+                LOTREntityNPC.class,
+                mumakil.boundingBox.expand(HOSTILE_REDIRECT_SCAN_RANGE, HOSTILE_REDIRECT_VERTICAL_RANGE, HOSTILE_REDIRECT_SCAN_RANGE)
+        );
+
+        for (int i = 0; i < nearbyNPCs.size(); ++i) {
+            LOTREntityNPC enemy = (LOTREntityNPC)nearbyNPCs.get(i);
+            if (!this.canEnemyNPCRedirectToMumakil(enemy, mumakil, driver)) {
+                continue;
+            }
+
+            enemy.setAttackTarget(mumakil);
+        }
+    }
+
+    private boolean canEnemyNPCRedirectToMumakil(LOTREntityNPC enemy, LOTREntityMumakil mumakil, LOTREntityNPC driver) {
+        if (enemy == null
+                || enemy == driver
+                || enemy == mumakil.riddenByEntity
+                || enemy instanceof LOTREntityMumakilHowdahArcher
+                || !enemy.isEntityAlive()
+                || enemy.ridingEntity == mumakil) {
+            return false;
+        }
+
+        EntityLivingBase currentTarget = enemy.getAttackTarget();
+        if (currentTarget != null
+                && currentTarget.isEntityAlive()
+                && currentTarget != driver
+                && !this.isHowdahHelperAssignedToMumakil(currentTarget, mumakil)) {
+            return false;
+        }
+
+        LOTRNPCTargetSelector enemyTargetSelector = new LOTRNPCTargetSelector(enemy);
+        return enemyTargetSelector.isEntityApplicable(driver)
+                && LOTRMod.canNPCAttackEntity(enemy, driver, false);
+    }
+
+    private boolean isHowdahHelperAssignedToMumakil(EntityLivingBase target, LOTREntityMumakil mumakil) {
+        if (!(target instanceof LOTREntityMumakilHowdahArcher)) {
+            return false;
+        }
+
+        LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)target;
+        if (archer.getHowdahMountEntityId() == mumakil.getEntityId()) {
+            return true;
+        }
+
+        String archerMountUuid = archer.getHowdahMountUuid();
+        String mumakilUuid = mumakil.getPersistentID().toString();
+        return archerMountUuid != null
+                && archerMountUuid.length() > 0
+                && archerMountUuid.equals(mumakilUuid);
     }
 
     private void driveMumakilTowardTarget(LOTREntityMumakil mumakil, LOTREntityNPC driver, EntityLivingBase target, long worldTime) {

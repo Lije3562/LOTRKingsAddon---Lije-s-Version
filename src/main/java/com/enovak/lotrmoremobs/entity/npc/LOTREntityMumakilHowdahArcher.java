@@ -11,6 +11,7 @@ import lotr.common.entity.npc.LOTREntityNearHaradrimArcher;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.IEntityLivingData;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.pathfinding.PathNavigate;
@@ -27,6 +28,7 @@ import net.minecraft.world.World;
  * knockback, and combat while attached to its Mumakil.
  */
 public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher implements IEntityAdditionalSpawnData {
+    private static final double HOWDAH_ARCHER_MAX_HEALTH = 24.0D;
     private static final String NBT_MOUNT_ID = "LOTRMoreMobsHowdahMountId";
     private static final String NBT_MOUNT_UUID = "LOTRMoreMobsHowdahMountUuid";
     private static final String NBT_SLOT = "LOTRMoreMobsHowdahArcherSlot";
@@ -63,6 +65,12 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         this.clearPassengerAI();
         this.noClip = true;
         this.isImmuneToFire = true;
+    }
+
+    @Override
+    protected void applyEntityAttributes() {
+        super.applyEntityAttributes();
+        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(HOWDAH_ARCHER_MAX_HEALTH);
     }
 
     @Override
@@ -122,6 +130,8 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             this.detachedFromDeadMumakil = false;
             this.detachedTicks = 0;
             this.primeHowdahShootCooldown();
+            this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(HOWDAH_ARCHER_MAX_HEALTH);
+            this.setHealth(this.getMaxHealth());
             this.clearPassengerAI();
             this.ensureNearHaradBowEquipped();
             this.noClip = true;
@@ -682,7 +692,11 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public boolean canBeCollidedWith() {
-        return !this.isFixedHowdahPassenger() && super.canBeCollidedWith();
+        if (this.isFixedHowdahPassenger()) {
+            return true;
+        }
+
+        return super.canBeCollidedWith();
     }
 
     @Override
@@ -727,7 +741,34 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public boolean attackEntityFrom(DamageSource source, float amount) {
-        return !this.isFixedHowdahPassenger() && super.attackEntityFrom(source, amount);
+        if (!this.isFixedHowdahPassenger()) {
+            return super.attackEntityFrom(source, amount);
+        }
+
+        if (source == null || amount <= 0.0F || this.isBlockedFixedPassengerDamage(source)) {
+            return false;
+        }
+
+        boolean damaged = super.attackEntityFrom(source, amount);
+
+        if (this.isEntityAlive()) {
+            this.noClip = true;
+            this.motionX = 0.0D;
+            this.motionY = 0.0D;
+            this.motionZ = 0.0D;
+        }
+
+        return damaged;
+    }
+
+    private boolean isBlockedFixedPassengerDamage(DamageSource source) {
+        return source == DamageSource.inWall
+                || source == DamageSource.fall
+                || source == DamageSource.drown
+                || source == DamageSource.cactus
+                || source == DamageSource.inFire
+                || source == DamageSource.onFire
+                || source == DamageSource.lava;
     }
 
     @Override

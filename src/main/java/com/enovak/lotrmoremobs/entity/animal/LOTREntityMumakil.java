@@ -76,15 +76,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double RIDER_HOWDAH_Y = 16.5D;
 
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
-    private static final double MAX_HEALTH = 120.0D;
+    private static final double MAX_HEALTH = 1000.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
-    private static final double KNOCKBACK_RESISTANCE = 1.0D;
+    private static final double KNOCKBACK_RESISTANCE = 20.0D;
     private static final double ATTACK_DAMAGE = 16.0D;
     private static final double WILD_ATTACK_SPEED = 1.30D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
     private static final double TUSK_ATTACK_RANGE = 6.5D;
-    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 60;
+    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 400;
     private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
     private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
@@ -97,13 +97,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
     private static final int MAX_OBSTACLES_PER_PASS = 96;
     private static final int TRAMPLE_SCAN_INTERVAL = 2;
-    private static final int TRAMPLE_COOLDOWN_TICKS = 20;
+    private static final int TRAMPLE_COOLDOWN_TICKS = 60;
     private static final float TRAMPLE_MIN_SPEED = 0.10F;
     private static final float TRAMPLE_DAMAGE = 8.0F;
     private static final float IDLE_YAW_SNAP_THRESHOLD = 45.0F;
     private static final float IDLE_YAW_MAX_STEP = 8.0F;
     private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
     private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+
+    //AOE damage
+    private static final float TUSK_AOE_DAMAGE = 16.0F;
+    private static final double TUSK_AOE_RADIUS = 4.25D;
+    private static final double TUSK_AOE_VERTICAL_RANGE = 2.25D;
+    private static final float TUSK_AOE_KNOCKBACK_HORIZONTAL = 3.0F;
+    private static final float TUSK_AOE_KNOCKBACK_VERTICAL = 1.0F;
 
     private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
     private final AnimationFactory animationFactory = new AnimationFactory(this);
@@ -250,11 +257,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
 
     private boolean tryEquipMumakilHowdah(EntityPlayer player) {
-        ItemStack held = player.getCurrentEquippedItem();
-
-        if (held == null || held.getItem() != Main.mumakilHowdah) {
+        if (this.getBelongsToNPC()) {
             return false;
         }
+
+        ItemStack held = player.getCurrentEquippedItem();
 
         if (!this.hasMumakilSaddleEquipped()) {
             return false;
@@ -436,6 +443,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public boolean interact(EntityPlayer player) {
+        if (this.getBelongsToNPC()) {
+            return super.interact(player);
+        }
+
         if (this.tryEquipMumakilHowdah(player)) {
             return true;
         }
@@ -579,6 +590,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public void openGUI(EntityPlayer player) {
+        if (this.getBelongsToNPC()) {
+            return;
+        }
+
         if (!this.worldObj.isRemote) {
             this.updateMumakilHowdahSyncState();
             IInventory inventory = this.findMumakilMountInventory();
@@ -618,6 +633,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
+
+            if (this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE)) {
+                this.playMumakilHitSound();
+            }
         }
 
         return attacked;
@@ -709,7 +728,57 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.75F, 0.5F);
+
+            if (this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE)) {
+                this.playMumakilHitSound();
+            }
         }
+    }
+
+    private boolean applyMumakilStrikeAOEDamage(Entity primaryTarget, float damage) {
+        if (this.worldObj.isRemote || !(primaryTarget instanceof EntityLivingBase)) {
+            return false;
+        }
+
+        EntityLivingBase impactTarget = (EntityLivingBase)primaryTarget;
+        AxisAlignedBB aoeBox = impactTarget.boundingBox.expand(
+                TUSK_AOE_RADIUS,
+                TUSK_AOE_VERTICAL_RANGE,
+                TUSK_AOE_RADIUS
+        );
+
+        List nearby = this.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, aoeBox);
+        boolean hitAny = false;
+
+        for (int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase target = (EntityLivingBase)nearby.get(i);
+
+            if (target == primaryTarget || !this.canTuskAttackTarget(target)) {
+                continue;
+            }
+
+            /*
+             * Keep the splash roughly circular around the impact point.
+             * The expanded AABB finds candidates cheaply, then this radius check
+             * prevents weird square-corner hits.
+             */
+            double dx = target.posX - impactTarget.posX;
+            double dz = target.posZ - impactTarget.posZ;
+            if (dx * dx + dz * dz > TUSK_AOE_RADIUS * TUSK_AOE_RADIUS) {
+                continue;
+            }
+
+            if (target.attackEntityFrom(DamageSource.causeMobDamage(this), damage)) {
+                this.applyMumakilHeavyKnockback(
+                        target,
+                        TUSK_AOE_KNOCKBACK_HORIZONTAL,
+                        TUSK_AOE_KNOCKBACK_VERTICAL
+                );
+                hitAny = true;
+            }
+        }
+
+        return hitAny;
     }
 
     private boolean canTuskAttackTarget(EntityLivingBase target) {

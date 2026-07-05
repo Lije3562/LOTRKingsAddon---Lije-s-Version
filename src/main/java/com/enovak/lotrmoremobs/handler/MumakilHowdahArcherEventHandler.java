@@ -43,6 +43,7 @@ public class MumakilHowdahArcherEventHandler {
     private static final String LEGACY_ARCHER_SLOT_KEY = "LOTRMoreMobsHowdahSlot";
     private static final String ARCHER_MOUNT_ID_KEY = "LOTRMoreMobsHowdahMountId";
     private static final String ARCHER_MOUNT_UUID_KEY = "LOTRMoreMobsHowdahMountUuid";
+    private static final String DEAD_ARCHER_SLOTS_KEY = "LOTRMoreMobsDeadHowdahArcherSlots";
 
     private static final int HOWDAH_ARCHER_COUNT = LOTREntityMumakilHowdahArcher.getHowdahArcherSlotCount();
     private static final int CURRENT_CARRIER_VERSION = 2;
@@ -138,8 +139,16 @@ public class MumakilHowdahArcherEventHandler {
         if (event == null
                 || event.entityLiving == null
                 || event.entityLiving.worldObj == null
-                || event.entityLiving.worldObj.isRemote
-                || !(event.entityLiving instanceof LOTREntityMumakil)) {
+                || event.entityLiving.worldObj.isRemote) {
+            return;
+        }
+
+        if (event.entityLiving instanceof LOTREntityMumakilHowdahArcher) {
+            markDeadHowdahArcherSlot((LOTREntityMumakilHowdahArcher)event.entityLiving);
+            return;
+        }
+
+        if (!(event.entityLiving instanceof LOTREntityMumakil)) {
             return;
         }
 
@@ -299,8 +308,7 @@ public class MumakilHowdahArcherEventHandler {
                 || target instanceof LOTREntityMumakil
                 || target instanceof LOTREntityMumakilHowdahArcher
                 || !target.isEntityAlive()
-                || target.riddenByEntity != null
-                || target.ridingEntity != null) {
+                || target.riddenByEntity != null) {
             return false;
         }
 
@@ -353,7 +361,7 @@ public class MumakilHowdahArcherEventHandler {
         StringBuilder resultSlots = new StringBuilder();
 
         for (int slot = 0; slot < HOWDAH_ARCHER_COUNT; ++slot) {
-            if (seenSlots[slot]) {
+            if (seenSlots[slot] || isHowdahArcherSlotDead(mumakil, slot)) {
                 continue;
             }
 
@@ -470,6 +478,61 @@ public class MumakilHowdahArcherEventHandler {
         return archerMountUuid != null
                 && archerMountUuid.length() > 0
                 && archerMountUuid.equals(getEntityPersistentIdString(mumakil));
+    }
+
+    private static void markDeadHowdahArcherSlot(LOTREntityMumakilHowdahArcher archer) {
+        if (archer == null
+                || !archer.isRuntimeHowdahPassenger()
+                || archer.isDetachedFromDeadMumakil()) {
+            return;
+        }
+
+        int slot = archer.getHowdahSlot();
+        if (slot < 0 || slot >= HOWDAH_ARCHER_COUNT || slot >= 32) {
+            return;
+        }
+
+        LOTREntityMumakil mumakil = findAssignedMumakilForArcher(archer);
+        if (mumakil != null) {
+            markHowdahArcherSlotDead(mumakil, slot);
+        }
+    }
+
+    private static LOTREntityMumakil findAssignedMumakilForArcher(LOTREntityMumakilHowdahArcher archer) {
+        int mountId = archer.getHowdahMountEntityId();
+        Entity entity = mountId == 0 || archer.worldObj == null ? null : archer.worldObj.getEntityByID(mountId);
+        if (entity instanceof LOTREntityMumakil) {
+            return (LOTREntityMumakil)entity;
+        }
+
+        String mountUuid = archer.getHowdahMountUuid();
+        if (archer.worldObj == null || mountUuid == null || mountUuid.length() == 0) {
+            return null;
+        }
+
+        List loaded = archer.worldObj.loadedEntityList;
+        for (int i = 0; i < loaded.size(); ++i) {
+            Object object = loaded.get(i);
+            if (object instanceof LOTREntityMumakil
+                    && mountUuid.equals(getEntityPersistentIdString((Entity)object))) {
+                return (LOTREntityMumakil)object;
+            }
+        }
+
+        return null;
+    }
+
+    private static boolean isHowdahArcherSlotDead(LOTREntityMumakil mumakil, int slot) {
+        return slot >= 0
+                && slot < 32
+                && (mumakil.getEntityData().getInteger(DEAD_ARCHER_SLOTS_KEY) & (1 << slot)) != 0;
+    }
+
+    private static void markHowdahArcherSlotDead(LOTREntityMumakil mumakil, int slot) {
+        mumakil.getEntityData().setInteger(
+                DEAD_ARCHER_SLOTS_KEY,
+                mumakil.getEntityData().getInteger(DEAD_ARCHER_SLOTS_KEY) | (1 << slot)
+        );
     }
 
     private static void tagArcher(LOTREntityMumakilHowdahArcher archer, LOTREntityMumakil mumakil, String mountUuid, int slot) {
