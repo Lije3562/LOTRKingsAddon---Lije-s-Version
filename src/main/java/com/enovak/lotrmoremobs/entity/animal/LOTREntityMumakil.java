@@ -47,6 +47,7 @@ import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.entity.projectile.EntityArrow;
 
 
 public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
@@ -104,6 +105,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float IDLE_YAW_MAX_STEP = 8.0F;
     private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
     private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+    private static final int PROJECTILE_HURT_RESISTANT_TICKS = 6;
 
     //AOE damage
     private static final float TUSK_AOE_DAMAGE = 16.0F;
@@ -644,13 +646,36 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public boolean attackEntityFrom(DamageSource source, float amount) {
+        boolean arrowDamage = this.isMumakilArrowDamage(source);
         boolean damaged = super.attackEntityFrom(source, amount);
+
+        if (damaged && !this.worldObj.isRemote && arrowDamage) {
+            this.hurtResistantTime = Math.min(this.hurtResistantTime, PROJECTILE_HURT_RESISTANT_TICKS);
+        }
 
         if (damaged && !this.worldObj.isRemote && amount > 0.0F && !this.isDead) {
             this.playMumakilNormalHitSound();
         }
 
+        if (!damaged && this.shouldConsumeBlockedMumakilArrow(source, amount)) {
+            return true;
+        }
+
         return damaged;
+    }
+
+    private boolean isMumakilArrowDamage(DamageSource source) {
+    return source != null
+            && (source.isProjectile() || source.getSourceOfDamage() instanceof EntityArrow);
+    }
+
+    private boolean shouldConsumeBlockedMumakilArrow(DamageSource source, float amount) {
+    return this.isMumakilArrowDamage(source)
+            && amount > 0.0F
+            && !this.worldObj.isRemote
+            && !this.isDead
+            && this.getHealth() > 0.0F
+            && !this.isEntityInvulnerable();
     }
 
     private void playMumakilNormalHitSound() {
