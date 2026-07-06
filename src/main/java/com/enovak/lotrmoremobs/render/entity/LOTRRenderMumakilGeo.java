@@ -29,6 +29,7 @@ import software.bernie.geckolib3.geo.render.built.GeoBone;
 import software.bernie.geckolib3.geo.render.built.GeoModel;
 import software.bernie.geckolib3.model.provider.data.EntityModelData;
 import software.bernie.geckolib3.renderers.geo.GeoEntityRenderer;
+import org.lwjgl.opengl.GL11;
 
 /**
  * Experimental renderer that bypasses the Java ModelRenderer conversion and renders the exported .geo.json.
@@ -444,10 +445,46 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                         renderColor.getBlue() / 255.0F,
                         renderColor.getAlpha() / 255.0F
                 );
+
+                Minecraft.getMinecraft().renderEngine.bindTexture(textureLocation);
+                this.renderMumakilHurtOverlay(geoModel, entity, partialTicks);
             } finally {
                 GlStateManager.popMatrix();
             }
         } finally {
+            GlStateManager.popMatrix();
+        }
+    }
+
+    private boolean shouldRenderHurtOverlay(LOTREntityMumakil entity) {
+        return entity != null && (entity.hurtTime > 0 || entity.deathTime > 0);
+    }
+
+    private void renderMumakilHurtOverlay(GeoModel geoModel, LOTREntityMumakil entity, float partialTicks) {
+        if (!this.shouldRenderHurtOverlay(entity)) {
+            return;
+        }
+
+        GlStateManager.pushMatrix();
+        try {
+            GL11.glEnable(GL11.GL_BLEND);
+            GL11.glBlendFunc(GL11.GL_SRC_ALPHA, GL11.GL_ONE_MINUS_SRC_ALPHA);
+            GL11.glDepthFunc(GL11.GL_EQUAL);
+            GL11.glDepthMask(false);
+
+            this.render(
+                    geoModel,
+                    entity,
+                    partialTicks,
+                    1.0F,
+                    0.12F,
+                    0.12F,
+                    0.55F
+            );
+        } finally {
+            GL11.glDepthMask(true);
+            GL11.glDepthFunc(GL11.GL_LEQUAL);
+            GL11.glDisable(GL11.GL_BLEND);
             GlStateManager.popMatrix();
         }
     }
