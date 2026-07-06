@@ -26,6 +26,7 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
 import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
+import net.minecraft.entity.ai.EntityAIWander;
 import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.passive.EntityAnimal;
 import net.minecraft.entity.passive.EntityHorse;
@@ -79,6 +80,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
     private static final double MAX_HEALTH = 1000.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
+    private static final double WILD_WANDER_SPEED = 0.55D;
     private static final double KNOCKBACK_RESISTANCE = 20.0D;
     private static final double ATTACK_DAMAGE = 16.0D;
     private static final double WILD_ATTACK_SPEED = 1.30D;
@@ -142,6 +144,17 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.setSize(7.0F, 15.0F);
         this.resetAngerWaveCooldown();
 
+        this.tasks.addTask(7, new EntityAIWander(this, WILD_WANDER_SPEED) {
+            @Override
+            public boolean shouldExecute() {
+                return LOTREntityMumakil.this.shouldWildWander() && super.shouldExecute();
+            }
+
+            @Override
+            public boolean continueExecuting() {
+                return LOTREntityMumakil.this.shouldWildWander() && super.continueExecuting();
+            }
+        });
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -177,6 +190,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private boolean isWildMumakil() {
         return !this.isTame() && this.riddenByEntity == null;
+    }
+
+    private boolean shouldWildWander() {
+        return this.isWildMumakil()
+                && !this.getBelongsToNPC()
+                && !this.hasMumakilHowdahEquipped()
+                && !this.isMountEnraged()
+                && this.getAttackTarget() == null;
     }
 
     public boolean hasMumakilHowdahEquipped() {
