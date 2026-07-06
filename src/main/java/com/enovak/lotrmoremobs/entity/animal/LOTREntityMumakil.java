@@ -26,7 +26,7 @@ import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
 import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
-import net.minecraft.entity.ai.EntityAIWander;
+import net.minecraft.entity.ai.RandomPositionGenerator;
 import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.passive.EntityAnimal;
 import net.minecraft.entity.passive.EntityHorse;
@@ -80,7 +80,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
     private static final double MAX_HEALTH = 1000.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
-    private static final double WILD_WANDER_SPEED = 0.55D;
+    private static final double WILD_WANDER_SPEED = 0.22D;
+    private static final double WILD_CHASE_SPEED = 0.40D;
+    private static final int WILD_CHASE_REPATH_INTERVAL = 25;
+    private static final int WILD_WANDER_MIN_INTERVAL = 80;
+    private static final int WILD_WANDER_RANDOM_INTERVAL = 81;
+    private static final int WILD_WANDER_RADIUS = 16;
+    private static final int WILD_WANDER_VERTICAL_RANGE = 4;
+    private static final int WILD_FALLBACK_MOVE_TICKS = 30;
+    private static final float WILD_FALLBACK_TURN_STEP = 8.0F;
+    private static final double WILD_CHASE_FALLBACK_ACCELERATION = 0.08D;
+    private static final double WILD_WANDER_FALLBACK_ACCELERATION = 0.04D;
+    private static final double WILD_CHASE_FALLBACK_MAX_SPEED = 0.28D;
+    private static final double WILD_WANDER_FALLBACK_MAX_SPEED = 0.14D;
+    private static final double WILD_WANDER_FALLBACK_STOP_RANGE = 3.0D;
     private static final double KNOCKBACK_RESISTANCE = 20.0D;
     private static final double ATTACK_DAMAGE = 16.0D;
     private static final double WILD_ATTACK_SPEED = 1.30D;
@@ -144,17 +157,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.setSize(7.0F, 15.0F);
         this.resetAngerWaveCooldown();
 
-        this.tasks.addTask(7, new EntityAIWander(this, WILD_WANDER_SPEED) {
-            @Override
-            public boolean shouldExecute() {
-                return LOTREntityMumakil.this.shouldWildWander() && super.shouldExecute();
-            }
-
-            @Override
-            public boolean continueExecuting() {
-                return LOTREntityMumakil.this.shouldWildWander() && super.continueExecuting();
-            }
-        });
+        this.tasks.addTask(4, new EntityAIWildMumakilMove());
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -189,7 +192,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean isWildMumakil() {
-        return !this.isTame() && this.riddenByEntity == null;
+        return !this.isTame() && !this.getBelongsToNPC() && this.riddenByEntity == null;
     }
 
     private boolean shouldWildWander() {
@@ -198,6 +201,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 && !this.hasMumakilHowdahEquipped()
                 && !this.isMountEnraged()
                 && this.getAttackTarget() == null;
+    }
+
+    private boolean shouldWildChaseTarget() {
+        EntityLivingBase target = this.getAttackTarget();
+        return this.isWildMumakil()
+                && !this.hasMumakilHowdahEquipped()
+                && target != null
+                && this.canTuskAttackTarget(target);
     }
 
     public boolean hasMumakilHowdahEquipped() {
@@ -439,6 +450,174 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     protected EntityAIBase createMountAttackAI() {
         return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
+    }
+
+    private class EntityAIWildMumakilMove extends EntityAIBase {
+        private int nextChasePathTick;
+        private int nextWanderPathTick;
+        private int fallbackMoveTicks;
+        private double fallbackX;
+        private double fallbackZ;
+
+        public EntityAIWildMumakilMove() {
+            this.setMutexBits(1);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            return LOTREntityMumakil.this.isWildMumakil()
+                    && (LOTREntityMumakil.this.shouldWildChaseTarget()
+                    || LOTREntityMumakil.this.shouldWildWander());
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            if (!LOTREntityMumakil.this.isWildMumakil()) {
+                return false;
+            }
+
+            if (LOTREntityMumakil.this.shouldWildChaseTarget()) {
+                return true;
+            }
+
+            return LOTREntityMumakil.this.shouldWildWander()
+                    && (!LOTREntityMumakil.this.getNavigator().noPath() || this.fallbackMoveTicks > 0);
+        }
+
+        @Override
+        public void resetTask() {
+            this.fallbackMoveTicks = 0;
+        }
+
+        @Override
+        public void updateTask() {
+            if (LOTREntityMumakil.this.shouldWildChaseTarget()) {
+                this.updateChaseMovement();
+            } else if (LOTREntityMumakil.this.shouldWildWander()) {
+                this.updateWanderMovement();
+            }
+        }
+
+        private void updateChaseMovement() {
+            EntityLivingBase target = LOTREntityMumakil.this.getAttackTarget();
+            if (target == null) {
+                return;
+            }
+
+            if (LOTREntityMumakil.this.ticksExisted >= this.nextChasePathTick) {
+                LOTREntityMumakil.this.getNavigator().tryMoveToEntityLiving(target, WILD_CHASE_SPEED);
+                this.nextChasePathTick = LOTREntityMumakil.this.ticksExisted + WILD_CHASE_REPATH_INTERVAL;
+            }
+
+            LOTREntityMumakil.this.setAIMoveSpeed((float)WILD_CHASE_SPEED);
+
+            if (LOTREntityMumakil.this.getNavigator().noPath()) {
+                this.applyFallbackMove(
+                        target.posX,
+                        target.posZ,
+                        WILD_CHASE_SPEED,
+                        WILD_CHASE_FALLBACK_ACCELERATION,
+                        WILD_CHASE_FALLBACK_MAX_SPEED,
+                        TUSK_ATTACK_RANGE
+                );
+            }
+        }
+
+        private void updateWanderMovement() {
+            if (!LOTREntityMumakil.this.getNavigator().noPath()) {
+                LOTREntityMumakil.this.setAIMoveSpeed((float)WILD_WANDER_SPEED);
+                return;
+            }
+
+            if (this.fallbackMoveTicks > 0) {
+                if (this.applyFallbackMove(
+                        this.fallbackX,
+                        this.fallbackZ,
+                        WILD_WANDER_SPEED,
+                        WILD_WANDER_FALLBACK_ACCELERATION,
+                        WILD_WANDER_FALLBACK_MAX_SPEED,
+                        WILD_WANDER_FALLBACK_STOP_RANGE
+                )) {
+                    --this.fallbackMoveTicks;
+                } else {
+                    this.fallbackMoveTicks = 0;
+                }
+                return;
+            }
+
+            if (LOTREntityMumakil.this.ticksExisted < this.nextWanderPathTick) {
+                return;
+            }
+
+            this.nextWanderPathTick = LOTREntityMumakil.this.ticksExisted
+                    + WILD_WANDER_MIN_INTERVAL
+                    + LOTREntityMumakil.this.rand.nextInt(WILD_WANDER_RANDOM_INTERVAL);
+
+            Vec3 wanderTarget = RandomPositionGenerator.findRandomTarget(
+                    LOTREntityMumakil.this,
+                    WILD_WANDER_RADIUS,
+                    WILD_WANDER_VERTICAL_RANGE
+            );
+
+            if (wanderTarget == null) {
+                return;
+            }
+
+            boolean pathAccepted = LOTREntityMumakil.this.getNavigator().tryMoveToXYZ(
+                    wanderTarget.xCoord,
+                    wanderTarget.yCoord,
+                    wanderTarget.zCoord,
+                    WILD_WANDER_SPEED
+            );
+
+            if (!pathAccepted || LOTREntityMumakil.this.getNavigator().noPath()) {
+                this.fallbackX = wanderTarget.xCoord;
+                this.fallbackZ = wanderTarget.zCoord;
+                this.fallbackMoveTicks = WILD_FALLBACK_MOVE_TICKS;
+            }
+        }
+
+        private boolean applyFallbackMove(
+                double x,
+                double z,
+                double aiSpeed,
+                double acceleration,
+                double maxSpeed,
+                double stopRange
+        ) {
+            if (!LOTREntityMumakil.this.isWildMumakil()) {
+                return false;
+            }
+
+            LOTREntityMumakil.this.faceWildMovePoint(x, z);
+
+            double dx = x - LOTREntityMumakil.this.posX;
+            double dz = z - LOTREntityMumakil.this.posZ;
+            double distSq = dx * dx + dz * dz;
+            if (distSq <= stopRange * stopRange || distSq < 1.0E-4D) {
+                LOTREntityMumakil.this.moveForward = 0.0F;
+                LOTREntityMumakil.this.moveStrafing = 0.0F;
+                return false;
+            }
+
+            double dist = Math.sqrt(distSq);
+            LOTREntityMumakil.this.motionX += dx / dist * acceleration;
+            LOTREntityMumakil.this.motionZ += dz / dist * acceleration;
+
+            double horizontalMotionSq = LOTREntityMumakil.this.motionX * LOTREntityMumakil.this.motionX
+                    + LOTREntityMumakil.this.motionZ * LOTREntityMumakil.this.motionZ;
+            if (horizontalMotionSq > maxSpeed * maxSpeed) {
+                double horizontalMotion = Math.sqrt(horizontalMotionSq);
+                LOTREntityMumakil.this.motionX = LOTREntityMumakil.this.motionX / horizontalMotion * maxSpeed;
+                LOTREntityMumakil.this.motionZ = LOTREntityMumakil.this.motionZ / horizontalMotion * maxSpeed;
+            }
+
+            LOTREntityMumakil.this.setAIMoveSpeed((float)aiSpeed);
+            LOTREntityMumakil.this.moveForward = 1.0F;
+            LOTREntityMumakil.this.moveStrafing = 0.0F;
+            LOTREntityMumakil.this.velocityChanged = true;
+            return true;
+        }
     }
 
     private EntityAIBase createWildMobTargetAI(Class targetClass) {
@@ -985,6 +1164,19 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private float clampYawStep(float stableYaw, float candidateYaw, float maximumStep) {
         float delta = MathHelper.wrapAngleTo180_float(candidateYaw - stableYaw);
         return stableYaw + MathHelper.clamp_float(delta, -maximumStep, maximumStep);
+    }
+
+    private void faceWildMovePoint(double x, double z) {
+        double deltaX = x - this.posX;
+        double deltaZ = z - this.posZ;
+        if (deltaX * deltaX + deltaZ * deltaZ < 1.0E-4D) {
+            return;
+        }
+
+        float desiredYaw = (float)(Math.atan2(deltaZ, deltaX) * 180.0D / Math.PI) - 90.0F;
+        this.rotationYaw = this.clampYawStep(this.rotationYaw, desiredYaw, WILD_FALLBACK_TURN_STEP);
+        this.renderYawOffset = this.clampYawStep(this.renderYawOffset, this.rotationYaw, WILD_FALLBACK_TURN_STEP);
+        this.rotationYawHead = this.renderYawOffset;
     }
 
     private void tryAcquireWildMobTarget() {
