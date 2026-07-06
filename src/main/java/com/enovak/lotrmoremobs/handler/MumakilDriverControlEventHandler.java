@@ -18,10 +18,10 @@ import net.minecraftforge.event.entity.living.LivingEvent;
 
 
 /**
- * Lightweight NPC driver steering for hired Southron Mumakil.
+ * Lightweight NPC driver steering for Near Harad NPC-driven Mumakil.
  *
  * This does not add target AI to howdah archers or replace the Mumakil's own
- * combat. It only gives an active Near Harad NPC rider a shared target and
+ * combat. It only gives a Near Harad NPC rider a shared target and
  * nudges the mount toward that target so existing tusk/trample attacks can fire.
  */
 public class MumakilDriverControlEventHandler {
@@ -77,7 +77,7 @@ public class MumakilDriverControlEventHandler {
     private void updateDriverControl(LOTREntityMumakil mumakil) {
         LOTREntityNPC driver = this.getValidNearHaradDriver(mumakil);
         if (driver == null) {
-            this.clearDriverControl(mumakil, null);
+            this.clearStoredDriverTarget(mumakil);
             return;
         }
 
@@ -104,7 +104,7 @@ public class MumakilDriverControlEventHandler {
         }
 
         if (target == null) {
-            this.clearDriverControl(mumakil, driver);
+            this.clearStoredDriverTarget(mumakil);
             return;
         }
 
@@ -121,8 +121,7 @@ public class MumakilDriverControlEventHandler {
         LOTREntityNPC driver = (LOTREntityNPC)rider;
         if (!driver.isEntityAlive()
                 || driver instanceof LOTREntityMumakilHowdahArcher
-                || driver.ridingEntity != mumakil
-                || !driver.hiredNPCInfo.isActive) {
+                || driver.ridingEntity != mumakil) {
             return null;
         }
 
@@ -411,6 +410,10 @@ public class MumakilDriverControlEventHandler {
         }
 
         driver.getNavigator().clearPathEntity();
+    }
+
+    private void clearStoredDriverTarget(LOTREntityMumakil mumakil) {
+        mumakil.getEntityData().setInteger(DRIVER_TARGET_ID_KEY, 0);
     }
 
     private void clearDriverControl(LOTREntityMumakil mumakil, LOTREntityNPC driver) {
