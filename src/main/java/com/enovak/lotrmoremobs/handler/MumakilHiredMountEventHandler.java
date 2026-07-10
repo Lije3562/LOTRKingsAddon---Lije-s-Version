@@ -44,6 +44,7 @@ public class MumakilHiredMountEventHandler {
     }
 
     private void equipHiredMumakil(LOTREntityMumakil mumakil) {
+        mumakil.setHiredWarMumakil(true);
         mumakil.saddleMountForWorldGen();
         this.setInventoryStack(mumakil, SADDLE_SLOT, new ItemStack(Items.saddle));
         this.setInventoryStack(mumakil, HOWDAH_SLOT, new ItemStack(Main.mumakilHowdah));

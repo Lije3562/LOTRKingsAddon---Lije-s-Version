@@ -1,24 +1,15 @@
-//
-// Source code recreated from a .class file by IntelliJ IDEA
-// (powered by FernFlower decompiler)
-//
-
 package com.enovak.lotrmoremobs.entity.animal;
 
 import com.enovak.lotrmoremobs.Main;
-import java.lang.reflect.Field;
-import java.util.HashMap;
-import java.util.Iterator;
-import java.util.List;
-import java.util.Map;
+import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.animal.LOTREntityHorse;
 import lotr.common.entity.npc.LOTREntityNPC;
+import lotr.common.fac.LOTRFaction;
 import net.minecraft.block.Block;
 import net.minecraft.command.IEntitySelector;
-import lotr.common.fac.LOTRFaction;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
@@ -32,6 +23,8 @@ import net.minecraft.entity.passive.EntityAnimal;
 import net.minecraft.entity.passive.EntityHorse;
 import net.minecraft.entity.passive.EntityTameable;
 import net.minecraft.entity.player.EntityPlayer;
+import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.entity.projectile.EntityArrow;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -46,25 +39,38 @@ import net.minecraft.world.World;
 import software.bernie.geckolib3.core.IAnimatable;
 import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
-import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
-import net.minecraft.entity.player.EntityPlayerMP;
-import net.minecraft.entity.projectile.EntityArrow;
 
+import java.lang.reflect.Field;
+import java.util.HashMap;
+import java.util.Iterator;
+import java.util.List;
+import java.util.Map;
 
 public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
-// Rider position tuning.
-// Forward = positive value moves rider toward Mumakil head.
-// Side = positive value moves rider to Mumakil right side.
+    // ---------------------------------------------------------------------
+    // Build / debug flags
+    // ---------------------------------------------------------------------
 
-    private static final float CHARGE_STOMP_SOUND_MIN_SPEED = 0.13F;
-    private static final int CHARGE_STOMP_SOUND_MIN_COOLDOWN = 10;
-    private static final int CHARGE_STOMP_SOUND_RANDOM_COOLDOWN = 7;
     private static final boolean DEBUG_COMBAT_LOGS = false;
 
-    // Rider position tuning.
-// Forward = positive value moves rider toward Mumakil head.
-// Side = positive value moves rider to Mumakil right side.
+    // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
+
+    // ---------------------------------------------------------------------
+    // Base stats
+    // ---------------------------------------------------------------------
+
+    private static final double MAX_HEALTH = 1000.0D;
+    private static final double MOVEMENT_SPEED = 0.30D;
+    private static final double KNOCKBACK_RESISTANCE = 20.0D;
+    private static final double ATTACK_DAMAGE = 16.0D;
+
+    // ---------------------------------------------------------------------
+    // Rider positioning
+    // Forward = positive value moves rider toward Mumakil head.
+    // Side = positive value moves rider to Mumakil right side.
+    // ---------------------------------------------------------------------
+
     private static final double RIDER_WILD_FORWARD = 4.0D;
     private static final double RIDER_WILD_SIDE = 0.0D;
     private static final double RIDER_WILD_Y = 16.0D;
@@ -77,9 +83,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double RIDER_HOWDAH_SIDE = 0.0D;
     private static final double RIDER_HOWDAH_Y = 16.5D;
 
-    // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
-    private static final double MAX_HEALTH = 1000.0D;
-    private static final double MOVEMENT_SPEED = 0.30D;
+    // ---------------------------------------------------------------------
+    // Wild movement
+    // ---------------------------------------------------------------------
+
     private static final double WILD_WANDER_SPEED = 0.22D;
     private static final double WILD_CHASE_SPEED = 0.40D;
     private static final int WILD_CHASE_REPATH_INTERVAL = 25;
@@ -94,62 +101,103 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double WILD_CHASE_FALLBACK_MAX_SPEED = 0.28D;
     private static final double WILD_WANDER_FALLBACK_MAX_SPEED = 0.14D;
     private static final double WILD_WANDER_FALLBACK_STOP_RANGE = 3.0D;
-    private static final double KNOCKBACK_RESISTANCE = 20.0D;
-    private static final double ATTACK_DAMAGE = 16.0D;
-    private static final double WILD_ATTACK_SPEED = 1.30D;
-    private static final float CHARGE_MIN_SPEED = 0.24F;
-    private static final float MAX_CHARGE_DAMAGE = 36.0F;
-    private static final double TUSK_ATTACK_RANGE = 6.5D;
-    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 400;
-    private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
-    private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
+
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
     private static final double MOB_TARGET_RANGE = 18.0D;
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
+
     private static final int ANGER_WAVE_MIN_DURATION = 60;
     private static final int ANGER_WAVE_RANDOM_DURATION = 61;
     private static final int ANGER_WAVE_MIN_COOLDOWN = 180;
     private static final int ANGER_WAVE_RANDOM_COOLDOWN = 81;
-    private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
-    private static final int MAX_OBSTACLES_PER_PASS = 96;
-    private static final int TRAMPLE_SCAN_INTERVAL = 2;
-    private static final int TRAMPLE_COOLDOWN_TICKS = 60;
-    private static final float TRAMPLE_MIN_SPEED = 0.10F;
-    private static final float TRAMPLE_DAMAGE = 8.0F;
-    private static final float IDLE_YAW_SNAP_THRESHOLD = 45.0F;
-    private static final float IDLE_YAW_MAX_STEP = 8.0F;
-    private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
-    private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
-    private static final int PROJECTILE_HURT_RESISTANT_TICKS = 6;
 
-    //AOE damage
+    private static final String NBT_HIRED_WAR_MUMAKIL = "lotrmoremobs_hiredWarMumakil";
+
+    // ---------------------------------------------------------------------
+    // Combat / tusk attack / trample
+    // ---------------------------------------------------------------------
+
+    private static final double WILD_ATTACK_SPEED = 1.30D;
+    private static final float CHARGE_MIN_SPEED = 0.24F;
+    private static final float MAX_CHARGE_DAMAGE = 36.0F;
+
+    private static final double TUSK_ATTACK_RANGE = 6.5D;
+    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 400;
+    private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
+    private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
+
     private static final float TUSK_AOE_DAMAGE = 16.0F;
     private static final double TUSK_AOE_RADIUS = 4.25D;
     private static final double TUSK_AOE_VERTICAL_RANGE = 2.25D;
     private static final float TUSK_AOE_KNOCKBACK_HORIZONTAL = 3.0F;
     private static final float TUSK_AOE_KNOCKBACK_VERTICAL = 1.0F;
 
-    private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
-    private final AnimationFactory animationFactory = new AnimationFactory(this);
-    private float lastStableIdleYaw;
-    private float lastStableIdleHeadYaw;
-    private boolean hasStableIdleYaw;
-    private int chargeStompSoundCooldown;
-    private int angerWaveCooldownTicks;
-    private int angerWaveActiveTicks;
-    private int tuskAttackCooldownTicks;
+    private static final int TRAMPLE_SCAN_INTERVAL = 2;
+    private static final int TRAMPLE_COOLDOWN_TICKS = 60;
+    private static final float TRAMPLE_MIN_SPEED = 0.10F;
+    private static final float TRAMPLE_DAMAGE = 8.0F;
+
+    private static final int PROJECTILE_HURT_RESISTANT_TICKS = 6;
+
+    // ---------------------------------------------------------------------
+    // Tree/obstacle clearing
+    // ---------------------------------------------------------------------
+
+    private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
+    private static final int MAX_OBSTACLES_PER_PASS = 96;
+
+    // ---------------------------------------------------------------------
+    // Sounds / animations
+    // ---------------------------------------------------------------------
+
+    private static final float CHARGE_STOMP_SOUND_MIN_SPEED = 0.13F;
+    private static final int CHARGE_STOMP_SOUND_MIN_COOLDOWN = 10;
+    private static final int CHARGE_STOMP_SOUND_RANDOM_COOLDOWN = 7;
 
     private static final int MUMAKIL_STRIKE_ANIMATION_TICKS = 36;
     private static final byte MUMAKIL_STRIKE_LEFT_STATUS = 80;
     private static final byte MUMAKIL_STRIKE_RIGHT_STATUS = 81;
+
+    // ---------------------------------------------------------------------
+    // Idle yaw stabilization
+    // ---------------------------------------------------------------------
+
+    private static final float IDLE_YAW_SNAP_THRESHOLD = 45.0F;
+    private static final float IDLE_YAW_MAX_STEP = 8.0F;
+    private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
+    private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+
+    // ---------------------------------------------------------------------
+    // Mount inventory / data watcher
+    // ---------------------------------------------------------------------
+
+    private static final int HORSE_ARMOR_WATCHER_ID = 22;
+    private static final int MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX = 1;
+
+    // ---------------------------------------------------------------------
+    // Runtime state
+    // ---------------------------------------------------------------------
+
+    private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
+    private final AnimationFactory animationFactory = new AnimationFactory(this);
+
+    private float lastStableIdleYaw;
+    private float lastStableIdleHeadYaw;
+    private boolean hasStableIdleYaw;
+
+    private int chargeStompSoundCooldown;
+    private int angerWaveCooldownTicks;
+    private int angerWaveActiveTicks;
+    private int tuskAttackCooldownTicks;
 
     private int mumakilStrikeAnimationTicks;
     private int prevMumakilStrikeAnimationTicks;
     private boolean mumakilStrikeAnimationLeft;
     private int mumakilAngrySoundTriggerCounter;
 
-    private static final int HORSE_ARMOR_WATCHER_ID = 22;
-    private static final int MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX = 1;
+    // ---------------------------------------------------------------------
+    // Construction / GeckoLib / basic entity hooks
+    // ---------------------------------------------------------------------
 
     public LOTREntityMumakil(World world) {
         super(world);
@@ -165,7 +213,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
 
-
             @Override
             public boolean continueExecuting() {
                 return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
@@ -176,19 +223,33 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.targetTasks.addTask(5, this.createWildMobTargetAI(EntityLivingBase.class));
     }
 
-    @Override
     public float getCollisionBorderSize() {
         // Small melee/raycast padding so normal-reach weapons can hit the large body reliably.
         return 1.25F;
     }
 
-    @Override
     public void registerControllers(AnimationData data) {
     }
 
-    @Override
     public AnimationFactory getFactory() {
         return this.animationFactory;
+    }
+
+    public int getHorseType() {
+        return 0;
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Wild and hired-war state gates
+    // ---------------------------------------------------------------------
+
+    public boolean isHiredWarMumakil() {
+        return this.getEntityData().getBoolean(NBT_HIRED_WAR_MUMAKIL);
+    }
+
+    public void setHiredWarMumakil(boolean hiredWar) {
+        this.getEntityData().setBoolean(NBT_HIRED_WAR_MUMAKIL, hiredWar);
     }
 
     private boolean isWildMumakil() {
@@ -211,245 +272,109 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 && this.canTuskAttackTarget(target);
     }
 
-    public boolean hasMumakilHowdahEquipped() {
-        return this.hasMumakilHowdahInventoryStack()
-                || this.getMumakilSyncedArmorIndex() > 0;
-    }
 
-    private boolean hasMumakilHowdahInventoryStack() {
-        ItemStack stack = this.getMumakilInventoryStack(1);
-        return stack != null && stack.getItem() == Main.mumakilHowdah;
-    }
+    // ---------------------------------------------------------------------
+    // Wild target selection and movement AI
+    // ---------------------------------------------------------------------
 
-    public boolean isMumakilHowdahEquipped() {
-        return this.hasMumakilHowdahEquipped();
-    }
-
-    public boolean hasMumakilSaddleEquipped() {
-        ItemStack stack = this.getMumakilInventoryStack(0);
-        return this.isMountSaddled()
-                || stack != null && stack.getItem() == Items.saddle;
-    }
-
-    private int getMumakilSyncedArmorIndex() {
-        try {
-            return this.dataWatcher.getWatchableObjectInt(HORSE_ARMOR_WATCHER_ID);
-        } catch (Exception e) {
-            return 0;
-        }
-    }
-
-    private void setMumakilSyncedArmorIndex(int armorIndex) {
-        try {
-            this.dataWatcher.updateObject(HORSE_ARMOR_WATCHER_ID, Integer.valueOf(armorIndex));
-        } catch (Exception e) {
-        }
-    }
-
-    private void updateMumakilHowdahSyncState() {
-        if (this.worldObj.isRemote) {
+    private void tryAcquireWildMobTarget() {
+        if (!this.isWildMumakil()
+                || !this.isWildAngerWaveActive()
+                || this.getAttackTarget() != null
+                || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0) {
             return;
         }
 
-        int desiredArmorIndex = this.hasMumakilHowdahInventoryStack() ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0;
+        List nearby = this.worldObj.getEntitiesWithinAABB(
+                EntityLivingBase.class,
+                this.boundingBox.expand(MOB_TARGET_RANGE, MOB_TARGET_VERTICAL_RANGE, MOB_TARGET_RANGE)
+        );
 
-        if (this.getMumakilSyncedArmorIndex() != desiredArmorIndex) {
-            this.setMumakilSyncedArmorIndex(desiredArmorIndex);
-        }
-    }
+        EntityLivingBase bestTarget = null;
+        int bestPriority = Integer.MAX_VALUE;
+        double bestDistanceSq = Double.MAX_VALUE;
 
-    public void setMumakilHowdahEquipped(boolean equipped) {
-        if (!this.worldObj.isRemote) {
-            this.setMumakilSyncedArmorIndex(equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0);
-        }
-    }
-    private ItemStack getMumakilInventoryStack(int slot) {
-        IInventory inventory = this.findMumakilMountInventory();
-        if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
-            return null;
-        }
+        for(int i = 0; i < nearby.size(); ++i) {
+            EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
+            if (!this.canTargetWildMob(candidate)) {
+                continue;
+            }
 
-        return inventory.getStackInSlot(slot);
-    }
+            int priority = this.getWildMobTargetPriority(candidate);
+            double distanceSq = this.getDistanceSqToEntity(candidate);
 
-    private boolean setMumakilInventoryStack(int slot, ItemStack stack) {
-        IInventory inventory = this.findMumakilMountInventory();
-        if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
-            return false;
-        }
-
-        inventory.setInventorySlotContents(slot, stack);
-        inventory.markDirty();
-
-        if (slot == 1 && !this.worldObj.isRemote) {
-            this.updateMumakilHowdahSyncState();
-        }
-
-        return true;
-    }
-
-
-
-    private boolean tryEquipMumakilHowdah(EntityPlayer player) {
-        if (this.getBelongsToNPC()) {
-            return false;
-        }
-
-        ItemStack held = player.getCurrentEquippedItem();
-
-        if (!this.hasMumakilSaddleEquipped()) {
-            return false;
-        }
-
-        if (this.hasMumakilHowdahEquipped()) {
-            return false;
-        }
-
-        if (this.worldObj.isRemote) {
-            return true;
-        }
-
-        ItemStack howdahStack = new ItemStack(Main.mumakilHowdah);
-        if (!this.setMumakilInventoryStack(1, howdahStack)) {
-            return false;
-        }
-
-        if (!player.capabilities.isCreativeMode) {
-            --held.stackSize;
-            if (held.stackSize <= 0) {
-                player.inventory.setInventorySlotContents(player.inventory.currentItem, null);
+            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
+                bestTarget = candidate;
+                bestPriority = priority;
+                bestDistanceSq = distanceSq;
             }
         }
 
-        player.swingItem();
+        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
+            this.playMumakilAngrySound();
+            this.setAttackTarget(bestTarget);
+        }
+    }
+
+    private boolean canTargetWildMob(EntityLivingBase target) {
+        if (target == this
+                || target instanceof EntityPlayer
+                || target instanceof LOTREntityMumakil
+                || !target.isEntityAlive()
+                || target.riddenByEntity != null
+                || target.ridingEntity != null) {
+            return false;
+        }
+
+        if (target instanceof EntityTameable && ((EntityTameable)target).isTamed()) {
+            return false;
+        }
+
+        if (target instanceof EntityHorse && ((EntityHorse)target).isTame()) {
+            return false;
+        }
+
+        if (target instanceof LOTREntityNPC) {
+            LOTREntityNPC npc = (LOTREntityNPC)target;
+            return !npc.hiredNPCInfo.isActive;
+        }
+
         return true;
     }
 
+    private int getWildMobTargetPriority(EntityLivingBase target) {
+        if (target instanceof IMob) {
+            return 0;
+        }
 
+        if (target instanceof LOTREntityNPC || !(target instanceof EntityAnimal)) {
+            return 1;
+        }
 
-    private IInventory findMumakilMountInventory() {
-        String[] inventoryFieldNames = new String[] {
-                "horseChest",
-                "mountInventory",
-                "horseInventory",
-                "inventory"
+        return 2;
+    }
+
+    private EntityAIBase createWildMobTargetAI(Class targetClass) {
+        return new EntityAINearestAttackableTarget(this, targetClass, 5, true, false, new IEntitySelector() {
+            @Override
+            public boolean isEntityApplicable(Entity entity) {
+                return entity instanceof EntityLivingBase
+                        && LOTREntityMumakil.this.isWildMumakil()
+                        && LOTREntityMumakil.this.canTargetWildMob((EntityLivingBase)entity);
+            }
+        }) {
+            @Override
+            public boolean shouldExecute() {
+                return LOTREntityMumakil.this.isWildMumakil()
+                        && (LOTREntityMumakil.this.getAttackTarget() != null || LOTREntityMumakil.this.isWildAngerWaveActive())
+                        && super.shouldExecute();
+            }
+
+            @Override
+            public boolean continueExecuting() {
+                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
+            }
         };
-
-        for (int i = 0; i < inventoryFieldNames.length; ++i) {
-            Field field = this.findMumakilField(this.getClass(), inventoryFieldNames[i]);
-            if (field != null) {
-                try {
-                    Object value = field.get(this);
-                    if (value instanceof IInventory) {
-                        return (IInventory)value;
-                    }
-                } catch (Exception e) {
-                }
-            }
-        }
-
-        return null;
-    }
-
-    private Field findMumakilField(Class type, String name) {
-        Class current = type;
-        while (current != null && current != Object.class) {
-            try {
-                Field field = current.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException e) {
-                current = current.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-
-        return null;
-    }
-
-    // This code controls the player sitting on the Mumakil.
-    @Override
-    public double getMountedYOffset() {
-        if (this.hasMumakilHowdahEquipped()) {
-            return RIDER_HOWDAH_Y;
-        }
-
-        if (this.hasMumakilSaddleEquipped()) {
-            return RIDER_SADDLE_Y;
-        }
-
-        return RIDER_WILD_Y;
-    }
-
-    @Override
-    public void updateRiderPosition() {
-        if (this.riddenByEntity != null) {
-            boolean hasHowdah = this.hasMumakilHowdahEquipped();
-
-            double forwardOffset;
-            double sideOffset;
-
-            if (hasHowdah) {
-                forwardOffset = RIDER_HOWDAH_FORWARD;
-                sideOffset = RIDER_HOWDAH_SIDE;
-            } else if (this.hasMumakilSaddleEquipped()) {
-                forwardOffset = RIDER_SADDLE_FORWARD;
-                sideOffset = RIDER_SADDLE_SIDE;
-            } else {
-                forwardOffset = RIDER_WILD_FORWARD;
-                sideOffset = RIDER_WILD_SIDE;
-            }
-
-            double verticalOffset = this.getMountedYOffset() + this.riddenByEntity.getYOffset();
-
-            /*
-             * Important:
-             * For howdah riders, use renderYawOffset because that is the yaw used by the
-             * visible Mumakil body/howdah. Using rotationYaw can put the rider beside the
-             * howdah when the body and path-facing yaw disagree.
-             *
-             * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
-             * own look/target logic so his allegiances and aggro can control the mount
-             * normally through LOTR's hired-horse AI.
-             */
-            float placementYaw = hasHowdah ? this.renderYawOffset : this.rotationYaw;
-            float yawRadians = placementYaw * 3.1415927F / 180.0F;
-
-            double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
-            double forwardZ = MathHelper.cos(yawRadians) * forwardOffset;
-
-            double sideX = MathHelper.cos(yawRadians) * sideOffset;
-            double sideZ = MathHelper.sin(yawRadians) * sideOffset;
-
-            this.riddenByEntity.setPosition(
-                    this.posX + forwardX + sideX,
-                    this.posY + verticalOffset,
-                    this.posZ + forwardZ + sideZ
-            );
-
-            /*
-             * Keep player riding comfortable, but do not force NPC driver rotation.
-             * Forcing the NPC driver's rotation/head yaw was what caused the earlier glitch.
-             */
-            if (hasHowdah && this.riddenByEntity instanceof EntityPlayer) {
-                this.riddenByEntity.rotationYaw = placementYaw;
-                this.riddenByEntity.prevRotationYaw = placementYaw;
-            }
-        }
-    }
-
-    @Override
-    public boolean shouldRiderSit() {
-        return !this.hasMumakilHowdahEquipped();
-    }
-
-    protected boolean isMountHostile() {
-        return true;
-    }
-
-    protected EntityAIBase createMountAttackAI() {
-        return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
     }
 
     private class EntityAIWildMumakilMove extends EntityAIBase {
@@ -620,30 +545,242 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    private EntityAIBase createWildMobTargetAI(Class targetClass) {
-        return new EntityAINearestAttackableTarget(this, targetClass, 5, true, false, new IEntitySelector() {
-            @Override
-            public boolean isEntityApplicable(Entity entity) {
-                return entity instanceof EntityLivingBase
-                        && LOTREntityMumakil.this.isWildMumakil()
-                        && LOTREntityMumakil.this.canTargetWildMob((EntityLivingBase)entity);
-            }
-        }) {
-            @Override
-            public boolean shouldExecute() {
-                return LOTREntityMumakil.this.isWildMumakil()
-                        && (LOTREntityMumakil.this.getAttackTarget() != null || LOTREntityMumakil.this.isWildAngerWaveActive())
-                        && super.shouldExecute();
-            }
 
-            @Override
-            public boolean continueExecuting() {
-                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
-            }
-        };
+    // ---------------------------------------------------------------------
+    // Howdah / saddle / inventory helpers
+    // ---------------------------------------------------------------------
+
+    public boolean hasMumakilHowdahEquipped() {
+        return this.hasMumakilHowdahInventoryStack()
+                || this.getMumakilSyncedArmorIndex() > 0;
     }
 
-    @Override
+    private boolean hasMumakilHowdahInventoryStack() {
+        ItemStack stack = this.getMumakilInventoryStack(1);
+        return stack != null && stack.getItem() == Main.mumakilHowdah;
+    }
+
+    public boolean isMumakilHowdahEquipped() {
+        return this.hasMumakilHowdahEquipped();
+    }
+
+    public boolean hasMumakilSaddleEquipped() {
+        ItemStack stack = this.getMumakilInventoryStack(0);
+        return this.isMountSaddled()
+                || stack != null && stack.getItem() == Items.saddle;
+    }
+
+    private int getMumakilSyncedArmorIndex() {
+        try {
+            return this.dataWatcher.getWatchableObjectInt(HORSE_ARMOR_WATCHER_ID);
+        } catch (Exception e) {
+            return 0;
+        }
+    }
+
+    private void setMumakilSyncedArmorIndex(int armorIndex) {
+        try {
+            this.dataWatcher.updateObject(HORSE_ARMOR_WATCHER_ID, Integer.valueOf(armorIndex));
+        } catch (Exception e) {
+        }
+    }
+
+    private void updateMumakilHowdahSyncState() {
+        if (this.worldObj.isRemote) {
+            return;
+        }
+
+        int desiredArmorIndex = this.hasMumakilHowdahInventoryStack() ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0;
+
+        if (this.getMumakilSyncedArmorIndex() != desiredArmorIndex) {
+            this.setMumakilSyncedArmorIndex(desiredArmorIndex);
+        }
+    }
+
+    public void setMumakilHowdahEquipped(boolean equipped) {
+        if (!this.worldObj.isRemote) {
+            this.setMumakilSyncedArmorIndex(equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0);
+        }
+    }
+
+    private ItemStack getMumakilInventoryStack(int slot) {
+        IInventory inventory = this.findMumakilMountInventory();
+        if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
+            return null;
+        }
+
+        return inventory.getStackInSlot(slot);
+    }
+
+    private boolean setMumakilInventoryStack(int slot, ItemStack stack) {
+        IInventory inventory = this.findMumakilMountInventory();
+        if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
+            return false;
+        }
+
+        inventory.setInventorySlotContents(slot, stack);
+        inventory.markDirty();
+
+        if (slot == 1 && !this.worldObj.isRemote) {
+            this.updateMumakilHowdahSyncState();
+        }
+
+        return true;
+    }
+
+    private boolean tryEquipMumakilHowdah(EntityPlayer player) {
+        if (this.getBelongsToNPC()) {
+            return false;
+        }
+
+        ItemStack held = player.getCurrentEquippedItem();
+
+        if (!this.hasMumakilSaddleEquipped()) {
+            return false;
+        }
+
+        if (this.hasMumakilHowdahEquipped()) {
+            return false;
+        }
+
+        if (this.worldObj.isRemote) {
+            return true;
+        }
+
+        ItemStack howdahStack = new ItemStack(Main.mumakilHowdah);
+        if (!this.setMumakilInventoryStack(1, howdahStack)) {
+            return false;
+        }
+
+        if (!player.capabilities.isCreativeMode) {
+            --held.stackSize;
+            if (held.stackSize <= 0) {
+                player.inventory.setInventorySlotContents(player.inventory.currentItem, null);
+            }
+        }
+
+        player.swingItem();
+        return true;
+    }
+
+    private IInventory findMumakilMountInventory() {
+        String[] inventoryFieldNames = new String[] {
+                "horseChest",
+                "mountInventory",
+                "horseInventory",
+                "inventory"
+        };
+
+        for (int i = 0; i < inventoryFieldNames.length; ++i) {
+            Field field = this.findMumakilField(this.getClass(), inventoryFieldNames[i]);
+            if (field != null) {
+                try {
+                    Object value = field.get(this);
+                    if (value instanceof IInventory) {
+                        return (IInventory)value;
+                    }
+                } catch (Exception e) {
+                }
+            }
+        }
+
+        return null;
+    }
+
+    private Field findMumakilField(Class type, String name) {
+        Class current = type;
+        while (current != null && current != Object.class) {
+            try {
+                Field field = current.getDeclaredField(name);
+                field.setAccessible(true);
+                return field;
+            } catch (NoSuchFieldException e) {
+                current = current.getSuperclass();
+            } catch (Exception e) {
+                return null;
+            }
+        }
+
+        return null;
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Rider placement and player interaction
+    // ---------------------------------------------------------------------
+
+    public double getMountedYOffset() {
+        if (this.hasMumakilHowdahEquipped()) {
+            return RIDER_HOWDAH_Y;
+        }
+
+        if (this.hasMumakilSaddleEquipped()) {
+            return RIDER_SADDLE_Y;
+        }
+
+        return RIDER_WILD_Y;
+    }
+
+    public void updateRiderPosition() {
+        if (this.riddenByEntity != null) {
+            boolean hasHowdah = this.hasMumakilHowdahEquipped();
+
+            double forwardOffset;
+            double sideOffset;
+
+            if (hasHowdah) {
+                forwardOffset = RIDER_HOWDAH_FORWARD;
+                sideOffset = RIDER_HOWDAH_SIDE;
+            } else if (this.hasMumakilSaddleEquipped()) {
+                forwardOffset = RIDER_SADDLE_FORWARD;
+                sideOffset = RIDER_SADDLE_SIDE;
+            } else {
+                forwardOffset = RIDER_WILD_FORWARD;
+                sideOffset = RIDER_WILD_SIDE;
+            }
+
+            double verticalOffset = this.getMountedYOffset() + this.riddenByEntity.getYOffset();
+
+            /*
+             * Important:
+             * For howdah riders, use renderYawOffset because that is the yaw used by the
+             * visible Mumakil body/howdah. Using rotationYaw can put the rider beside the
+             * howdah when the body and path-facing yaw disagree.
+             *
+             * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
+             * own look/target logic so his allegiances and aggro can control the mount
+             * normally through LOTR's hired-horse AI.
+             */
+            float placementYaw = hasHowdah ? this.renderYawOffset : this.rotationYaw;
+            float yawRadians = placementYaw * 3.1415927F / 180.0F;
+
+            double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
+            double forwardZ = MathHelper.cos(yawRadians) * forwardOffset;
+
+            double sideX = MathHelper.cos(yawRadians) * sideOffset;
+            double sideZ = MathHelper.sin(yawRadians) * sideOffset;
+
+            this.riddenByEntity.setPosition(
+                    this.posX + forwardX + sideX,
+                    this.posY + verticalOffset,
+                    this.posZ + forwardZ + sideZ
+            );
+
+            /*
+             * Keep player riding comfortable, but do not force NPC driver rotation.
+             * Forcing the NPC driver's rotation/head yaw was what caused the earlier glitch.
+             */
+            if (hasHowdah && this.riddenByEntity instanceof EntityPlayer) {
+                this.riddenByEntity.rotationYaw = placementYaw;
+                this.riddenByEntity.prevRotationYaw = placementYaw;
+            }
+        }
+    }
+
+    public boolean shouldRiderSit() {
+        return !this.hasMumakilHowdahEquipped();
+    }
+
     public boolean interact(EntityPlayer player) {
         if (this.getBelongsToNPC()) {
             return super.interact(player);
@@ -661,9 +798,50 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return super.interact(player);
     }
 
+    public void openGUI(EntityPlayer player) {
+        if (this.getBelongsToNPC()) {
+            return;
+        }
 
-    public int getHorseType() {
-        return 0;
+        if (!this.worldObj.isRemote) {
+            this.updateMumakilHowdahSyncState();
+            IInventory inventory = this.findMumakilMountInventory();
+
+            if (inventory != null && player instanceof EntityPlayerMP) {
+                EntityPlayerMP playerMP = (EntityPlayerMP)player;
+
+                /*
+                 * First let vanilla open the normal horse GUI window on the client.
+                 */
+                playerMP.displayGUIHorse(this, inventory);
+
+                /*
+                 * Then replace the server-side container with a Mumakil-safe version.
+                 * This keeps the same GUI but prevents the distance check from instantly closing it.
+                 */
+                int windowId = playerMP.openContainer.windowId;
+                playerMP.openContainer = new ContainerMumakilInventory(playerMP.inventory, inventory, this);
+                playerMP.openContainer.windowId = windowId;
+                playerMP.openContainer.addCraftingToCrafters(playerMP);
+
+                return;
+            }
+
+            super.openGUI(player);
+        }
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Mount flags, attributes, breeding, and NBT
+    // ---------------------------------------------------------------------
+
+    protected boolean isMountHostile() {
+        return true;
+    }
+
+    protected EntityAIBase createMountAttackAI() {
+        return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
     }
 
     protected void applyEntityAttributes() {
@@ -712,6 +890,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     public boolean isBreedingItem(ItemStack itemstack) {
         return itemstack != null && itemstack.getItem() == Items.wheat;
     }
+
+
+    // ---------------------------------------------------------------------
+    // Main server tick update
+    // ---------------------------------------------------------------------
 
     public void onLivingUpdate() {
         super.onLivingUpdate();
@@ -790,41 +973,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    @Override
-    public void openGUI(EntityPlayer player) {
-        if (this.getBelongsToNPC()) {
-            return;
-        }
 
-        if (!this.worldObj.isRemote) {
-            this.updateMumakilHowdahSyncState();
-            IInventory inventory = this.findMumakilMountInventory();
+    // ---------------------------------------------------------------------
+    // Direct melee, tusk attack, and projectile damage
+    // ---------------------------------------------------------------------
 
-            if (inventory != null && player instanceof EntityPlayerMP) {
-                EntityPlayerMP playerMP = (EntityPlayerMP)player;
-
-                /*
-                 * First let vanilla open the normal horse GUI window on the client.
-                 */
-                playerMP.displayGUIHorse(this, inventory);
-
-                /*
-                 * Then replace the server-side container with a Mumakil-safe version.
-                 * This keeps the same GUI but prevents the distance check from instantly closing it.
-                 */
-                int windowId = playerMP.openContainer.windowId;
-                playerMP.openContainer = new ContainerMumakilInventory(playerMP.inventory, inventory, this);
-                playerMP.openContainer.windowId = windowId;
-                playerMP.openContainer.addCraftingToCrafters(playerMP);
-
-                return;
-            }
-
-            super.openGUI(player);
-        }
-    }
-
-    @Override
     public boolean attackEntityAsMob(Entity target) {
         if (this.tuskAttackCooldownTicks > 0) {
             return false;
@@ -844,7 +997,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return attacked;
     }
 
-    @Override
     public boolean attackEntityFrom(DamageSource source, float amount) {
         boolean arrowDamage = this.isMumakilArrowDamage(source);
         boolean damaged = super.attackEntityFrom(source, amount);
@@ -865,66 +1017,22 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean isMumakilArrowDamage(DamageSource source) {
-    return source != null
-            && (source.isProjectile() || source.getSourceOfDamage() instanceof EntityArrow);
+        return source != null
+                && (source.isProjectile() || source.getSourceOfDamage() instanceof EntityArrow);
     }
 
     private boolean shouldConsumeBlockedMumakilArrow(DamageSource source, float amount) {
-    return this.isMumakilArrowDamage(source)
-            && amount > 0.0F
-            && !this.worldObj.isRemote
-            && !this.isDead
-            && this.getHealth() > 0.0F
-            && !this.isEntityInvulnerable();
+        return this.isMumakilArrowDamage(source)
+                && amount > 0.0F
+                && !this.worldObj.isRemote
+                && !this.isDead
+                && this.getHealth() > 0.0F
+                && !this.isEntityInvulnerable();
     }
 
-    private void playMumakilNormalHitSound() {
-        this.worldObj.playSoundAtEntity(
-                this,
-                "game.neutral.hurt",
-                0.9F,
-                0.62F + this.rand.nextFloat() * 0.10F
-        );
-    }
-
-    @Override
     public void knockBack(Entity attacker, float strength, double xRatio, double zRatio) {
         // A Mumakil's mass lets damage land normally without letting ordinary hits shove the war beast around.
         super.knockBack(attacker, strength * 0.1F, xRatio, zRatio);
-    }
-
-    private void updateAngerWave() {
-        if (!this.isWildMumakil()) {
-            this.angerWaveActiveTicks = 0;
-            if (this.angerWaveCooldownTicks <= 0) {
-                this.resetAngerWaveCooldown();
-            }
-            return;
-        }
-
-        if (this.angerWaveActiveTicks > 0) {
-            --this.angerWaveActiveTicks;
-            if (this.angerWaveActiveTicks <= 0) {
-                this.resetAngerWaveCooldown();
-            }
-            return;
-        }
-
-        if (this.angerWaveCooldownTicks > 0) {
-            --this.angerWaveCooldownTicks;
-            return;
-        }
-
-        this.angerWaveActiveTicks = ANGER_WAVE_MIN_DURATION + this.rand.nextInt(ANGER_WAVE_RANDOM_DURATION);
-        this.playMumakilAngrySound();
-    }
-
-    private void resetAngerWaveCooldown() {
-        this.angerWaveCooldownTicks = ANGER_WAVE_MIN_COOLDOWN + this.rand.nextInt(ANGER_WAVE_RANDOM_COOLDOWN);
-    }
-
-    private boolean isWildAngerWaveActive() {
-        return this.isWildMumakil() && this.angerWaveActiveTicks > 0;
     }
 
     private void tryTuskReachAttack() {
@@ -1095,166 +1203,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         target.velocityChanged = true;
     }
 
-    /**
-     * LOTREntityHorse can inherit idle look updates that swing the whole body while the mount is
-     * standing still. Keep those idle-only yaw changes from becoming elephant-sized snap-turns,
-     * but leave movement, combat, riding, enraged movement, and active pathing untouched.
-     */
-    private void stabilizeIdleYaw() {
-        if (!this.isStationaryIdleForYawLock()) {
-            this.rememberStableIdleYaw();
-            return;
-        }
 
-        if (!this.hasStableIdleYaw) {
-            this.rememberStableIdleYaw();
-            return;
-        }
-
-        boolean corrected = false;
-        float bodyDelta = MathHelper.wrapAngleTo180_float(this.renderYawOffset - this.lastStableIdleYaw);
-        if (Math.abs(bodyDelta) > IDLE_YAW_SNAP_THRESHOLD) {
-            this.renderYawOffset = this.clampYawStep(this.lastStableIdleYaw, this.renderYawOffset, IDLE_YAW_MAX_STEP);
-            corrected = true;
-        }
-
-        float entityDelta = MathHelper.wrapAngleTo180_float(this.rotationYaw - this.lastStableIdleYaw);
-        if (Math.abs(entityDelta) > IDLE_YAW_SNAP_THRESHOLD) {
-            this.rotationYaw = this.clampYawStep(this.lastStableIdleYaw, this.rotationYaw, IDLE_YAW_MAX_STEP);
-            corrected = true;
-        }
-
-        float headDelta = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.lastStableIdleHeadYaw);
-        float headFromBody = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.renderYawOffset);
-        if (Math.abs(headDelta) > IDLE_YAW_SNAP_THRESHOLD && Math.abs(headFromBody) > IDLE_HEAD_YAW_LIMIT) {
-            this.rotationYawHead = this.renderYawOffset + MathHelper.clamp_float(headFromBody, -IDLE_HEAD_YAW_LIMIT, IDLE_HEAD_YAW_LIMIT);
-            corrected = true;
-        }
-
-        if (corrected) {
-            this.prevRotationYaw = this.rotationYaw;
-            this.prevRenderYawOffset = this.renderYawOffset;
-            this.prevRotationYawHead = this.rotationYawHead;
-        }
-
-        this.rememberStableIdleYaw();
-    }
-
-    private boolean isStationaryIdleForYawLock() {
-        if (this.riddenByEntity != null
-                || this.getAttackTarget() != null
-                || this.isMountEnraged()
-                || this.isSprinting()
-                || !this.onGround
-                || Math.abs(this.moveForward) > 0.01F
-                || Math.abs(this.moveStrafing) > 0.01F) {
-            return false;
-        }
-
-        double horizontalMotionSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
-        return horizontalMotionSq <= IDLE_YAW_MOTION_THRESHOLD_SQ && this.getNavigator().noPath();
-    }
-
-    private void rememberStableIdleYaw() {
-        this.lastStableIdleYaw = this.renderYawOffset;
-        this.lastStableIdleHeadYaw = this.rotationYawHead;
-        this.hasStableIdleYaw = true;
-    }
-
-    private float clampYawStep(float stableYaw, float candidateYaw, float maximumStep) {
-        float delta = MathHelper.wrapAngleTo180_float(candidateYaw - stableYaw);
-        return stableYaw + MathHelper.clamp_float(delta, -maximumStep, maximumStep);
-    }
-
-    private void faceWildMovePoint(double x, double z) {
-        double deltaX = x - this.posX;
-        double deltaZ = z - this.posZ;
-        if (deltaX * deltaX + deltaZ * deltaZ < 1.0E-4D) {
-            return;
-        }
-
-        float desiredYaw = (float)(Math.atan2(deltaZ, deltaX) * 180.0D / Math.PI) - 90.0F;
-        this.rotationYaw = this.clampYawStep(this.rotationYaw, desiredYaw, WILD_FALLBACK_TURN_STEP);
-        this.renderYawOffset = this.clampYawStep(this.renderYawOffset, this.rotationYaw, WILD_FALLBACK_TURN_STEP);
-        this.rotationYawHead = this.renderYawOffset;
-    }
-
-    private void tryAcquireWildMobTarget() {
-        if (!this.isWildMumakil()
-                || !this.isWildAngerWaveActive()
-                || this.getAttackTarget() != null
-                || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0) {
-            return;
-        }
-
-        List nearby = this.worldObj.getEntitiesWithinAABB(
-                EntityLivingBase.class,
-                this.boundingBox.expand(MOB_TARGET_RANGE, MOB_TARGET_VERTICAL_RANGE, MOB_TARGET_RANGE)
-        );
-
-        EntityLivingBase bestTarget = null;
-        int bestPriority = Integer.MAX_VALUE;
-        double bestDistanceSq = Double.MAX_VALUE;
-
-        for(int i = 0; i < nearby.size(); ++i) {
-            EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
-            if (!this.canTargetWildMob(candidate)) {
-                continue;
-            }
-
-            int priority = this.getWildMobTargetPriority(candidate);
-            double distanceSq = this.getDistanceSqToEntity(candidate);
-
-            if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
-                bestTarget = candidate;
-                bestPriority = priority;
-                bestDistanceSq = distanceSq;
-            }
-        }
-
-        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
-            this.playMumakilAngrySound();
-            this.setAttackTarget(bestTarget);
-        }
-    }
-
-    private boolean canTargetWildMob(EntityLivingBase target) {
-        if (target == this
-                || target instanceof EntityPlayer
-                || target instanceof LOTREntityMumakil
-                || !target.isEntityAlive()
-                || target.riddenByEntity != null
-                || target.ridingEntity != null) {
-            return false;
-        }
-
-        if (target instanceof EntityTameable && ((EntityTameable)target).isTamed()) {
-            return false;
-        }
-
-        if (target instanceof EntityHorse && ((EntityHorse)target).isTame()) {
-            return false;
-        }
-
-        if (target instanceof LOTREntityNPC) {
-            LOTREntityNPC npc = (LOTREntityNPC)target;
-            return !npc.hiredNPCInfo.isActive;
-        }
-
-        return true;
-    }
-
-    private int getWildMobTargetPriority(EntityLivingBase target) {
-        if (target instanceof IMob) {
-            return 0;
-        }
-
-        if (target instanceof LOTREntityNPC || !(target instanceof EntityAnimal)) {
-            return 1;
-        }
-
-        return 2;
-    }
+    // ---------------------------------------------------------------------
+    // Trample damage
+    // ---------------------------------------------------------------------
 
     private void applyTrampleDamage() {
         if (this.worldObj.isRemote || this.ticksExisted % TRAMPLE_SCAN_INTERVAL != 0) {
@@ -1366,7 +1318,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return true;
     }
 
-
     private boolean isOwner(EntityPlayer player) {
         if (!this.isTame()) {
             return false;
@@ -1406,13 +1357,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    /**
-     * Angry Mumakil should be able to shove through trees while pursuing a target.
-     * This deliberately uses Forge's leaf/wood hooks instead of Material.wood, so planks,
-     * doors, fences, and chests are not treated as casual obstacle clearing targets.
-     *
-     * Broken leaves/logs now drop their normal drops instead of silently disappearing.
-     */
+
+    // ---------------------------------------------------------------------
+    // Tree / obstacle clearing
+    // ---------------------------------------------------------------------
+
     private void clearAggroObstaclesForMovement() {
         if (this.worldObj.isRemote || this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0) {
             return;
@@ -1580,6 +1529,129 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return block.isLeaves(this.worldObj, x, y, z) || block.isWood(this.worldObj, x, y, z);
     }
 
+
+    // ---------------------------------------------------------------------
+    // Idle yaw stabilization and fallback-facing helpers
+    // ---------------------------------------------------------------------
+
+    private void stabilizeIdleYaw() {
+        if (!this.isStationaryIdleForYawLock()) {
+            this.rememberStableIdleYaw();
+            return;
+        }
+
+        if (!this.hasStableIdleYaw) {
+            this.rememberStableIdleYaw();
+            return;
+        }
+
+        boolean corrected = false;
+        float bodyDelta = MathHelper.wrapAngleTo180_float(this.renderYawOffset - this.lastStableIdleYaw);
+        if (Math.abs(bodyDelta) > IDLE_YAW_SNAP_THRESHOLD) {
+            this.renderYawOffset = this.clampYawStep(this.lastStableIdleYaw, this.renderYawOffset, IDLE_YAW_MAX_STEP);
+            corrected = true;
+        }
+
+        float entityDelta = MathHelper.wrapAngleTo180_float(this.rotationYaw - this.lastStableIdleYaw);
+        if (Math.abs(entityDelta) > IDLE_YAW_SNAP_THRESHOLD) {
+            this.rotationYaw = this.clampYawStep(this.lastStableIdleYaw, this.rotationYaw, IDLE_YAW_MAX_STEP);
+            corrected = true;
+        }
+
+        float headDelta = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.lastStableIdleHeadYaw);
+        float headFromBody = MathHelper.wrapAngleTo180_float(this.rotationYawHead - this.renderYawOffset);
+        if (Math.abs(headDelta) > IDLE_YAW_SNAP_THRESHOLD && Math.abs(headFromBody) > IDLE_HEAD_YAW_LIMIT) {
+            this.rotationYawHead = this.renderYawOffset + MathHelper.clamp_float(headFromBody, -IDLE_HEAD_YAW_LIMIT, IDLE_HEAD_YAW_LIMIT);
+            corrected = true;
+        }
+
+        if (corrected) {
+            this.prevRotationYaw = this.rotationYaw;
+            this.prevRenderYawOffset = this.renderYawOffset;
+            this.prevRotationYawHead = this.rotationYawHead;
+        }
+
+        this.rememberStableIdleYaw();
+    }
+
+    private boolean isStationaryIdleForYawLock() {
+        if (this.riddenByEntity != null
+                || this.getAttackTarget() != null
+                || this.isMountEnraged()
+                || this.isSprinting()
+                || !this.onGround
+                || Math.abs(this.moveForward) > 0.01F
+                || Math.abs(this.moveStrafing) > 0.01F) {
+            return false;
+        }
+
+        double horizontalMotionSq = this.motionX * this.motionX + this.motionZ * this.motionZ;
+        return horizontalMotionSq <= IDLE_YAW_MOTION_THRESHOLD_SQ && this.getNavigator().noPath();
+    }
+
+    private void rememberStableIdleYaw() {
+        this.lastStableIdleYaw = this.renderYawOffset;
+        this.lastStableIdleHeadYaw = this.rotationYawHead;
+        this.hasStableIdleYaw = true;
+    }
+
+    private float clampYawStep(float stableYaw, float candidateYaw, float maximumStep) {
+        float delta = MathHelper.wrapAngleTo180_float(candidateYaw - stableYaw);
+        return stableYaw + MathHelper.clamp_float(delta, -maximumStep, maximumStep);
+    }
+
+    private void faceWildMovePoint(double x, double z) {
+        double deltaX = x - this.posX;
+        double deltaZ = z - this.posZ;
+        if (deltaX * deltaX + deltaZ * deltaZ < 1.0E-4D) {
+            return;
+        }
+
+        float desiredYaw = (float)(Math.atan2(deltaZ, deltaX) * 180.0D / Math.PI) - 90.0F;
+        this.rotationYaw = this.clampYawStep(this.rotationYaw, desiredYaw, WILD_FALLBACK_TURN_STEP);
+        this.renderYawOffset = this.clampYawStep(this.renderYawOffset, this.rotationYaw, WILD_FALLBACK_TURN_STEP);
+        this.rotationYawHead = this.renderYawOffset;
+    }
+
+
+    // ---------------------------------------------------------------------
+    // Anger wave, sounds, strike animation, and drops
+    // ---------------------------------------------------------------------
+
+    private void updateAngerWave() {
+        if (!this.isWildMumakil()) {
+            this.angerWaveActiveTicks = 0;
+            if (this.angerWaveCooldownTicks <= 0) {
+                this.resetAngerWaveCooldown();
+            }
+            return;
+        }
+
+        if (this.angerWaveActiveTicks > 0) {
+            --this.angerWaveActiveTicks;
+            if (this.angerWaveActiveTicks <= 0) {
+                this.resetAngerWaveCooldown();
+            }
+            return;
+        }
+
+        if (this.angerWaveCooldownTicks > 0) {
+            --this.angerWaveCooldownTicks;
+            return;
+        }
+
+        this.angerWaveActiveTicks = ANGER_WAVE_MIN_DURATION + this.rand.nextInt(ANGER_WAVE_RANDOM_DURATION);
+        this.playMumakilAngrySound();
+    }
+
+    private void resetAngerWaveCooldown() {
+        this.angerWaveCooldownTicks = ANGER_WAVE_MIN_COOLDOWN + this.rand.nextInt(ANGER_WAVE_RANDOM_COOLDOWN);
+    }
+
+    private boolean isWildAngerWaveActive() {
+        return this.isWildMumakil() && this.angerWaveActiveTicks > 0;
+    }
+
     private void updateChargeStompSound() {
         if (this.chargeStompSoundCooldown > 0) {
             --this.chargeStompSoundCooldown;
@@ -1610,6 +1682,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean shouldPlayMumakilAngrySoundThisTrigger() {
         ++this.mumakilAngrySoundTriggerCounter;
         return this.mumakilAngrySoundTriggerCounter % 10 == 0;
+    }
+
+    private void playMumakilNormalHitSound() {
+        this.worldObj.playSoundAtEntity(
+                this,
+                "game.neutral.hurt",
+                0.9F,
+                0.62F + this.rand.nextFloat() * 0.10F
+        );
     }
 
     private void playMumakilAngrySound() {
@@ -1647,7 +1728,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    @Override
     protected float getSoundPitch() {
         return 0.62F + this.rand.nextFloat() * 0.10F;
     }
@@ -1697,7 +1777,6 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    @Override
     public void handleHealthUpdate(byte status) {
         if (status == MUMAKIL_STRIKE_LEFT_STATUS || status == MUMAKIL_STRIKE_RIGHT_STATUS) {
             this.mumakilStrikeAnimationLeft = status == MUMAKIL_STRIKE_LEFT_STATUS;

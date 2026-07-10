@@ -52,6 +52,7 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         LOTREntityMumakil mumakil = new LOTREntityMumakil(world);
         mumakil.onSpawnWithEgg(null);
         mumakil.setBelongsToNPC(true);
+        mumakil.setHiredWarMumakil(true);
         mumakil.setMountable(true);
 
         if (world.isRemote) {
