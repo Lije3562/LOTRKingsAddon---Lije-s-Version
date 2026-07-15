@@ -3,7 +3,6 @@ package com.enovak.lotrmoremobs.entity.animal;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
-import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
@@ -805,18 +804,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean interactHiredWarDriver(EntityPlayer player) {
-        LOTREntityNPC driver = this.getLivingHiredWarDriver();
-        if (driver != null && !this.worldObj.isRemote) {
-            if (driver.hiredNPCInfo.getHiringPlayer() == player) {
-                driver.hiredNPCInfo.sendClientPacket(false);
-                player.openGui(LOTRMod.instance, LOTRCommonProxy.GUI_ID_HIRED_INTERACT, this.worldObj, driver.getEntityId(), 0, 0);
-            } else {
-                driver.interact(player);
-            }
-        }
-
-        return true;
-    }
+    return true;
+}
 
     private LOTREntityNPC getLivingHiredWarDriver() {
         if (!(this.riddenByEntity instanceof LOTREntityNPC)) {
