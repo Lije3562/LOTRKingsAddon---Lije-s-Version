@@ -1,7 +1,9 @@
 package com.enovak.lotrmoremobs.entity.animal;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
+import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
@@ -782,6 +784,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public boolean interact(EntityPlayer player) {
+        if (this.isHiredWarMumakil()) {
+            return this.interactHiredWarDriver(player);
+        }
+
         if (this.getBelongsToNPC()) {
             return super.interact(player);
         }
@@ -796,6 +802,33 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         return super.interact(player);
+    }
+
+    private boolean interactHiredWarDriver(EntityPlayer player) {
+        LOTREntityNPC driver = this.getLivingHiredWarDriver();
+        if (driver != null && !this.worldObj.isRemote) {
+            if (driver.hiredNPCInfo.getHiringPlayer() == player) {
+                driver.hiredNPCInfo.sendClientPacket(false);
+                player.openGui(LOTRMod.instance, LOTRCommonProxy.GUI_ID_HIRED_INTERACT, this.worldObj, driver.getEntityId(), 0, 0);
+            } else {
+                driver.interact(player);
+            }
+        }
+
+        return true;
+    }
+
+    private LOTREntityNPC getLivingHiredWarDriver() {
+        if (!(this.riddenByEntity instanceof LOTREntityNPC)) {
+            return null;
+        }
+
+        LOTREntityNPC driver = (LOTREntityNPC)this.riddenByEntity;
+        if (driver.isDead || !driver.isEntityAlive() || driver.hiredNPCInfo == null || !driver.hiredNPCInfo.isActive) {
+            return null;
+        }
+
+        return driver;
     }
 
     public void openGUI(EntityPlayer player) {
@@ -998,6 +1031,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public boolean attackEntityFrom(DamageSource source, float amount) {
+        if (this.shouldBlockOwnHowdahArcherArrow(source)) {
+            return true;
+        }
+
         boolean arrowDamage = this.isMumakilArrowDamage(source);
         boolean damaged = super.attackEntityFrom(source, amount);
 
@@ -1019,6 +1056,49 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean isMumakilArrowDamage(DamageSource source) {
         return source != null
                 && (source.isProjectile() || source.getSourceOfDamage() instanceof EntityArrow);
+    }
+
+    private boolean shouldBlockOwnHowdahArcherArrow(DamageSource source) {
+        return source != null
+                && this.isHiredWarMumakil()
+                && this.getMumakilDamageArrow(source) != null
+                && this.isOwnAttachedHowdahArcher(this.getMumakilArrowShooter(source));
+    }
+
+    private EntityArrow getMumakilDamageArrow(DamageSource source) {
+        Entity damageEntity = source.getSourceOfDamage();
+        return damageEntity instanceof EntityArrow ? (EntityArrow)damageEntity : null;
+    }
+
+    private Entity getMumakilArrowShooter(DamageSource source) {
+        Entity shooter = source.getEntity();
+        if (shooter instanceof LOTREntityMumakilHowdahArcher) {
+            return shooter;
+        }
+
+        EntityArrow arrow = this.getMumakilDamageArrow(source);
+        return arrow == null ? null : arrow.shootingEntity;
+    }
+
+    private boolean isOwnAttachedHowdahArcher(Entity shooter) {
+        if (!(shooter instanceof LOTREntityMumakilHowdahArcher)) {
+            return false;
+        }
+
+        LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)shooter;
+        if (!archer.isRuntimeHowdahPassenger()) {
+            return false;
+        }
+
+        int mountEntityId = archer.getHowdahMountEntityId();
+        if (mountEntityId != 0 && mountEntityId == this.getEntityId()) {
+            return true;
+        }
+
+        String mountUuid = archer.getHowdahMountUuid();
+        return mountUuid != null
+                && mountUuid.length() > 0
+                && mountUuid.equals(this.getPersistentID().toString());
     }
 
     private boolean shouldConsumeBlockedMumakilArrow(DamageSource source, float amount) {
