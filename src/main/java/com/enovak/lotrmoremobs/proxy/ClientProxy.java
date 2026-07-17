@@ -1,6 +1,8 @@
 package com.enovak.lotrmoremobs.proxy;
 
+import com.enovak.lotrmoremobs.client.MumakilHiredDriverGuiHandler;
 import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
+import com.enovak.lotrmoremobs.client.gui.MumakilHiredDriverGuiContext;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilGeoInventoryScaled;
@@ -27,6 +29,20 @@ public class ClientProxy extends CommonProxy {
         FMLCommonHandler.instance().bus().register(mumakilInventoryKeyHandler);
         MinecraftForge.EVENT_BUS.register(mumakilInventoryKeyHandler);
 
+    }
+
+    @Override
+    public void prepareMumakilHiredDriverGui(int driverEntityId, int mumakilEntityId) {
+        MumakilHiredDriverGuiContext.begin(driverEntityId, mumakilEntityId);
+    }
+
+    @Override
+    public void registerEventHandlers() {
+        super.registerEventHandlers();
+
+        MumakilHiredDriverGuiHandler hiredDriverGuiHandler = new MumakilHiredDriverGuiHandler();
+        MinecraftForge.EVENT_BUS.register(hiredDriverGuiHandler);
+        FMLCommonHandler.instance().bus().register(hiredDriverGuiHandler);
     }
 
     private void registerHowdahArcherRenderer() {

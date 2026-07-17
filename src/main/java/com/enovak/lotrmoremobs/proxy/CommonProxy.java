@@ -13,6 +13,9 @@ public class CommonProxy {
     public void registerRenderers() {
     }
 
+    public void prepareMumakilHiredDriverGui(int driverEntityId, int mumakilEntityId) {
+    }
+
     public void registerEventHandlers() {
         MinecraftForge.EVENT_BUS.register(new MumakilFearEventHandler());
         MinecraftForge.EVENT_BUS.register(new MumakilEquipmentEventHandler());

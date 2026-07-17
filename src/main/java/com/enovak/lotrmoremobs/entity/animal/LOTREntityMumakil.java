@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs.entity.animal;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
+import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
@@ -783,7 +784,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public boolean interact(EntityPlayer player) {
-        if (this.isHiredWarMumakil()) {
+        if (this.shouldRouteHiredWarBodyClick()) {
             return this.interactHiredWarDriver(player);
         }
 
@@ -803,9 +804,45 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return super.interact(player);
     }
 
+    private boolean shouldRouteHiredWarBodyClick() {
+        if (this.isHiredWarMumakil()) {
+            return true;
+        }
+
+        if (this.riddenByEntity instanceof LOTREntityNPC) {
+            LOTREntityNPC driver = (LOTREntityNPC)this.riddenByEntity;
+            return driver.hiredNPCInfo != null && driver.hiredNPCInfo.isActive;
+        }
+
+        return false;
+    }
+
     private boolean interactHiredWarDriver(EntityPlayer player) {
-    return true;
-}
+        LOTREntityNPC driver = this.getLivingHiredWarDriver();
+
+        if (driver == null) {
+            return true;
+        }
+
+        if (driver.hiredNPCInfo.getHiringPlayer() == player) {
+            if (this.worldObj.isRemote) {
+                Main.proxy.prepareMumakilHiredDriverGui(driver.getEntityId(), this.getEntityId());
+                player.openGui(
+                        LOTRMod.instance,
+                        LOTRCommonProxy.GUI_ID_HIRED_INTERACT,
+                        player.worldObj,
+                        driver.getEntityId(),
+                        0,
+                        0
+                );
+            } else {
+                // Keep client hired data fresh; the initial interact GUI itself is client-only in LOTR.
+                driver.hiredNPCInfo.sendClientPacket(false);
+            }
+        }
+
+        return true;
+    }
 
     private LOTREntityNPC getLivingHiredWarDriver() {
         if (!(this.riddenByEntity instanceof LOTREntityNPC)) {
