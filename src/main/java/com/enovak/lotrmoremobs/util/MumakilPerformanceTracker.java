@@ -7,7 +7,7 @@ import java.util.HashMap;
 import java.util.Map;
 
 public final class MumakilPerformanceTracker {
-    public static final boolean DEBUG_MUMAKIL_PERFORMANCE = true;
+    public static final boolean DEBUG_MUMAKIL_PERFORMANCE = false;
     public static final boolean DEBUG_DO_NOT_SPAWN_HOWDAH_ARCHERS = false;
     public static final boolean DEBUG_DISABLE_HOWDAH_ARCHER_COMBAT = false;
     public static final boolean DEBUG_DISABLE_MUMAKIL_TREE_CLEARING = false;
@@ -23,6 +23,7 @@ public final class MumakilPerformanceTracker {
     public static final int COMBAT_PATH_REASON_NO_PROGRESS = 4;
 
     private static final int REPORT_INTERVAL_TICKS = 100;
+    private static final long COMBAT_PATH_DETAIL_LOG_THRESHOLD_NANOS = 25000000L;
     private static final int MAX_HOWDAH_ARCHER_SLOTS = 17;
     private static final Map<Integer, Metrics> METRICS_BY_MOUNT = new HashMap<Integer, Metrics>();
 
@@ -419,6 +420,40 @@ public final class MumakilPerformanceTracker {
         metrics.combatPathTotalNanos += nanos;
         metrics.combatPathMaxNanos = Math.max(metrics.combatPathMaxNanos, nanos);
         metrics.addMeasuredTime(nanos);
+    }
+
+
+    public static void recordCombatPathDetail(
+            LOTREntityMumakil mumakil,
+            long pathSearchNanos,
+            long pathInstallNanos,
+            boolean accepted,
+            int reason,
+            double targetDistanceSq,
+            boolean preparingStart
+    ) {
+        if (!DEBUG_MUMAKIL_PERFORMANCE
+                || mumakil == null
+                || mumakil.worldObj == null
+                || mumakil.worldObj.isRemote
+                || pathSearchNanos < COMBAT_PATH_DETAIL_LOG_THRESHOLD_NANOS) {
+            return;
+        }
+
+        StringBuilder message = new StringBuilder(224);
+        message.append("[LOTRMoreMobs CombatPathDetail] mount=").append(mumakil.getEntityId())
+                .append(" worldTick=").append(mumakil.worldObj.getTotalWorldTime())
+                .append(" entityTick=").append(mumakil.ticksExisted)
+                .append(" reason=").append(reason)
+                .append(" accepted=").append(accepted)
+                .append(" preparingStart=").append(preparingStart)
+                .append(" targetDistance=").append(Math.sqrt(targetDistanceSq))
+                .append(" searchMs=");
+        appendNanosAsMillis(message, pathSearchNanos);
+        message.append(" installMs=");
+        appendNanosAsMillis(message, pathInstallNanos);
+
+        System.out.println(message.toString());
     }
 
     public static void recordCombatPathSkippedCooldown(LOTREntityMumakil mumakil) {

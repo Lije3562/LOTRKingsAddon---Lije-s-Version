@@ -40,6 +40,7 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.potion.Potion;
 import net.minecraft.potion.PotionEffect;
 import net.minecraft.pathfinding.PathEntity;
+import net.minecraft.pathfinding.PathPoint;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
@@ -128,13 +129,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private static final double WILD_ATTACK_SPEED = 1.30D;
     private static final int COMBAT_PATH_REPATH_COOLDOWN = 20;
-    private static final int COMBAT_PATH_NO_PATH_RETRY_COOLDOWN = 40;
+    private static final int COMBAT_PATH_NO_PATH_RETRY_COOLDOWN = 100;
     private static final int COMBAT_PATH_FAILURE_BACKOFF_MIN = 40;
     private static final int COMBAT_PATH_FAILURE_BACKOFF_MAX = 100;
     private static final int COMBAT_PATH_STAGGER_TICKS = 5;
     private static final int COMBAT_PATH_PROGRESS_CHECK_TICKS = 20;
     private static final int COMBAT_PATH_NO_PROGRESS_TICKS = 60;
     private static final double COMBAT_PATH_TARGET_MOVE_THRESHOLD_SQ = 36.0D;
+    private static final double COMBAT_DIRECT_PATH_MAX_RANGE = 16.0D;
+    private static final double COMBAT_DIRECT_PATH_MAX_Y_DIFFERENCE = 3.0D;
     private static final double COMBAT_PATH_PROGRESS_THRESHOLD_SQ = 1.0D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
@@ -1290,8 +1293,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         private void updateControlledPath(EntityLivingBase target, boolean preparingStart) {
-            if (LOTREntityMumakil.this.getDistanceSqToEntity(target)
-                    <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
+            double targetDistanceSq = LOTREntityMumakil.this.getDistanceSqToEntity(target);
+
+            if (targetDistanceSq <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
                 this.resetProgressTracking();
                 return;
             }
@@ -1310,24 +1314,47 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return;
             }
 
-            long start = MumakilPerformanceTracker.startTimer();
-            PathEntity path = LOTREntityMumakil.this.getNavigator().getPathToEntityLiving(target);
+            long pathSearchStart = MumakilPerformanceTracker.startTimer();
+            PathEntity path = null;
+
+            if (reason == MumakilPerformanceTracker.COMBAT_PATH_REASON_NEW_TARGET
+                    || reason == MumakilPerformanceTracker.COMBAT_PATH_REASON_TARGET_MOVED) {
+                path = this.createDirectCombatPath(target, targetDistanceSq);
+            }
+
+            if (path == null) {
+                path = LOTREntityMumakil.this.getNavigator().getPathToEntityLiving(target);
+            }
+
+            long pathSearchNanos = System.nanoTime() - pathSearchStart;
             boolean accepted = path != null;
+            long pathInstallNanos = 0L;
 
             if (accepted) {
                 if (preparingStart) {
                     this.entityPathEntity = path;
                 } else {
+                    long pathInstallStart = MumakilPerformanceTracker.startTimer();
                     accepted = LOTREntityMumakil.this.getNavigator().setPath(path, this.moveSpeed);
+                    pathInstallNanos = System.nanoTime() - pathInstallStart;
                 }
             }
 
-            long elapsed = System.nanoTime() - start;
+            long elapsed = pathSearchNanos + pathInstallNanos;
             MumakilPerformanceTracker.recordCombatPathRequest(
                     LOTREntityMumakil.this,
                     elapsed,
                     accepted,
                     reason
+            );
+            MumakilPerformanceTracker.recordCombatPathDetail(
+                    LOTREntityMumakil.this,
+                    pathSearchNanos,
+                    pathInstallNanos,
+                    accepted,
+                    reason,
+                    targetDistanceSq,
+                    preparingStart
             );
 
             this.lastPathTargetX = target.posX;
@@ -1354,6 +1381,24 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                         this.failureBackoffTicks * 2
                 );
             }
+        }
+
+        private PathEntity createDirectCombatPath(EntityLivingBase target, double targetDistanceSq) {
+            if (target == null
+                    || targetDistanceSq > COMBAT_DIRECT_PATH_MAX_RANGE * COMBAT_DIRECT_PATH_MAX_RANGE
+                    || Math.abs(target.posY - LOTREntityMumakil.this.posY)
+                    > COMBAT_DIRECT_PATH_MAX_Y_DIFFERENCE
+                    || !LOTREntityMumakil.this.canEntityBeSeen(target)) {
+                return null;
+            }
+
+            int pathX = MathHelper.floor_double(target.posX);
+            int pathY = MathHelper.floor_double(target.boundingBox.minY);
+            int pathZ = MathHelper.floor_double(target.posZ);
+
+            return new PathEntity(new PathPoint[]{
+                    new PathPoint(pathX, pathY, pathZ)
+            });
         }
 
         private int getControlledPathReason(EntityLivingBase target) {
