@@ -63,6 +63,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private static final boolean DEBUG_COMBAT_LOGS = false;
+    private static final boolean DEBUG_MUMAKIL_MODE = false;
 
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
 
@@ -122,6 +123,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int ANGER_WAVE_RANDOM_COOLDOWN = 81;
 
     private static final String NBT_HIRED_WAR_MUMAKIL = "lotrmoremobs_hiredWarMumakil";
+    private static final String NBT_MUMAKIL_MODE = "lotrmoremobs_mumakilMode";
 
     // ---------------------------------------------------------------------
     // Combat / tusk attack / trample
@@ -203,6 +205,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private final AnimationFactory animationFactory = new AnimationFactory(this);
     private final DriverTargetProgressState driverTargetProgressState = new DriverTargetProgressState();
 
+    private MumakilMode mumakilMode;
     private float lastStableIdleYaw;
     private float lastStableIdleHeadYaw;
     private boolean hasStableIdleYaw;
@@ -325,16 +328,68 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // Wild and hired-war state gates
     // ---------------------------------------------------------------------
 
+    public MumakilMode getMumakilMode() {
+        if (this.mumakilMode == null) {
+            this.mumakilMode = this.getEntityData().getBoolean(NBT_HIRED_WAR_MUMAKIL)
+                    ? MumakilMode.HIRED_WAR
+                    : this.inferNonHiredMumakilMode();
+        } else if (this.mumakilMode != MumakilMode.HIRED_WAR) {
+            MumakilMode inferredMode = this.inferNonHiredMumakilMode();
+            if (this.mumakilMode != inferredMode) {
+                this.mumakilMode = inferredMode;
+            }
+        }
+
+        return this.mumakilMode;
+    }
+
+    public void setMumakilMode(MumakilMode mode) {
+        if (mode == null) {
+            mode = this.inferNonHiredMumakilMode();
+        }
+
+        this.mumakilMode = mode;
+        this.getEntityData().setBoolean(
+                NBT_HIRED_WAR_MUMAKIL,
+                mode == MumakilMode.HIRED_WAR
+        );
+    }
+
+    private MumakilMode inferNonHiredMumakilMode() {
+        if (this.isChild()) {
+            return this.isTame() ? MumakilMode.BABY_TAMED : MumakilMode.BABY_WILD;
+        }
+
+        return this.isTame() ? MumakilMode.ADULT_TAMED : MumakilMode.ADULT_WILD;
+    }
+
     public boolean isHiredWarMumakil() {
-        return this.getEntityData().getBoolean(NBT_HIRED_WAR_MUMAKIL);
+        return this.getMumakilMode() == MumakilMode.HIRED_WAR;
     }
 
     public void setHiredWarMumakil(boolean hiredWar) {
-        this.getEntityData().setBoolean(NBT_HIRED_WAR_MUMAKIL, hiredWar);
+        this.setMumakilMode(
+                hiredWar ? MumakilMode.HIRED_WAR : this.inferNonHiredMumakilMode()
+        );
+    }
+
+    public boolean isBabyMumakil() {
+        return this.getMumakilMode().isBaby();
+    }
+
+    public boolean isAdultMumakil() {
+        return this.getMumakilMode().isAdult();
+    }
+
+    public boolean isTamedMumakilMode() {
+        return this.getMumakilMode().isTamed();
     }
 
     private boolean isWildMumakil() {
-        return !this.isTame() && !this.getBelongsToNPC() && this.riddenByEntity == null;
+        MumakilMode mode = this.getMumakilMode();
+        return (mode == MumakilMode.BABY_WILD || mode == MumakilMode.ADULT_WILD)
+                && !this.getBelongsToNPC()
+                && this.riddenByEntity == null;
     }
 
     private boolean shouldWildWander() {
@@ -709,7 +764,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public void setMumakilHowdahEquipped(boolean equipped) {
         if (!this.worldObj.isRemote) {
-            this.setMumakilSyncedArmorIndex(equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0);
+            this.setMumakilSyncedArmorIndex(
+                    equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0
+            );
         }
     }
 
@@ -1568,8 +1625,25 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.setHealth(this.getMaxHealth());
     }
 
+    public void writeEntityToNBT(NBTTagCompound nbt) {
+        super.writeEntityToNBT(nbt);
+        nbt.setInteger(NBT_MUMAKIL_MODE, this.getMumakilMode().getId());
+    }
+
     public void readEntityFromNBT(NBTTagCompound nbt) {
         super.readEntityFromNBT(nbt);
+
+        MumakilMode loadedMode = nbt.hasKey(NBT_MUMAKIL_MODE)
+                ? MumakilMode.fromId(nbt.getInteger(NBT_MUMAKIL_MODE))
+                : null;
+
+        if (this.getEntityData().getBoolean(NBT_HIRED_WAR_MUMAKIL)) {
+            loadedMode = MumakilMode.HIRED_WAR;
+        }
+
+        this.setMumakilMode(
+                loadedMode == null ? this.inferNonHiredMumakilMode() : loadedMode
+        );
         this.applyConfiguredAttributes();
 
         if (this.angerWaveCooldownTicks <= 0 && this.angerWaveActiveTicks <= 0) {
@@ -1622,6 +1696,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         if (!this.worldObj.isRemote) {
+            if (DEBUG_MUMAKIL_MODE && this.ticksExisted % 100 == 0) {
+                System.out.println(
+                        "[LOTRMoreMobs] Mumakil mode"
+                                + " entity=" + this.getEntityId()
+                                + " mode=" + this.getMumakilMode()
+                                + " child=" + this.isChild()
+                                + " tame=" + this.isTame()
+                                + " belongsToNPC=" + this.getBelongsToNPC()
+                                + " rider=" + (this.riddenByEntity == null
+                                ? "none"
+                                : this.riddenByEntity.getClass().getSimpleName())
+                );
+            }
+
             this.updateMumakilHowdahSyncState();
 
             if (this.tuskAttackCooldownTicks > 0) {
