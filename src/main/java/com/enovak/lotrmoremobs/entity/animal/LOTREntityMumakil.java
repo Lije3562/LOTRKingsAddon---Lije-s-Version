@@ -3,10 +3,14 @@ package com.enovak.lotrmoremobs.entity.animal;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
+import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
+import lotr.common.entity.LOTREntityUtils;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
+import lotr.common.entity.ai.LOTREntityAIHorseFollowHiringPlayer;
+import lotr.common.entity.ai.LOTREntityAIHorseMoveToRiderTarget;
 import lotr.common.entity.animal.LOTREntityHorse;
 import lotr.common.entity.npc.LOTREntityNPC;
 import lotr.common.fac.LOTRFaction;
@@ -18,7 +22,9 @@ import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
+import net.minecraft.entity.ai.EntityAIHurtByTarget;
 import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
+import net.minecraft.entity.ai.EntityAITasks;
 import net.minecraft.entity.ai.RandomPositionGenerator;
 import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.passive.EntityAnimal;
@@ -33,6 +39,7 @@ import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.potion.Potion;
 import net.minecraft.potion.PotionEffect;
+import net.minecraft.pathfinding.PathEntity;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
@@ -120,6 +127,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private static final double WILD_ATTACK_SPEED = 1.30D;
+    private static final int COMBAT_PATH_REPATH_COOLDOWN = 20;
+    private static final int COMBAT_PATH_NO_PATH_RETRY_COOLDOWN = 40;
+    private static final int COMBAT_PATH_FAILURE_BACKOFF_MIN = 40;
+    private static final int COMBAT_PATH_FAILURE_BACKOFF_MAX = 100;
+    private static final int COMBAT_PATH_STAGGER_TICKS = 5;
+    private static final int COMBAT_PATH_PROGRESS_CHECK_TICKS = 20;
+    private static final int COMBAT_PATH_NO_PROGRESS_TICKS = 60;
+    private static final double COMBAT_PATH_TARGET_MOVE_THRESHOLD_SQ = 36.0D;
+    private static final double COMBAT_PATH_PROGRESS_THRESHOLD_SQ = 1.0D;
     private static final float CHARGE_MIN_SPEED = 0.24F;
     private static final float MAX_CHARGE_DAMAGE = 36.0F;
 
@@ -182,6 +198,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
     private final AnimationFactory animationFactory = new AnimationFactory(this);
+    private final DriverTargetProgressState driverTargetProgressState = new DriverTargetProgressState();
 
     private float lastStableIdleYaw;
     private float lastStableIdleHeadYaw;
@@ -197,6 +214,28 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean mumakilStrikeAnimationLeft;
     private int mumakilAngrySoundTriggerCounter;
 
+    public DriverTargetProgressState getDriverTargetProgressState() {
+        return this.driverTargetProgressState;
+    }
+
+    public static final class DriverTargetProgressState {
+        public int progressTargetEntityId = -1;
+        public long nextProgressCheckTick;
+        public double lastProgressX;
+        public double lastProgressY;
+        public double lastProgressZ;
+        public int stuckTicks;
+
+        public void reset() {
+            this.progressTargetEntityId = -1;
+            this.nextProgressCheckTick = 0L;
+            this.lastProgressX = 0.0D;
+            this.lastProgressY = 0.0D;
+            this.lastProgressZ = 0.0D;
+            this.stuckTicks = 0;
+        }
+    }
+
     // ---------------------------------------------------------------------
     // Construction / GeckoLib / basic entity hooks
     // ---------------------------------------------------------------------
@@ -206,8 +245,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         // Main physical/hurt box. Wide and tall enough to roughly fit the rendered Mumakil body.
         this.setSize(7.0F, 15.0F);
         this.resetAngerWaveCooldown();
+        this.replaceInheritedRiderTargetAI();
+        this.replaceInheritedFollowHiringPlayerAI();
+        this.replaceInheritedHurtByTargetAI();
 
         this.tasks.addTask(4, new EntityAIWildMumakilMove());
+        this.tasks.addTask(5, new EntityAIBlockHiredWarWander());
         this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
             @Override
             public boolean shouldExecute() {
@@ -223,6 +266,39 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.targetTasks.addTask(3, this.createWildMobTargetAI(IMob.class));
         this.targetTasks.addTask(4, this.createWildMobTargetAI(LOTREntityNPC.class));
         this.targetTasks.addTask(5, this.createWildMobTargetAI(EntityLivingBase.class));
+    }
+
+    private void replaceInheritedRiderTargetAI() {
+        EntityAITasks.EntityAITaskEntry inherited = LOTREntityUtils.removeAITask(
+                this,
+                LOTREntityAIHorseMoveToRiderTarget.class
+        );
+
+        if (inherited != null) {
+            this.tasks.addTask(inherited.priority, new EntityAIMumakilMoveToRiderTarget());
+        }
+    }
+
+    private void replaceInheritedFollowHiringPlayerAI() {
+        EntityAITasks.EntityAITaskEntry inherited = LOTREntityUtils.removeAITask(
+                this,
+                LOTREntityAIHorseFollowHiringPlayer.class
+        );
+
+        if (inherited != null) {
+            this.tasks.addTask(inherited.priority, new EntityAIMumakilFollowHiringPlayer());
+        }
+    }
+
+    private void replaceInheritedHurtByTargetAI() {
+        EntityAITasks.EntityAITaskEntry inherited = LOTREntityUtils.removeAITask(
+                this,
+                EntityAIHurtByTarget.class
+        );
+
+        if (inherited != null) {
+            this.targetTasks.addTask(inherited.priority, new EntityAIMumakilHurtByTarget());
+        }
     }
 
     public float getCollisionBorderSize() {
@@ -287,6 +363,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             return;
         }
 
+        long perfStart = MumakilPerformanceTracker.startTimer();
         List nearby = this.worldObj.getEntitiesWithinAABB(
                 EntityLivingBase.class,
                 this.boundingBox.expand(MOB_TARGET_RANGE, MOB_TARGET_VERTICAL_RANGE, MOB_TARGET_RANGE)
@@ -312,6 +389,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
         }
 
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordMountTargetScan(this, nearby.size(), System.nanoTime() - perfStart);
+        }
+
         if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
             this.playMumakilAngrySound();
             this.setAttackTarget(bestTarget);
@@ -319,6 +400,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean canTargetWildMob(EntityLivingBase target) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordMountCandidateCheck(this);
+        }
+
         if (target == this
                 || target instanceof EntityPlayer
                 || target instanceof LOTREntityMumakil
@@ -432,7 +517,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
             if (LOTREntityMumakil.this.ticksExisted >= this.nextChasePathTick) {
-                LOTREntityMumakil.this.getNavigator().tryMoveToEntityLiving(target, WILD_CHASE_SPEED);
+                long perfStart = MumakilPerformanceTracker.startTimer();
+                boolean pathAccepted = LOTREntityMumakil.this.getNavigator().tryMoveToEntityLiving(target, WILD_CHASE_SPEED);
+                if (MumakilPerformanceTracker.isEnabled()) {
+                    MumakilPerformanceTracker.recordMountPathRequest(
+                            LOTREntityMumakil.this,
+                            System.nanoTime() - perfStart,
+                            pathAccepted && !LOTREntityMumakil.this.getNavigator().noPath(),
+                            true
+                    );
+                }
                 this.nextChasePathTick = LOTREntityMumakil.this.ticksExisted + WILD_CHASE_REPATH_INTERVAL;
             }
 
@@ -490,14 +584,25 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return;
             }
 
+            long perfStart = MumakilPerformanceTracker.startTimer();
             boolean pathAccepted = LOTREntityMumakil.this.getNavigator().tryMoveToXYZ(
                     wanderTarget.xCoord,
                     wanderTarget.yCoord,
                     wanderTarget.zCoord,
                     WILD_WANDER_SPEED
             );
+            boolean pathUsable = pathAccepted && !LOTREntityMumakil.this.getNavigator().noPath();
 
-            if (!pathAccepted || LOTREntityMumakil.this.getNavigator().noPath()) {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordMountPathRequest(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - perfStart,
+                        pathUsable,
+                        false
+                );
+            }
+
+            if (!pathUsable) {
                 this.fallbackX = wanderTarget.xCoord;
                 this.fallbackZ = wanderTarget.zCoord;
                 this.fallbackMoveTicks = WILD_FALLBACK_MOVE_TICKS;
@@ -900,7 +1005,500 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected EntityAIBase createMountAttackAI() {
-        return new LOTREntityAIAttackOnCollide(this, WILD_ATTACK_SPEED, true);
+        return new EntityAIMumakilAttackOnCollide();
+    }
+
+    private boolean hasLivingNPCCombatDriver() {
+        if (!(this.riddenByEntity instanceof LOTREntityNPC)) {
+            return false;
+        }
+
+        LOTREntityNPC driver = (LOTREntityNPC)this.riddenByEntity;
+        return !driver.isDead && driver.isEntityAlive();
+    }
+
+    private boolean shouldUsePersonalAttackAI() {
+        if (this.isChild() || this.riddenByEntity instanceof EntityPlayer) {
+            return false;
+        }
+
+        if (this.isHiredWarMumakil()) {
+            if (!this.hasLivingNPCCombatDriver()) {
+                return true;
+            }
+
+            EntityLivingBase driverTarget = ((LOTREntityNPC)this.riddenByEntity).getAttackTarget();
+            return driverTarget != null
+                    && driverTarget.isEntityAlive()
+                    && this.getAttackTarget() == driverTarget;
+        }
+
+        return this.isWildMumakil();
+    }
+
+    private boolean hasExpectedRiderTargetPathRequest() {
+        if (this.isHiredWarMumakil()
+                || !this.getBelongsToNPC()
+                || !this.hasLivingNPCCombatDriver()) {
+            return false;
+        }
+
+        EntityLivingBase target = ((LOTREntityNPC)this.riddenByEntity).getAttackTarget();
+        return target != null && target.isEntityAlive();
+    }
+
+    private boolean hasActiveHiredWarCombatTarget() {
+        if (!this.isHiredWarMumakil()) {
+            return false;
+        }
+
+        EntityLivingBase target;
+        if (this.hasLivingNPCCombatDriver()) {
+            target = ((LOTREntityNPC)this.riddenByEntity).getAttackTarget();
+        } else {
+            target = this.getAttackTarget();
+        }
+
+        return target != null && target.isEntityAlive();
+    }
+
+    private boolean hasActiveLivingSouthronDriver() {
+        if (!this.isHiredWarMumakil() || !(this.riddenByEntity instanceof LOTREntityNPC)) {
+            return false;
+        }
+
+        LOTREntityNPC driver = (LOTREntityNPC)this.riddenByEntity;
+        if (driver.isDead
+                || !driver.isEntityAlive()
+                || driver.hiredNPCInfo == null
+                || !driver.hiredNPCInfo.isActive) {
+            return false;
+        }
+
+        try {
+            return LOTRMod.getNPCFaction(driver) == LOTRFaction.NEAR_HARAD;
+        } catch (Exception e) {
+            return false;
+        }
+    }
+
+    /* Recurring repaths remain private inside LOTR; only the directly visible initial path is timed here. */
+    private class EntityAIMumakilMoveToRiderTarget extends LOTREntityAIHorseMoveToRiderTarget {
+        private EntityAIMumakilMoveToRiderTarget() {
+            super(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+                return false;
+            }
+
+            boolean measuresPath = LOTREntityMumakil.this.hasExpectedRiderTargetPathRequest();
+            long start = measuresPath ? MumakilPerformanceTracker.startTimer() : 0L;
+            boolean execute = super.shouldExecute();
+
+            if (measuresPath && MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordRiderTargetPathRequest(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start,
+                        execute
+                );
+            }
+
+            return execute;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return !LOTREntityMumakil.this.isHiredWarMumakil() && super.continueExecuting();
+        }
+
+        @Override
+        public void startExecuting() {
+            super.startExecuting();
+            MumakilPerformanceTracker.recordRiderTargetAIStart(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public void updateTask() {
+            super.updateTask();
+            MumakilPerformanceTracker.recordRiderTargetAIUpdate(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public void resetTask() {
+            super.resetTask();
+            MumakilPerformanceTracker.recordRiderTargetAIReset(LOTREntityMumakil.this);
+        }
+    }
+
+    private class EntityAIMumakilAttackOnCollide extends LOTREntityAIAttackOnCollide {
+        private int controlledTargetId = -1;
+        private boolean newTargetPathPending;
+        private boolean noProgressPathPending;
+        private int nextControlledPathTick;
+        private int failureBackoffTicks = COMBAT_PATH_FAILURE_BACKOFF_MIN;
+        private double lastPathTargetX;
+        private double lastPathTargetY;
+        private double lastPathTargetZ;
+        private double lastProgressX;
+        private double lastProgressZ;
+        private int nextProgressCheckTick;
+        private int noProgressTicks;
+
+        private EntityAIMumakilAttackOnCollide() {
+            super(LOTREntityMumakil.this, WILD_ATTACK_SPEED, true);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            if (this.isHiredWarMountAttackAIDisabled()
+                    || !LOTREntityMumakil.this.shouldUsePersonalAttackAI()) {
+                return false;
+            }
+
+            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+                long start = MumakilPerformanceTracker.startTimer();
+                EntityLivingBase target = LOTREntityMumakil.this.getAttackTarget();
+                boolean execute = target != null && target.isEntityAlive();
+
+                if (execute) {
+                    this.attackTarget = target;
+                    LOTREntityMumakil.this.getNavigator().setAvoidsWater(false);
+                    this.resetControlledPathForNewTarget(target);
+                    this.updateControlledPath(target, true);
+                }
+
+                MumakilPerformanceTracker.recordMountAttackShould(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start
+                );
+                return execute;
+            }
+
+            boolean measuresPath = LOTREntityMumakil.this.getAttackTarget() != null;
+            long start = MumakilPerformanceTracker.startTimer();
+            boolean execute = super.shouldExecute();
+
+            if (MumakilPerformanceTracker.isEnabled()) {
+                long elapsed = System.nanoTime() - start;
+                MumakilPerformanceTracker.recordMountAttackShould(LOTREntityMumakil.this, elapsed);
+                if (measuresPath) {
+                    MumakilPerformanceTracker.recordMountAttackPathRequest(
+                            LOTREntityMumakil.this,
+                            elapsed,
+                            execute
+                    );
+                }
+            }
+
+            return execute;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            if (this.isHiredWarMountAttackAIDisabled()
+                    || !LOTREntityMumakil.this.shouldUsePersonalAttackAI()) {
+                return false;
+            }
+
+            long start = MumakilPerformanceTracker.startTimer();
+            boolean execute = super.continueExecuting();
+            if (execute && LOTREntityMumakil.this.isHiredWarMumakil()) {
+                this.resetControlledPathForNewTarget(this.attackTarget);
+            }
+            MumakilPerformanceTracker.recordMountAttackContinue(
+                    LOTREntityMumakil.this,
+                    System.nanoTime() - start
+            );
+            return execute;
+        }
+
+        @Override
+        public void startExecuting() {
+            long start = MumakilPerformanceTracker.startTimer();
+            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+                if (this.entityPathEntity != null) {
+                    LOTREntityMumakil.this.getNavigator().setPath(this.entityPathEntity, this.moveSpeed);
+                    this.entityPathEntity = null;
+                }
+                this.pathCheckTimer = 0;
+            } else {
+                super.startExecuting();
+            }
+            MumakilPerformanceTracker.recordMountAttackStart(
+                    LOTREntityMumakil.this,
+                    System.nanoTime() - start
+            );
+            MumakilPerformanceTracker.recordMountAttackAIStart(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public void updateTask() {
+            long start = MumakilPerformanceTracker.startTimer();
+            super.updateTask();
+            MumakilPerformanceTracker.recordMountAttackUpdate(
+                    LOTREntityMumakil.this,
+                    System.nanoTime() - start
+            );
+        }
+
+        @Override
+        public void resetTask() {
+            long start = MumakilPerformanceTracker.startTimer();
+            super.resetTask();
+            MumakilPerformanceTracker.recordMountAttackReset(
+                    LOTREntityMumakil.this,
+                    System.nanoTime() - start
+            );
+            MumakilPerformanceTracker.recordMountAttackAIReset(LOTREntityMumakil.this);
+        }
+
+        @Override
+        protected void updateLookAndPathing() {
+            if (!LOTREntityMumakil.this.isHiredWarMumakil()) {
+                super.updateLookAndPathing();
+                return;
+            }
+
+            LOTREntityMumakil.this.getLookHelper().setLookPositionWithEntity(this.attackTarget, 30.0F, 30.0F);
+            this.resetControlledPathForNewTarget(this.attackTarget);
+            this.updateControlledPath(this.attackTarget, false);
+        }
+
+        private void resetControlledPathForNewTarget(EntityLivingBase target) {
+            int targetId = target.getEntityId();
+            if (targetId == this.controlledTargetId) {
+                return;
+            }
+
+            this.controlledTargetId = targetId;
+            this.newTargetPathPending = true;
+            this.noProgressPathPending = false;
+            this.nextControlledPathTick = LOTREntityMumakil.this.ticksExisted;
+            this.failureBackoffTicks = COMBAT_PATH_FAILURE_BACKOFF_MIN;
+            this.lastPathTargetX = target.posX;
+            this.lastPathTargetY = target.posY;
+            this.lastPathTargetZ = target.posZ;
+            this.lastProgressX = LOTREntityMumakil.this.posX;
+            this.lastProgressZ = LOTREntityMumakil.this.posZ;
+            this.nextProgressCheckTick = LOTREntityMumakil.this.ticksExisted + COMBAT_PATH_PROGRESS_CHECK_TICKS;
+            this.noProgressTicks = 0;
+            this.entityPathEntity = null;
+            LOTREntityMumakil.this.getNavigator().clearPathEntity();
+        }
+
+        private void updateControlledPath(EntityLivingBase target, boolean preparingStart) {
+            if (LOTREntityMumakil.this.getDistanceSqToEntity(target)
+                    <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
+                this.resetProgressTracking();
+                return;
+            }
+
+            this.updateProgressTracking();
+
+            int reason = this.getControlledPathReason(target);
+            if (reason == 0) {
+                MumakilPerformanceTracker.recordCombatPathSkippedExistingPath(LOTREntityMumakil.this);
+                return;
+            }
+
+            int currentTick = LOTREntityMumakil.this.ticksExisted;
+            if (currentTick < this.nextControlledPathTick || !this.isStaggerTick(currentTick)) {
+                MumakilPerformanceTracker.recordCombatPathSkippedCooldown(LOTREntityMumakil.this);
+                return;
+            }
+
+            long start = MumakilPerformanceTracker.startTimer();
+            PathEntity path = LOTREntityMumakil.this.getNavigator().getPathToEntityLiving(target);
+            boolean accepted = path != null;
+
+            if (accepted) {
+                if (preparingStart) {
+                    this.entityPathEntity = path;
+                } else {
+                    accepted = LOTREntityMumakil.this.getNavigator().setPath(path, this.moveSpeed);
+                }
+            }
+
+            long elapsed = System.nanoTime() - start;
+            MumakilPerformanceTracker.recordCombatPathRequest(
+                    LOTREntityMumakil.this,
+                    elapsed,
+                    accepted,
+                    reason
+            );
+
+            this.lastPathTargetX = target.posX;
+            this.lastPathTargetY = target.posY;
+            this.lastPathTargetZ = target.posZ;
+            this.newTargetPathPending = false;
+            this.noProgressPathPending = false;
+            this.noProgressTicks = 0;
+            this.lastProgressX = LOTREntityMumakil.this.posX;
+            this.lastProgressZ = LOTREntityMumakil.this.posZ;
+            this.nextProgressCheckTick = currentTick + COMBAT_PATH_PROGRESS_CHECK_TICKS;
+
+            if (accepted) {
+                this.failureBackoffTicks = COMBAT_PATH_FAILURE_BACKOFF_MIN;
+                this.nextControlledPathTick = currentTick
+                        + (reason == MumakilPerformanceTracker.COMBAT_PATH_REASON_NO_PATH
+                        ? COMBAT_PATH_NO_PATH_RETRY_COOLDOWN
+                        : COMBAT_PATH_REPATH_COOLDOWN);
+            } else {
+                MumakilPerformanceTracker.recordCombatPathBackoff(LOTREntityMumakil.this);
+                this.nextControlledPathTick = currentTick + this.failureBackoffTicks;
+                this.failureBackoffTicks = Math.min(
+                        COMBAT_PATH_FAILURE_BACKOFF_MAX,
+                        this.failureBackoffTicks * 2
+                );
+            }
+        }
+
+        private int getControlledPathReason(EntityLivingBase target) {
+            if (this.newTargetPathPending) {
+                return MumakilPerformanceTracker.COMBAT_PATH_REASON_NEW_TARGET;
+            }
+            if (this.noProgressPathPending) {
+                return MumakilPerformanceTracker.COMBAT_PATH_REASON_NO_PROGRESS;
+            }
+
+            double movedX = target.posX - this.lastPathTargetX;
+            double movedY = target.posY - this.lastPathTargetY;
+            double movedZ = target.posZ - this.lastPathTargetZ;
+            if (movedX * movedX + movedY * movedY + movedZ * movedZ
+                    >= COMBAT_PATH_TARGET_MOVE_THRESHOLD_SQ) {
+                return MumakilPerformanceTracker.COMBAT_PATH_REASON_TARGET_MOVED;
+            }
+            if (LOTREntityMumakil.this.getNavigator().noPath()) {
+                return MumakilPerformanceTracker.COMBAT_PATH_REASON_NO_PATH;
+            }
+            return 0;
+        }
+
+        private void updateProgressTracking() {
+            int currentTick = LOTREntityMumakil.this.ticksExisted;
+            if (currentTick < this.nextProgressCheckTick) {
+                return;
+            }
+
+            double movedX = LOTREntityMumakil.this.posX - this.lastProgressX;
+            double movedZ = LOTREntityMumakil.this.posZ - this.lastProgressZ;
+            if (movedX * movedX + movedZ * movedZ >= COMBAT_PATH_PROGRESS_THRESHOLD_SQ) {
+                this.noProgressTicks = 0;
+            } else {
+                this.noProgressTicks += COMBAT_PATH_PROGRESS_CHECK_TICKS;
+                if (this.noProgressTicks >= COMBAT_PATH_NO_PROGRESS_TICKS) {
+                    this.noProgressPathPending = true;
+                }
+            }
+
+            this.lastProgressX = LOTREntityMumakil.this.posX;
+            this.lastProgressZ = LOTREntityMumakil.this.posZ;
+            this.nextProgressCheckTick = currentTick + COMBAT_PATH_PROGRESS_CHECK_TICKS;
+        }
+
+        private void resetProgressTracking() {
+            this.noProgressTicks = 0;
+            this.noProgressPathPending = false;
+            this.lastProgressX = LOTREntityMumakil.this.posX;
+            this.lastProgressZ = LOTREntityMumakil.this.posZ;
+            this.nextProgressCheckTick = LOTREntityMumakil.this.ticksExisted + COMBAT_PATH_PROGRESS_CHECK_TICKS;
+        }
+
+        private boolean isStaggerTick(int currentTick) {
+            int entitySlot = (LOTREntityMumakil.this.getEntityId() & Integer.MAX_VALUE)
+                    % COMBAT_PATH_STAGGER_TICKS;
+            return currentTick % COMBAT_PATH_STAGGER_TICKS == entitySlot;
+        }
+
+        private boolean isHiredWarMountAttackAIDisabled() {
+            return MumakilPerformanceTracker.DEBUG_DISABLE_HIRED_WAR_MOUNT_ATTACK_AI
+                    && LOTREntityMumakil.this.isHiredWarMumakil();
+        }
+    }
+
+    private class EntityAIMumakilFollowHiringPlayer extends LOTREntityAIHorseFollowHiringPlayer {
+        private int followUpdatesSinceStart;
+
+        private EntityAIMumakilFollowHiringPlayer() {
+            super(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            boolean blockedByDriver = LOTREntityMumakil.this.hasActiveLivingSouthronDriver();
+            boolean execute = !blockedByDriver
+                    && !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+                    && super.shouldExecute();
+            MumakilPerformanceTracker.recordMountFollowShould(
+                    LOTREntityMumakil.this,
+                    blockedByDriver,
+                    execute
+            );
+            return execute;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return !LOTREntityMumakil.this.hasActiveLivingSouthronDriver()
+                    && !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+                    && super.continueExecuting();
+        }
+
+        @Override
+        public void startExecuting() {
+            this.followUpdatesSinceStart = 0;
+            super.startExecuting();
+            MumakilPerformanceTracker.recordMountFollowStart(LOTREntityMumakil.this);
+        }
+
+        @Override
+        public void updateTask() {
+            boolean pathCall = this.followUpdatesSinceStart % 10 == 0;
+            super.updateTask();
+            ++this.followUpdatesSinceStart;
+            MumakilPerformanceTracker.recordMountFollowUpdate(
+                    LOTREntityMumakil.this,
+                    pathCall
+            );
+        }
+
+        @Override
+        public void resetTask() {
+            super.resetTask();
+            this.followUpdatesSinceStart = 0;
+        }
+    }
+
+    private class EntityAIMumakilHurtByTarget extends EntityAIHurtByTarget {
+        private EntityAIMumakilHurtByTarget() {
+            super(LOTREntityMumakil.this, false);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            return !(LOTREntityMumakil.this.isHiredWarMumakil()
+                    && LOTREntityMumakil.this.hasLivingNPCCombatDriver())
+                    && super.shouldExecute();
+        }
+    }
+
+    private class EntityAIBlockHiredWarWander extends EntityAIBase {
+        private EntityAIBlockHiredWarWander() {
+            this.setMutexBits(1);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            return LOTREntityMumakil.this.hasActiveHiredWarCombatTarget();
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return LOTREntityMumakil.this.hasActiveHiredWarCombatTarget();
+        }
     }
 
     protected void applyEntityAttributes() {
@@ -956,7 +1554,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     public void onLivingUpdate() {
-        super.onLivingUpdate();
+        long superPerfStart = !this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()
+                ? MumakilPerformanceTracker.startTimer()
+                : 0L;
+
+        try {
+            super.onLivingUpdate();
+        } finally {
+            if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordMountSuperLiving(
+                        this,
+                        System.nanoTime() - superPerfStart
+                );
+            }
+        }
         this.stabilizeIdleYaw();
 
         this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
@@ -975,7 +1586,19 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.updateAngerWave();
             this.tryAcquireWildMobTarget();
             this.tryTuskReachAttack();
-            this.clearAggroObstaclesForMovement();
+            if (!MumakilPerformanceTracker.DEBUG_DISABLE_MUMAKIL_TREE_CLEARING) {
+                long treePerfStart = MumakilPerformanceTracker.startTimer();
+                try {
+                    this.clearAggroObstaclesForMovement();
+                } finally {
+                    if (MumakilPerformanceTracker.isEnabled()) {
+                        MumakilPerformanceTracker.recordTreeScan(
+                                this,
+                                System.nanoTime() - treePerfStart
+                        );
+                    }
+                }
+            }
             this.updateChargeStompSound();
             this.applyTrampleDamage();
 
@@ -1029,6 +1652,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             } else {
                 this.setSprinting(false);
             }
+
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.reportIfDue(this);
+            }
         }
     }
 
@@ -1036,6 +1663,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
     // Direct melee, tusk attack, and projectile damage
     // ---------------------------------------------------------------------
+
+    @Override
+    public void setAttackTarget(EntityLivingBase target) {
+        EntityLivingBase previousTarget = this.getAttackTarget();
+
+        if (MumakilPerformanceTracker.isEnabled()
+                && this.worldObj != null
+                && !this.worldObj.isRemote
+                && previousTarget != target) {
+            MumakilPerformanceTracker.recordTargetChange(this);
+        }
+
+        super.setAttackTarget(target);
+    }
 
     public boolean attackEntityAsMob(Entity target) {
         if (this.tuskAttackCooldownTicks > 0) {
@@ -1221,6 +1862,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean canTuskAttackTarget(EntityLivingBase target) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordTuskCandidateCheck(this);
+        }
+
         if (target == this
                 || target == this.riddenByEntity
                 || target instanceof LOTREntityMumakil
@@ -1348,7 +1993,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 .expand(0.85D, 0.5D, 0.85D)
                 .addCoord(directionX * 1.5D, -0.35D, directionZ * 1.5D);
 
+        long perfStart = MumakilPerformanceTracker.startTimer();
         List nearby = this.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, trampleBox);
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordTrampleScan(this, nearby.size(), System.nanoTime() - perfStart);
+        }
+
         boolean hitAnyEntities = false;
 
         for(int i = 0; i < nearby.size(); ++i) {
@@ -1376,6 +2026,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean canTrample(EntityLivingBase target) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordTrampleCandidateCheck(this);
+        }
+
         if (target == this
                 || target == this.riddenByEntity
                 || target instanceof LOTREntityMumakil
@@ -1471,6 +2125,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private void clearAggroObstaclesForMovement() {
         if (this.worldObj.isRemote || this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0) {
             return;
+        }
+
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordTreePass(this);
         }
 
         Vec3 look = this.getLookVec();
@@ -1583,25 +2241,36 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         int minZ = MathHelper.floor_double(obstacleBox.minZ);
         int maxZ = MathHelper.floor_double(obstacleBox.maxZ);
         int broken = 0;
+        int checked = 0;
 
         for (int x = minX; x <= maxX; ++x) {
             for (int y = minY; y <= maxY; ++y) {
                 for (int z = minZ; z <= maxZ; ++z) {
                     if (broken >= maximum) {
+                        if (MumakilPerformanceTracker.isEnabled()) {
+                            MumakilPerformanceTracker.recordTreeBlocksChecked(this, checked);
+                        }
                         return broken;
                     }
 
+                    ++checked;
                     if (!this.worldObj.blockExists(x, y, z)) {
                         continue;
                     }
-
                     Block block = this.worldObj.getBlock(x, y, z);
                     if (this.canBreakAggroObstacle(block, x, y, z)) {
                         this.breakAggroObstacleBlock(block, x, y, z);
                         ++broken;
+                        if (MumakilPerformanceTracker.isEnabled()) {
+                            MumakilPerformanceTracker.recordTreeBlocksDestroyed(this, 1);
+                        }
                     }
                 }
             }
+        }
+
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordTreeBlocksChecked(this, checked);
         }
 
         return broken;

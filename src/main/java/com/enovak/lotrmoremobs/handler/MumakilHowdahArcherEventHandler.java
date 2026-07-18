@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Method;
 import java.util.List;
@@ -111,7 +112,19 @@ public class MumakilHowdahArcherEventHandler {
         EntityLivingBase living = event.entityLiving;
 
         if (living instanceof LOTREntityMumakil) {
-            updateHiredMumakilArchers((LOTREntityMumakil)living);
+            LOTREntityMumakil mumakil = (LOTREntityMumakil)living;
+            long perfStart = MumakilPerformanceTracker.startTimer();
+
+            try {
+                updateHiredMumakilArchers(mumakil);
+            } finally {
+                if (MumakilPerformanceTracker.isEnabled()) {
+                    MumakilPerformanceTracker.recordArcherHandler(
+                            mumakil,
+                            System.nanoTime() - perfStart
+                    );
+                }
+            }
             return;
         }
 
@@ -239,6 +252,11 @@ public class MumakilHowdahArcherEventHandler {
     }
 
     private static void updateHowdahArcherSharedTarget(LOTREntityMumakil mumakil, long worldTime) {
+        if (MumakilPerformanceTracker.DEBUG_DISABLE_HOWDAH_ARCHER_COMBAT) {
+            LOTREntityMumakilHowdahArcher.setSharedHowdahTarget(mumakil, null);
+            return;
+        }
+
         NBTTagCompound data = mumakil.getEntityData();
         long nextScan = data.getLong(MUMAKIL_ARCHERS_NEXT_TARGET_SCAN_KEY);
         if (nextScan > worldTime) {
@@ -255,6 +273,7 @@ public class MumakilHowdahArcherEventHandler {
     }
 
     private static EntityLivingBase findBestHowdahArcherTarget(LOTREntityMumakil mumakil) {
+        long perfStart = mumakil.worldObj.isRemote ? 0L : MumakilPerformanceTracker.startTimer();
         List nearby = mumakil.worldObj.getEntitiesWithinAABB(
                 EntityLivingBase.class,
                 mumakil.boundingBox.expand(TARGET_SCAN_RANGE, TARGET_SCAN_VERTICAL_RANGE, TARGET_SCAN_RANGE)
@@ -281,6 +300,10 @@ public class MumakilHowdahArcherEventHandler {
             }
         }
 
+        if (!mumakil.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArcherTargetScan(mumakil, nearby.size(), System.nanoTime() - perfStart);
+        }
+
         return bestTarget;
     }
 
@@ -302,6 +325,10 @@ public class MumakilHowdahArcherEventHandler {
     }
 
     private static boolean canHowdahArchersTarget(LOTREntityMumakil mumakil, EntityLivingBase target, LOTRNPCTargetSelector targetSelector) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArcherCandidateCheck(mumakil);
+        }
+
         if (target == null
                 || target == mumakil
                 || target == mumakil.riddenByEntity
@@ -357,6 +384,10 @@ public class MumakilHowdahArcherEventHandler {
     }
 
     private static int spawnMissingHowdahArchers(LOTREntityMumakil mumakil, boolean[] seenSlots, boolean initialSpawn) {
+        if (MumakilPerformanceTracker.DEBUG_DO_NOT_SPAWN_HOWDAH_ARCHERS) {
+            return 0;
+        }
+
         int spawned = 0;
         StringBuilder resultSlots = new StringBuilder();
 

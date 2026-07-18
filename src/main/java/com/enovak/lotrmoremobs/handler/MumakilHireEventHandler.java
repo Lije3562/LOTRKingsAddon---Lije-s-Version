@@ -27,7 +27,7 @@ import net.minecraftforge.event.entity.player.EntityInteractEvent;
  * remains untouched.
  */
 public class MumakilHireEventHandler {
-    private static final double REQUIRED_NEAR_HARAD_ALIGNMENT = 3000.0D;
+    private static final double REQUIRED_NEAR_HARAD_ALIGNMENT = 0.0D;
     private static final int HIRE_CLICK_COOLDOWN_TICKS = 20;
     private static final int SADDLE_SLOT = 0;
     private static final int WAR_EQUIPMENT_SLOT = 1;

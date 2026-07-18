@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.entity.npc;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.registry.IEntityAdditionalSpawnData;
 import io.netty.buffer.ByteBuf;
@@ -242,22 +243,40 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public void onUpdate() {
-        if (this.isRuntimeHowdahPassenger()) {
-            /*
-             * Runtime passengers only need the base Entity tick for age, previous
-             * position, fire/portal bookkeeping, and tracker stability. Calling the
-             * full LOTR NPC/Living update here runs combat, inventory, senses,
-             * navigation, and AI work that these visual helpers never use.
-             */
-            this.onEntityUpdate();
-            this.updateHowdahPassengerAttachment();
-            return;
-        }
+        boolean trackPerformance = !this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled();
+        long perfStart = trackPerformance ? MumakilPerformanceTracker.startTimer() : 0L;
+        LOTREntityMumakil perfMumakil = trackPerformance ? this.getAttachedMumakilForPerformance() : null;
 
-        super.onUpdate();
+        try {
+            if (this.isRuntimeHowdahPassenger()) {
+                /*
+                 * Runtime passengers only need the base Entity tick for age, previous
+                 * position, fire/portal bookkeeping, and tracker stability. Calling the
+                 * full LOTR NPC/Living update here runs combat, inventory, senses,
+                 * navigation, and AI work that these visual helpers never use.
+                 */
+                this.onEntityUpdate();
+                this.updateHowdahPassengerAttachment();
+                return;
+            }
 
-        if (this.detachedFromDeadMumakil && !this.worldObj.isRemote && ++this.detachedTicks > DETACHED_DESPAWN_TICKS) {
-            this.setDead();
+            super.onUpdate();
+
+            if (this.detachedFromDeadMumakil && !this.worldObj.isRemote && ++this.detachedTicks > DETACHED_DESPAWN_TICKS) {
+                this.setDead();
+            }
+        } finally {
+            if (trackPerformance) {
+                if (perfMumakil == null) {
+                    perfMumakil = this.getAttachedMumakilForPerformance();
+                }
+                if (perfMumakil != null) {
+                    MumakilPerformanceTracker.recordArcherFullLiving(
+                            perfMumakil,
+                            System.nanoTime() - perfStart
+                    );
+                }
+            }
         }
     }
 
@@ -269,13 +288,36 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         }
 
         if (this.detachedFromDeadMumakil) {
-            super.onLivingUpdate();
+            this.runSuperOnLivingUpdate();
             return;
         }
 
         this.clearPassengerAI();
-        super.onLivingUpdate();
+        this.runSuperOnLivingUpdate();
         this.updateHowdahPassengerAttachment();
+    }
+
+    private void runSuperOnLivingUpdate() {
+        boolean trackPerformance = !this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled();
+        LOTREntityMumakil perfMumakil = trackPerformance ? this.getAttachedMumakilForPerformance() : null;
+        long perfStart = perfMumakil != null ? MumakilPerformanceTracker.startTimer() : 0L;
+
+        try {
+            super.onLivingUpdate();
+        } finally {
+            if (perfMumakil != null) {
+                MumakilPerformanceTracker.recordArcherSuperLiving(
+                        perfMumakil,
+                        System.nanoTime() - perfStart
+                );
+            }
+        }
+    }
+
+    private LOTREntityMumakil getAttachedMumakilForPerformance() {
+        int mountId = this.getHowdahMountEntityId();
+        Entity entity = mountId == 0 || this.worldObj == null ? null : this.worldObj.getEntityByID(mountId);
+        return entity instanceof LOTREntityMumakil ? (LOTREntityMumakil)entity : null;
     }
 
     private void updateHowdahPassengerAttachment() {
@@ -463,15 +505,40 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     }
 
     private void updateHowdahCombatBehavior(LOTREntityMumakil mumakil) {
-        EntityLivingBase target = getSharedHowdahTarget(mumakil);
-        if (this.canHowdahArcherTrackTarget(mumakil, target)) {
-            this.updateHowdahLookBehavior(target);
-            this.updateHowdahShooting(mumakil, target);
-            return;
-        }
+        long perfStart = this.worldObj.isRemote ? 0L : MumakilPerformanceTracker.startTimer();
+        int perfWorkUnits = 1;
+        boolean perfHasTarget = false;
 
-        this.updateHowdahIdleLook();
-        this.tickHowdahShootCooldown();
+        try {
+            if (MumakilPerformanceTracker.DEBUG_DISABLE_HOWDAH_ARCHER_COMBAT) {
+                this.updateHowdahIdleLook();
+                this.tickHowdahShootCooldown();
+                return;
+            }
+
+            EntityLivingBase target = getSharedHowdahTarget(mumakil);
+            perfHasTarget = this.canHowdahArcherTrackTarget(mumakil, target);
+
+            if (perfHasTarget) {
+                ++perfWorkUnits;
+                this.updateHowdahLookBehavior(target);
+                this.updateHowdahShooting(mumakil, target);
+                return;
+            }
+
+            this.updateHowdahIdleLook();
+            this.tickHowdahShootCooldown();
+        } finally {
+            if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordArcherUpdate(
+                        mumakil,
+                        this.getHowdahSlot(),
+                        perfHasTarget,
+                        perfWorkUnits,
+                        System.nanoTime() - perfStart
+                );
+            }
+        }
     }
 
     private void updateHowdahLookBehavior(EntityLivingBase target) {
@@ -526,7 +593,7 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             return;
         }
 
-        this.shootHowdahArrowAt(target);
+        this.shootHowdahArrowAt(mumakil, target);
         this.resetHowdahShootCooldown();
     }
 
@@ -567,10 +634,14 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     private boolean canHowdahArcherShootTarget(LOTREntityMumakil mumakil, EntityLivingBase target) {
         return this.canHowdahArcherTrackTarget(mumakil, target)
                 && this.getDistanceSqToEntity(target) <= HOWDAH_ARCHER_SHOOT_RANGE * HOWDAH_ARCHER_SHOOT_RANGE
-                && this.hasHowdahShotLine(target);
+                && this.hasHowdahShotLine(mumakil, target);
     }
 
-    private boolean hasHowdahShotLine(EntityLivingBase target) {
+    private boolean hasHowdahShotLine(LOTREntityMumakil mumakil, EntityLivingBase target) {
+        if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArcherVisibilityCheck(mumakil, this.getHowdahSlot());
+        }
+
         if (this.canEntityBeSeen(target)) {
             return true;
         }
@@ -580,11 +651,15 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         }
 
         Vec3 origin = Vec3.createVectorHelper(this.posX, this.posY + (double)this.getEyeHeight(), this.posZ);
-        return this.hasClearShotTo(origin, target.posY + (double)target.height * 0.65D, target)
-                || this.hasClearShotTo(origin, target.posY + 0.2D, target);
+        return this.hasClearShotTo(mumakil, origin, target.posY + (double)target.height * 0.65D, target)
+                || this.hasClearShotTo(mumakil, origin, target.posY + 0.2D, target);
     }
 
-    private boolean hasClearShotTo(Vec3 origin, double targetY, EntityLivingBase target) {
+    private boolean hasClearShotTo(LOTREntityMumakil mumakil, Vec3 origin, double targetY, EntityLivingBase target) {
+        if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArcherVisibilityCheck(mumakil, this.getHowdahSlot());
+        }
+
         Vec3 targetPoint = Vec3.createVectorHelper(target.posX, targetY, target.posZ);
         return this.worldObj.rayTraceBlocks(origin, targetPoint) == null;
     }
@@ -593,7 +668,11 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         return this.getHowdahSlot() <= 13;
     }
 
-    private void shootHowdahArrowAt(EntityLivingBase target) {
+    private void shootHowdahArrowAt(LOTREntityMumakil mumakil, EntityLivingBase target) {
+        if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArrowFired(mumakil, this.getHowdahSlot());
+        }
+
         this.attackEntityWithRangedAttack(target, 1.0F);
     }
 
@@ -871,10 +950,20 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             return;
         }
 
+        int previousTargetId = mumakil.getEntityData().getInteger(MUMAKIL_SHARED_TARGET_ID_KEY);
+        int newTargetId = target == null || target.isDead ? 0 : target.getEntityId();
+
         mumakil.getEntityData().setInteger(
                 MUMAKIL_SHARED_TARGET_ID_KEY,
-                target == null || target.isDead ? 0 : target.getEntityId()
+                newTargetId
         );
+
+        if (mumakil.worldObj != null
+                && !mumakil.worldObj.isRemote
+                && previousTargetId != newTargetId
+                && MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordArcherTargetChange(mumakil);
+        }
     }
 
     private static EntityLivingBase getSharedHowdahTarget(LOTREntityMumakil mumakil) {

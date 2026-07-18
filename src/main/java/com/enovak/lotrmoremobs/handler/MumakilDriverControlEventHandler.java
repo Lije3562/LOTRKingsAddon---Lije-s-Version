@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import lotr.common.LOTRMod;
 import lotr.common.entity.npc.LOTREntityNPC;
@@ -9,6 +10,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.ai.EntityAIBase;
 import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.passive.EntityHorse;
 import net.minecraft.entity.passive.EntityTameable;
@@ -20,6 +22,8 @@ import net.minecraft.world.World;
 import net.minecraftforge.event.entity.living.LivingEvent;
 
 import java.util.List;
+import java.util.Map;
+import java.util.WeakHashMap;
 
 /**
  * LOTRMoreMobs Mumakil driver-control handler.
@@ -40,32 +44,19 @@ import java.util.List;
 public class MumakilDriverControlEventHandler {
 
     private static final String NBT_DRIVER_TARGET_ID = "lotrmoremobs_driverTargetId";
-    private static final String NBT_PROGRESS_TARGET_ID = "lotrmoremobs_driverProgressTargetId";
-    private static final String NBT_PROGRESS_LAST_DIST_SQ = "lotrmoremobs_driverProgressLastDistSq";
-    private static final String NBT_PROGRESS_STUCK_TICKS = "lotrmoremobs_driverProgressStuckTicks";
-    private static final String NBT_NEXT_PROGRESS_CHECK_TICK = "lotrmoremobs_driverNextProgressCheckTick";
     private static final String NBT_REJECTED_TARGET_ID = "lotrmoremobs_driverRejectedTargetId";
     private static final String NBT_REJECTED_UNTIL_TICK = "lotrmoremobs_driverRejectedUntilTick";
     private static final String NBT_NEXT_TARGET_SCAN_TICK = "lotrmoremobs_driverNextTargetScanTick";
-    private static final String NBT_NEXT_REPATH_TICK = "lotrmoremobs_driverNextRepathTick";
 
-    private static final double TARGET_SCAN_RANGE = 32.0D;
-    private static final double TARGET_SCAN_VERTICAL_RANGE = 16.0D;
+    private static final double TARGET_SCAN_RANGE = 16.0D;
+    private static final double TARGET_SCAN_VERTICAL_RANGE = 8.0D;
 
-    /*
-     * Stop slightly outside the entity's tusk hit range so the entity's own attack logic can fire
-     * without forcing the mount to try to stand inside the target.
-     */
     private static final double APPROACH_STOP_RANGE = 7.0D;
-    private static final double APPROACH_STOP_RANGE_SQ = APPROACH_STOP_RANGE * APPROACH_STOP_RANGE;
-
-    private static final double DRIVER_APPROACH_SPEED = 0.42D;
-    private static final int DRIVER_REPATH_INTERVAL = 10;
 
     private static final int DRIVER_TARGET_PROGRESS_CHECK_INTERVAL = 20;
     private static final int DRIVER_TARGET_STUCK_TIMEOUT = 100; // about 5 seconds
     private static final int DRIVER_TARGET_REJECT_TICKS = 200; // about 10 seconds
-    private static final double DRIVER_TARGET_PROGRESS_EPSILON_SQ = 4.0D;
+    private static final double DRIVER_PROGRESS_MOVE_THRESHOLD_SQ = 1.0D;
     private static final double DRIVER_TARGET_REACHABLE_EXTRA_RANGE = 4.0D;
 
     /*
@@ -80,9 +71,11 @@ public class MumakilDriverControlEventHandler {
      * Do not scan crowded battlefields every tick.
      * This only throttles new target acquisition, not ordinary mount movement/control.
      */
-    private static final int DRIVER_TARGET_SCAN_COOLDOWN = 20;
+    private static final int DRIVER_TARGET_SCAN_COOLDOWN = 10;
 
     private static final boolean DEBUG_DRIVER_TARGETS = false;
+    private static final Map<LOTREntityNPC, Boolean> MOUNTED_DRIVER_COMBAT_GUARDS =
+            new WeakHashMap<LOTREntityNPC, Boolean>();
 
     @SubscribeEvent
     public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
@@ -96,20 +89,77 @@ public class MumakilDriverControlEventHandler {
             return;
         }
 
-        EntityLivingBase driver = getValidNearHaradDriver(mumakil);
+        long perfStart = MumakilPerformanceTracker.startTimer();
 
-        if (driver != null) {
-            markHiredWarIfApplicable(mumakil);
-        } else if (isImplicitHiredWarMumakil(mumakil)) {
-            mumakil.setHiredWarMumakil(true);
+        try {
+            LOTREntityNPC driver = getValidNearHaradDriver(mumakil);
+
+            if (driver != null) {
+                markHiredWarIfApplicable(mumakil);
+            } else if (isImplicitHiredWarMumakil(mumakil)) {
+                mumakil.setHiredWarMumakil(true);
+            }
+
+            if (!mumakil.isHiredWarMumakil()) {
+                if (hasDriverTargetState(mumakil)) {
+                    clearDriverTargetState(mumakil);
+                }
+                return;
+            }
+
+            if (driver != null) {
+                ensureMountedDriverCombatGuard(driver);
+            }
+
+            updateDrivenMumakil(mumakil, driver);
+        } finally {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverHandler(
+                        mumakil,
+                        System.nanoTime() - perfStart
+                );
+            }
         }
+    }
 
-        if (driver == null && !mumakil.isHiredWarMumakil()) {
-            clearDriverTargetState(mumakil);
+    private static void ensureMountedDriverCombatGuard(LOTREntityNPC driver) {
+        if (MOUNTED_DRIVER_COMBAT_GUARDS.containsKey(driver)) {
             return;
         }
 
-        updateDrivenMumakil(mumakil, driver);
+        driver.tasks.addTask(1, new EntityAIBlockMountedMumakilDriverCombat(driver));
+        MOUNTED_DRIVER_COMBAT_GUARDS.put(driver, Boolean.TRUE);
+    }
+
+    private static final class EntityAIBlockMountedMumakilDriverCombat extends EntityAIBase {
+        private final LOTREntityNPC driver;
+
+        private EntityAIBlockMountedMumakilDriverCombat(LOTREntityNPC driver) {
+            this.driver = driver;
+            this.setMutexBits(3);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            EntityLivingBase target = this.driver.getAttackTarget();
+            return target != null && target.isEntityAlive() && this.isDrivingHiredWarMumakil();
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return this.shouldExecute();
+        }
+
+        private boolean isDrivingHiredWarMumakil() {
+            if (!(this.driver.ridingEntity instanceof LOTREntityMumakil)) {
+                return false;
+            }
+
+            LOTREntityMumakil mumakil = (LOTREntityMumakil)this.driver.ridingEntity;
+            return mumakil.isHiredWarMumakil()
+                    && mumakil.riddenByEntity == this.driver
+                    && this.driver.isEntityAlive();
+        }
     }
 
     private static void markHiredWarIfApplicable(LOTREntityMumakil mumakil) {
@@ -124,43 +174,66 @@ public class MumakilDriverControlEventHandler {
                 && mumakil.hasMumakilHowdahEquipped();
     }
 
-    private static void updateDrivenMumakil(LOTREntityMumakil mumakil, EntityLivingBase driver) {
+    private static void updateDrivenMumakil(LOTREntityMumakil mumakil, LOTREntityNPC driver) {
         World world = mumakil.worldObj;
         long worldTick = world.getTotalWorldTime();
-
         EntityLivingBase currentTarget = getStoredDriverTarget(mumakil);
+        EntityLivingBase authoritativeTarget = getAuthoritativeAttackTarget(mumakil, driver);
 
-        if (currentTarget == null) {
-            EntityLivingBase attackTarget = mumakil.getAttackTarget();
-            if (isValidDriverTarget(mumakil, driver, attackTarget)) {
-                setStoredDriverTarget(mumakil, attackTarget);
-                resetTargetProgress(mumakil, attackTarget);
-                currentTarget = attackTarget;
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordDriverTargetRead(mumakil);
+        }
+
+        if (currentTarget == null
+                && mumakil.getEntityData().getInteger(NBT_DRIVER_TARGET_ID) > 0) {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetReset(mumakil);
+            }
+            clearStoredDriverTarget(mumakil);
+        }
+
+        if (authoritativeTarget != null && authoritativeTarget != currentTarget) {
+            if (isValidDriverTarget(mumakil, driver, authoritativeTarget)
+                    && !isRejectedDriverTarget(mumakil, authoritativeTarget, worldTick)
+                    && !isTooHighForDrivenMumakilMelee(mumakil, authoritativeTarget)) {
+                setStoredDriverTarget(mumakil, authoritativeTarget);
+                currentTarget = authoritativeTarget;
+            } else {
+                if (isTooHighForDrivenMumakilMelee(mumakil, authoritativeTarget)) {
+                    temporarilyRejectDriverTarget(
+                            mumakil,
+                            authoritativeTarget,
+                            worldTick,
+                            DRIVER_TARGET_ELEVATED_REJECT_TICKS,
+                            "elevated"
+                    );
+                }
+                clearAuthoritativeAttackTarget(mumakil, driver, authoritativeTarget);
             }
         }
 
-        if (!isValidDriverTarget(mumakil, driver, currentTarget)) {
-            clearStoredDriverTarget(mumakil);
-
-            if (mumakil.getAttackTarget() == currentTarget) {
-                mumakil.setAttackTarget(null);
+        if (currentTarget != null && !isValidDriverTarget(mumakil, driver, currentTarget)) {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetReset(mumakil);
             }
-
+            clearStoredDriverTarget(mumakil);
+            clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
             currentTarget = null;
         }
 
         if (currentTarget != null && isRejectedDriverTarget(mumakil, currentTarget, worldTick)) {
-            clearStoredDriverTarget(mumakil);
-
-            if (mumakil.getAttackTarget() == currentTarget) {
-                mumakil.setAttackTarget(null);
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetReset(mumakil);
             }
-
-            clearNavigatorPath(mumakil);
+            clearStoredDriverTarget(mumakil);
+            clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
             currentTarget = null;
         }
 
         if (currentTarget != null && isTooHighForDrivenMumakilMelee(mumakil, currentTarget)) {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetReset(mumakil);
+            }
             temporarilyRejectDriverTarget(
                     mumakil,
                     currentTarget,
@@ -169,22 +242,21 @@ public class MumakilDriverControlEventHandler {
                     "elevated"
             );
 
-            if (mumakil.getAttackTarget() == currentTarget) {
-                mumakil.setAttackTarget(null);
-            }
-
+            clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
             clearStoredDriverTarget(mumakil);
-            clearNavigatorPath(mumakil);
             return;
         }
 
         if (currentTarget != null) {
-            updateCurrentTargetProgress(mumakil, currentTarget, worldTick);
+            updateCurrentTargetProgress(mumakil, driver, currentTarget, worldTick);
 
             /*
              * updateCurrentTargetProgress may clear/reject the current target.
              */
             currentTarget = getStoredDriverTarget(mumakil);
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetRead(mumakil);
+            }
         }
 
         if (currentTarget == null) {
@@ -192,16 +264,15 @@ public class MumakilDriverControlEventHandler {
 
             if (currentTarget != null) {
                 setStoredDriverTarget(mumakil, currentTarget);
-                resetTargetProgress(mumakil, currentTarget);
             }
         }
 
         if (currentTarget != null) {
-            driveTowardTarget(mumakil, currentTarget, worldTick);
+            setAuthoritativeAttackTarget(mumakil, driver, currentTarget);
         }
     }
 
-    private static EntityLivingBase getValidNearHaradDriver(LOTREntityMumakil mumakil) {
+    private static LOTREntityNPC getValidNearHaradDriver(LOTREntityMumakil mumakil) {
         Entity rider = mumakil.riddenByEntity;
 
         if (!(rider instanceof LOTREntityNPC)) {
@@ -258,58 +329,133 @@ public class MumakilDriverControlEventHandler {
             return;
         }
 
-        mumakil.getEntityData().setInteger(NBT_DRIVER_TARGET_ID, target.getEntityId());
-        mumakil.setAttackTarget(target);
+        NBTTagCompound data = mumakil.getEntityData();
+        int targetId = target.getEntityId();
+        boolean storedTargetChanged = data.getInteger(NBT_DRIVER_TARGET_ID) != targetId;
 
-        if (DEBUG_DRIVER_TARGETS) {
+        if (storedTargetChanged) {
+            data.setInteger(NBT_DRIVER_TARGET_ID, targetId);
+            resetTargetProgress(mumakil, target);
+        }
+
+        if (DEBUG_DRIVER_TARGETS && storedTargetChanged) {
             System.out.println("[LOTRMoreMobs] Driven Mumakil " + mumakil.getEntityId()
-                    + " selected target " + target.getEntityId()
+                    + " selected target " + targetId
                     + " " + target.getClass().getSimpleName());
         }
     }
 
     private static void clearStoredDriverTarget(LOTREntityMumakil mumakil) {
         NBTTagCompound data = mumakil.getEntityData();
+
+        if (data.getInteger(NBT_DRIVER_TARGET_ID) <= 0
+                && !hasActiveDriverTargetProgress(mumakil.getDriverTargetProgressState())) {
+            return;
+        }
+
         data.setInteger(NBT_DRIVER_TARGET_ID, -1);
-        data.setInteger(NBT_PROGRESS_TARGET_ID, -1);
-        data.setDouble(NBT_PROGRESS_LAST_DIST_SQ, -1.0D);
-        data.setInteger(NBT_PROGRESS_STUCK_TICKS, 0);
-        data.setLong(NBT_NEXT_PROGRESS_CHECK_TICK, 0L);
+        mumakil.getDriverTargetProgressState().reset();
     }
 
     private static void clearDriverTargetState(LOTREntityMumakil mumakil) {
         NBTTagCompound data = mumakil.getEntityData();
         data.setInteger(NBT_DRIVER_TARGET_ID, -1);
-        data.setInteger(NBT_PROGRESS_TARGET_ID, -1);
-        data.setDouble(NBT_PROGRESS_LAST_DIST_SQ, -1.0D);
-        data.setInteger(NBT_PROGRESS_STUCK_TICKS, 0);
-        data.setLong(NBT_NEXT_PROGRESS_CHECK_TICK, 0L);
         data.setInteger(NBT_REJECTED_TARGET_ID, -1);
         data.setLong(NBT_REJECTED_UNTIL_TICK, 0L);
         data.setLong(NBT_NEXT_TARGET_SCAN_TICK, 0L);
-        data.setLong(NBT_NEXT_REPATH_TICK, 0L);
+        mumakil.getDriverTargetProgressState().reset();
+    }
+
+    private static boolean hasDriverTargetState(LOTREntityMumakil mumakil) {
+        NBTTagCompound data = mumakil.getEntityData();
+        return data.getInteger(NBT_DRIVER_TARGET_ID) > 0
+                || data.getInteger(NBT_REJECTED_TARGET_ID) > 0
+                || data.getLong(NBT_REJECTED_UNTIL_TICK) > 0L
+                || data.getLong(NBT_NEXT_TARGET_SCAN_TICK) > 0L
+                || hasActiveDriverTargetProgress(mumakil.getDriverTargetProgressState());
+    }
+
+    private static boolean hasActiveDriverTargetProgress(LOTREntityMumakil.DriverTargetProgressState state) {
+        return state.progressTargetEntityId > 0
+                || state.nextProgressCheckTick > 0L
+                || state.stuckTicks > 0;
+    }
+
+    private static EntityLivingBase getAuthoritativeAttackTarget(
+            LOTREntityMumakil mumakil,
+            LOTREntityNPC driver
+    ) {
+        return driver != null ? driver.getAttackTarget() : mumakil.getAttackTarget();
+    }
+
+    private static void setAuthoritativeAttackTarget(
+            LOTREntityMumakil mumakil,
+            LOTREntityNPC driver,
+            EntityLivingBase target
+    ) {
+        boolean authoritativeTargetChanged = getAuthoritativeAttackTarget(mumakil, driver) != target;
+        boolean mountTargetChanged = driver != null && mumakil.getAttackTarget() != target;
+
+        if (!authoritativeTargetChanged && !mountTargetChanged) {
+            return;
+        }
+
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordDriverTargetSyncAttempt(mumakil);
+        }
+
+        if (driver != null) {
+            if (authoritativeTargetChanged) {
+                driver.setAttackTarget(target);
+            }
+            if (mountTargetChanged) {
+                mumakil.setAttackTarget(target);
+            }
+        } else if (authoritativeTargetChanged) {
+            mumakil.setAttackTarget(target);
+        }
+    }
+
+    private static void clearAuthoritativeAttackTarget(
+            LOTREntityMumakil mumakil,
+            LOTREntityNPC driver,
+            EntityLivingBase target
+    ) {
+        if (getAuthoritativeAttackTarget(mumakil, driver) == target) {
+            setAuthoritativeAttackTarget(mumakil, driver, null);
+        }
     }
 
     private static void resetTargetProgress(LOTREntityMumakil mumakil, EntityLivingBase target) {
-        NBTTagCompound data = mumakil.getEntityData();
-        data.setInteger(NBT_PROGRESS_TARGET_ID, target != null ? target.getEntityId() : -1);
-        data.setDouble(NBT_PROGRESS_LAST_DIST_SQ, target != null ? mumakil.getDistanceSqToEntity(target) : -1.0D);
-        data.setInteger(NBT_PROGRESS_STUCK_TICKS, 0);
-        data.setLong(NBT_NEXT_PROGRESS_CHECK_TICK, mumakil.worldObj.getTotalWorldTime() + DRIVER_TARGET_PROGRESS_CHECK_INTERVAL);
+        LOTREntityMumakil.DriverTargetProgressState state = mumakil.getDriverTargetProgressState();
+        state.progressTargetEntityId = target != null ? target.getEntityId() : -1;
+        state.nextProgressCheckTick = mumakil.worldObj.getTotalWorldTime() + DRIVER_TARGET_PROGRESS_CHECK_INTERVAL;
+        state.lastProgressX = mumakil.posX;
+        state.lastProgressY = mumakil.posY;
+        state.lastProgressZ = mumakil.posZ;
+        state.stuckTicks = 0;
     }
 
-    private static void updateCurrentTargetProgress(LOTREntityMumakil mumakil, EntityLivingBase target, long worldTick) {
+    private static void updateCurrentTargetProgress(
+            LOTREntityMumakil mumakil,
+            LOTREntityNPC driver,
+            EntityLivingBase target,
+            long worldTick
+    ) {
         if (target == null) {
             return;
         }
 
-        NBTTagCompound data = mumakil.getEntityData();
+        LOTREntityMumakil.DriverTargetProgressState state = mumakil.getDriverTargetProgressState();
 
-        if (worldTick < data.getLong(NBT_NEXT_PROGRESS_CHECK_TICK)) {
+        if (worldTick < state.nextProgressCheckTick) {
             return;
         }
 
-        data.setLong(NBT_NEXT_PROGRESS_CHECK_TICK, worldTick + DRIVER_TARGET_PROGRESS_CHECK_INTERVAL);
+        state.nextProgressCheckTick = worldTick + DRIVER_TARGET_PROGRESS_CHECK_INTERVAL;
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordUnreachableCheck(mumakil);
+        }
 
         double distSq = mumakil.getDistanceSqToEntity(target);
         double directReach = APPROACH_STOP_RANGE + DRIVER_TARGET_REACHABLE_EXTRA_RANGE;
@@ -321,37 +467,30 @@ public class MumakilDriverControlEventHandler {
         }
 
         int targetId = target.getEntityId();
-        int progressTargetId = data.getInteger(NBT_PROGRESS_TARGET_ID);
 
-        if (progressTargetId != targetId) {
+        if (state.progressTargetEntityId != targetId) {
             resetTargetProgress(mumakil, target);
             return;
         }
 
-        double lastDistSq = data.getDouble(NBT_PROGRESS_LAST_DIST_SQ);
-        int stuckTicks = data.getInteger(NBT_PROGRESS_STUCK_TICKS);
+        double progressX = mumakil.posX - state.lastProgressX;
+        double progressZ = mumakil.posZ - state.lastProgressZ;
+        double horizontalProgressSq = progressX * progressX + progressZ * progressZ;
 
-        boolean improved = lastDistSq < 0.0D || distSq < lastDistSq - DRIVER_TARGET_PROGRESS_EPSILON_SQ;
-        boolean noPath = mumakil.getNavigator().noPath();
-
-        if (improved) {
-            stuckTicks = 0;
-            data.setDouble(NBT_PROGRESS_LAST_DIST_SQ, distSq);
+        if (horizontalProgressSq >= DRIVER_PROGRESS_MOVE_THRESHOLD_SQ) {
+            state.stuckTicks = 0;
         } else {
-            stuckTicks += DRIVER_TARGET_PROGRESS_CHECK_INTERVAL;
+            state.stuckTicks += DRIVER_TARGET_PROGRESS_CHECK_INTERVAL;
         }
 
-        /*
-         * If the navigator has no path while the target is outside direct reach, count that check
-         * as stuck even if the distance value is noisy.
-         */
-        if (noPath && !improved) {
-            stuckTicks += DRIVER_TARGET_PROGRESS_CHECK_INTERVAL;
-        }
+        state.lastProgressX = mumakil.posX;
+        state.lastProgressY = mumakil.posY;
+        state.lastProgressZ = mumakil.posZ;
 
-        data.setInteger(NBT_PROGRESS_STUCK_TICKS, stuckTicks);
-
-        if (stuckTicks >= DRIVER_TARGET_STUCK_TIMEOUT) {
+        if (state.stuckTicks >= DRIVER_TARGET_STUCK_TIMEOUT) {
+            if (MumakilPerformanceTracker.isEnabled()) {
+                MumakilPerformanceTracker.recordDriverTargetReset(mumakil);
+            }
             temporarilyRejectDriverTarget(
                     mumakil,
                     target,
@@ -360,12 +499,8 @@ public class MumakilDriverControlEventHandler {
                     "stuck"
             );
 
-            if (mumakil.getAttackTarget() == target) {
-                mumakil.setAttackTarget(null);
-            }
-
+            clearAuthoritativeAttackTarget(mumakil, driver, target);
             clearStoredDriverTarget(mumakil);
-            clearNavigatorPath(mumakil);
         }
     }
 
@@ -426,6 +561,7 @@ public class MumakilDriverControlEventHandler {
                 TARGET_SCAN_RANGE
         );
 
+        long perfStart = MumakilPerformanceTracker.startTimer();
         List nearby = mumakil.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, scanBox);
 
         EntityLivingBase bestTarget = null;
@@ -455,6 +591,10 @@ public class MumakilDriverControlEventHandler {
                 bestScore = score;
                 bestDistanceSq = distanceSq;
             }
+        }
+
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordMountTargetScan(mumakil, nearby.size(), System.nanoTime() - perfStart);
         }
 
         return bestTarget;
@@ -521,6 +661,10 @@ public class MumakilDriverControlEventHandler {
             EntityLivingBase driver,
             EntityLivingBase target
     ) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordMountCandidateCheck(mumakil);
+        }
+
         if (mumakil == null || target == null) {
             return false;
         }
@@ -598,6 +742,10 @@ public class MumakilDriverControlEventHandler {
     }
 
     private static boolean isTooHighForDrivenMumakilMelee(LOTREntityMumakil mumakil, EntityLivingBase target) {
+        if (MumakilPerformanceTracker.isEnabled()) {
+            MumakilPerformanceTracker.recordUnreachableCheck(mumakil);
+        }
+
         if (mumakil == null || target == null) {
             return false;
         }
@@ -612,80 +760,6 @@ public class MumakilDriverControlEventHandler {
         double directReachSq = directReach * directReach;
 
         return mumakil.getDistanceSqToEntity(target) > directReachSq;
-    }
-
-    private static void driveTowardTarget(LOTREntityMumakil mumakil, EntityLivingBase target, long worldTick) {
-        if (target == null) {
-            return;
-        }
-
-        mumakil.setAttackTarget(target);
-        faceTarget(mumakil, target);
-
-        double distSq = mumakil.getDistanceSqToEntity(target);
-
-        if (distSq <= APPROACH_STOP_RANGE_SQ) {
-            clearNavigatorPath(mumakil);
-            mumakil.setAIMoveSpeed(0.0F);
-            mumakil.moveForward = 0.0F;
-            mumakil.moveStrafing = 0.0F;
-            return;
-        }
-
-        NBTTagCompound data = mumakil.getEntityData();
-
-        if (worldTick >= data.getLong(NBT_NEXT_REPATH_TICK)) {
-            mumakil.getNavigator().tryMoveToEntityLiving(target, DRIVER_APPROACH_SPEED);
-            data.setLong(NBT_NEXT_REPATH_TICK, worldTick + DRIVER_REPATH_INTERVAL);
-        }
-
-        mumakil.setAIMoveSpeed((float) DRIVER_APPROACH_SPEED);
-
-        /*
-         * Do not use a direct motion fallback here.
-         * For driven siege behavior, if pathing cannot reach a fortress/tower target, the
-         * target-rejection system should switch targets instead of brute-forcing movement.
-         */
-    }
-
-    private static void faceTarget(LOTREntityMumakil mumakil, EntityLivingBase target) {
-        if (mumakil == null || target == null) {
-            return;
-        }
-
-        mumakil.getLookHelper().setLookPositionWithEntity(target, 30.0F, 30.0F);
-
-        double dx = target.posX - mumakil.posX;
-        double dz = target.posZ - mumakil.posZ;
-
-        if (dx * dx + dz * dz < 1.0E-4D) {
-            return;
-        }
-
-        float desiredYaw = (float)(Math.atan2(dz, dx) * 180.0D / Math.PI) - 90.0F;
-        mumakil.rotationYaw = updateRotation(mumakil.rotationYaw, desiredYaw, 8.0F);
-        mumakil.renderYawOffset = updateRotation(mumakil.renderYawOffset, mumakil.rotationYaw, 8.0F);
-        mumakil.rotationYawHead = mumakil.renderYawOffset;
-    }
-
-    private static float updateRotation(float current, float target, float maxStep) {
-        float delta = MathHelper.wrapAngleTo180_float(target - current);
-
-        if (delta > maxStep) {
-            delta = maxStep;
-        }
-
-        if (delta < -maxStep) {
-            delta = -maxStep;
-        }
-
-        return current + delta;
-    }
-
-    private static void clearNavigatorPath(LOTREntityMumakil mumakil) {
-        if (mumakil != null && mumakil.getNavigator() != null) {
-            mumakil.getNavigator().clearPathEntity();
-        }
     }
 
 }
