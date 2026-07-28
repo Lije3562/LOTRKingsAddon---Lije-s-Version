@@ -3,7 +3,6 @@ package com.enovak.lotrmoremobs.handler;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
-import java.lang.reflect.Field;
 import net.minecraft.entity.Entity;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -16,14 +15,8 @@ import net.minecraftforge.event.entity.living.LivingEvent;
  * the saddle and armor slots normally. Any non-howdah item that reaches the armor slot is ejected.
  */
 public class MumakilEquipmentEventHandler {
+    // BABY_HOWDAH_RIGHT_CLICK_BLOCK_V1
     private static final int WAR_EQUIPMENT_SLOT = 1;
-
-    private static final String[] INVENTORY_FIELDS = new String[] {
-            "horseChest",
-            "mountInventory",
-            "horseInventory",
-            "inventory"
-    };
 
     @SubscribeEvent
     public void onLivingUpdate(LivingEvent.LivingUpdateEvent event) {
@@ -32,13 +25,21 @@ public class MumakilEquipmentEventHandler {
         }
 
         LOTREntityMumakil mumakil = (LOTREntityMumakil) event.entityLiving;
-        IInventory inventory = this.findMountInventory(mumakil);
+        mumakil.enforceTamedAdultHowdahRequiresSaddle(null);
+        IInventory inventory = mumakil.getMumakilMountInventory();
         if (inventory == null || WAR_EQUIPMENT_SLOT >= inventory.getSizeInventory()) {
             return;
         }
 
         ItemStack stack = inventory.getStackInSlot(WAR_EQUIPMENT_SLOT);
-        if (stack == null || stack.getItem() == null || stack.getItem() == Main.mumakilHowdah) {
+        if (stack == null || stack.getItem() == null) {
+            return;
+        }
+
+        boolean illegalBabyHowdah = stack.getItem() == Main.mumakilHowdah
+                && (mumakil.isChild() || mumakil.isBabyMumakil());
+
+        if (stack.getItem() == Main.mumakilHowdah && !illegalBabyHowdah) {
             return;
         }
 
@@ -52,35 +53,4 @@ public class MumakilEquipmentEventHandler {
         }
     }
 
-    private IInventory findMountInventory(LOTREntityMumakil mumakil) {
-        for (int i = 0; i < INVENTORY_FIELDS.length; ++i) {
-            Field field = this.findField(mumakil.getClass(), INVENTORY_FIELDS[i]);
-            if (field != null) {
-                try {
-                    Object value = field.get(mumakil);
-                    if (value instanceof IInventory) {
-                        return (IInventory) value;
-                    }
-                } catch (Exception e) {
-                }
-            }
-        }
-        return null;
-    }
-
-    private Field findField(Class type, String name) {
-        Class current = type;
-        while (current != null && current != Object.class) {
-            try {
-                Field field = current.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException e) {
-                current = current.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
-    }
 }

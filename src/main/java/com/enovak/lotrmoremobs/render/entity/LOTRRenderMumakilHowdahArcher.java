@@ -30,6 +30,10 @@ public class LOTRRenderMumakilHowdahArcher extends RenderBiped {
 
     @Override
     public void doRender(Entity entity, double x, double y, double z, float yaw, float partialTicks) {
+        if (entity instanceof LOTREntityMumakilHowdahArcher) {
+            ((LOTREntityMumakilHowdahArcher)entity).resetAttachedLocomotionAnimation();
+        }
+
         Render lotrRenderer = this.getDeferredLotrRenderer();
 
         if (lotrRenderer != null && lotrRenderer != this) {

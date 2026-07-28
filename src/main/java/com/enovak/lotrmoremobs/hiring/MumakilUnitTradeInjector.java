@@ -33,6 +33,6 @@ public class MumakilUnitTradeInjector {
         trades.tradeEntries = newEntries;
 
         injected = true;
-        System.out.println("[LOTRMoreMobs] Added Mumakil with Howdah to Near Harad Warlord unit trades.");
+        System.out.println("[LOTRMoreMobs] Added Mumak with Howdah to Near Harad Warlord unit trades.");
     }
 }

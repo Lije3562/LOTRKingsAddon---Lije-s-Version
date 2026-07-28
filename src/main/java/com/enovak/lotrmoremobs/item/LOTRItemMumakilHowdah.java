@@ -1,7 +1,5 @@
 package com.enovak.lotrmoremobs.item;
 
-import com.enovak.lotrmoremobs.Main;
-import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
@@ -18,24 +16,10 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
 
     @Override
     public boolean itemInteractionForEntity(ItemStack stack, EntityPlayer player, EntityLivingBase target) {
-        if (!this.isMumakil(target)) {
-            return false;
-        }
-
-        LOTREntityMumakil mumakil = this.asMumakil(target);
-        if (!mumakil.hasMumakilSaddleEquipped() || this.hasWarEquipmentStack(mumakil)) {
-            return false;
-        }
-
-        if (mumakil.worldObj.isRemote) {
-            return true;
-        }
-
-        this.equipWarEquipmentSlot(mumakil, new ItemStack(Main.mumakilHowdah));
-        mumakil.setMumakilHowdahEquipped(true);
-        this.consumeOne(stack, player);
-        player.swingItem();
-
-        return true;
+        /*
+         * Player equipment is inventory-only. Entity interaction owns normal
+         * mounting and shift-right-click inventory access.
+         */
+        return false;
     }
 }

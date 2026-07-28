@@ -2,33 +2,24 @@ package com.enovak.lotrmoremobs.hiring;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
-import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
-import java.lang.reflect.Field;
+import com.enovak.lotrmoremobs.entity.animal.MumakilFormationOrigin;
+import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHirePreviewDriver;
+import com.enovak.lotrmoremobs.handler.MumakilAchievementEventHandler;
+import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
 import java.lang.reflect.Method;
+import lotr.common.entity.npc.LOTREntityNPC;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
 import lotr.common.entity.npc.LOTRUnitTradeEntry;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
-import net.minecraft.init.Items;
-import net.minecraft.inventory.IInventory;
-import net.minecraft.item.ItemStack;
 import net.minecraft.world.World;
 
 public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
-    public static final int MUMAKIL_HIRE_COST = 500;
-    public static final float MUMAKIL_ALIGNMENT_REQUIRED = 3000.0F;
+    public static final int MUMAKIL_HIRE_COST = 1000;
+    public static final float MUMAKIL_ALIGNMENT_REQUIRED = 2000.0F;
 
-    private static final int SADDLE_SLOT = 0;
-    private static final int HOWDAH_SLOT = 1;
     private static final float HIRE_GUI_DISPLAY_WIDTH = 14.0F;
     private static final float HIRE_GUI_DISPLAY_HEIGHT = 30.0F;
-
-    private static final String[] INVENTORY_FIELDS = new String[] {
-            "horseChest",
-            "mountInventory",
-            "horseInventory",
-            "inventory"
-    };
 
     public LOTRUnitTradeEntryMumakil() {
         super(
@@ -39,28 +30,51 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
                 MUMAKIL_ALIGNMENT_REQUIRED
         );
         this.setMountArmor(Main.mumakilHowdah, 1.0F);
-        this.setExtraInfo("Requires 3000 Near Harad alignment. Includes a saddle and howdah.");
+        this.setPledgeExclusive();
+        this.setExtraInfo("Mumakil_Howdah");
     }
 
     @Override
-    public String getUnitTradeName() {
-        return "Mumakil with Howdah";
+    public LOTREntityNPC getOrCreateHiredNPC(World world) {
+        if (!world.isRemote) {
+            return super.getOrCreateHiredNPC(world);
+        }
+
+        LOTREntityMumakilHirePreviewDriver driver = new LOTREntityMumakilHirePreviewDriver(world);
+        driver.initCreatureForHire(null);
+        driver.refreshCurrentAttackMode();
+        driver.setCurrentItemOrArmor(0, null);
+        return driver;
     }
 
     @Override
     public EntityLiving createHiredMount(World world) {
         LOTREntityMumakil mumakil = new LOTREntityMumakil(world);
         mumakil.onSpawnWithEgg(null);
-        mumakil.setBelongsToNPC(true);
-        mumakil.setHiredWarMumakil(true);
-        mumakil.setMountable(true);
+        if (!MumakilWarFormationFactory.initializeMount(
+                mumakil,
+                MumakilFormationOrigin.PLAYER_HIRED
+        )) {
+            System.out.println(
+                    "[LOTRMoreMobs] Could not fully equip player-hired Mumak."
+            );
+        }
 
         if (world.isRemote) {
             this.applyHireGuiDisplayScale(mumakil);
+            mumakil.setMumakilHowdahPreviewEquipped(true);
+        } else {
+            /*
+             * The mount created by this server-side native trade path is the
+             * only formation eligible for the hiring achievement. The event
+             * handler waits until the paid driver and all seventeen archers
+             * exist, so failed transactions and old loaded formations cannot
+             * award it.
+             */
+            MumakilAchievementEventHandler
+                    .markHiringAchievementPending(mumakil);
         }
 
-        this.equipMumakilForHire(mumakil);
-        MumakilHowdahArcherEventHandler.markHiredHowdahArcherCarrier(mumakil);
         return mumakil;
     }
 
@@ -101,54 +115,4 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         return null;
     }
 
-    private void equipMumakilForHire(LOTREntityMumakil mumakil) {
-        mumakil.saddleMountForWorldGen();
-        this.setInventoryStack(mumakil, SADDLE_SLOT, new ItemStack(Items.saddle));
-        this.setInventoryStack(mumakil, HOWDAH_SLOT, new ItemStack(Main.mumakilHowdah));
-        mumakil.setMumakilHowdahEquipped(true);
-    }
-
-    private boolean setInventoryStack(LOTREntityMumakil mumakil, int slot, ItemStack stack) {
-        IInventory inventory = this.findMountInventory(mumakil);
-        if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
-            System.out.println("[LOTRMoreMobs] Could not equip hired Mumakil inventory slot " + slot);
-            return false;
-        }
-
-        inventory.setInventorySlotContents(slot, stack);
-        inventory.markDirty();
-        return true;
-    }
-
-    private IInventory findMountInventory(LOTREntityMumakil mumakil) {
-        for (int i = 0; i < INVENTORY_FIELDS.length; ++i) {
-            Field field = this.findField(mumakil.getClass(), INVENTORY_FIELDS[i]);
-            if (field != null) {
-                try {
-                    Object value = field.get(mumakil);
-                    if (value instanceof IInventory) {
-                        return (IInventory)value;
-                    }
-                } catch (Exception e) {
-                }
-            }
-        }
-        return null;
-    }
-
-    private Field findField(Class type, String name) {
-        Class current = type;
-        while (current != null && current != Object.class) {
-            try {
-                Field field = current.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException e) {
-                current = current.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-        return null;
-    }
 }

@@ -1,5 +1,23 @@
 item.atalcare.name=Atalcarë
-item.mumakil_tusk.name=Mumakil Tusk
-item.mumakil_shank.name=Mumakil Shank
-item.mumakil_howdah.name=Mumakil Howdah
-entity.Mumakil.name=Mumakil
+item.mumakil_tusk.name=Mumak Tusk
+item.mumakil_shank.name=Mumak Shank
+item.mumakil_howdah.name=Mumak Howdah
+entity.Mumakil.name=Mumak
+entity.lotr.Mumakil.name=Mumak
+item.cooked_mumakil_shank.name=Cooked Mumak Shank
+item.mumakil_calf_spawn_egg.name=Spawn Mumak Calf
+item.mumakil_howdah_spawn_egg.name=Mumak with Howdah Spawn Egg
+lotr.unit.Mumakil_Howdah=Mumak with Howdah
+lotr.unitinfo.Mumakil_Howdah=Requires a Near Harad pledge and 2000 alignment. Includes a saddle and howdah.
+# MUMAK_SINGULAR_DISPLAY_NAMES_V1_1
+lotr.achievement.lotrmoremobsBreedMumakCalf.title=Grey as a mouse, big as a house
+lotr.achievement.lotrmoremobsBreedMumakCalf.desc=Breed your first Mumak calf.
+lotr.achievement.lotrmoremobsSlayMumak.title=Bring Down the Beast
+lotr.achievement.lotrmoremobsSlayMumak.desc=Slay a Mumak.
+lotr.achievement.lotrmoremobsHireMumakHowdah.title=Master of the Great Beasts
+lotr.achievement.lotrmoremobsHireMumakHowdah.desc=Hire a Mumak equipped with a Howdah.
+lotr.achievement.lotrmoremobsTravelMumak.title=Across the Haradwaith
+lotr.achievement.lotrmoremobsTravelMumak.desc=Travel 5,000 blocks on a Mumak.
+gui.lotrmoremobs.unitTrade.pledgeTo=Pledge to %s
+gui.lotrmoremobs.unitTrade.pledged=Pledged
+chat.lotrmoremobs.mumak.ownerOnly=Only this Mumak's owner can access its equipment.

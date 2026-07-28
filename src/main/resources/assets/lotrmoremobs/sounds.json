@@ -29,10 +29,22 @@
       "lotrmoremobs:mumakil/trumpet"
     ]
   },
+  "mumakil.calftrumpet": {
+    "category": "neutral",
+    "sounds": [
+      "lotrmoremobs:mumakil/calftrumpet"
+    ]
+  },
   "mumakil.angry": {
     "category": "hostile",
     "sounds": [
       "lotrmoremobs:mumakil/angry"
+    ]
+  },
+  "haradrim_war_horn": {
+    "category": "neutral",
+    "sounds": [
+      "lotrmoremobs:harad_warhorn/haradrim_war_horn"
     ]
   }
 }

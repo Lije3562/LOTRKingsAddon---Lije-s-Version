@@ -12,15 +12,21 @@ import java.io.Reader;
 import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Comparator;
+import java.util.HashMap;
+import java.util.IdentityHashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import net.geckominecraft.client.renderer.GlStateManager;
 import net.minecraft.client.Minecraft;
+import net.minecraft.client.resources.IResourceManager;
+import net.minecraft.client.resources.IResourceManagerReloadListener;
+import net.minecraft.client.resources.IReloadableResourceManager;
 import net.minecraft.client.resources.IResource;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.ResourceLocation;
 import org.apache.commons.lang3.tuple.Pair;
 import software.bernie.geckolib3.core.event.predicate.AnimationEvent;
@@ -37,7 +43,10 @@ import org.lwjgl.opengl.GL11;
  * Keep LOTRRenderMumakil available as the stable RenderLiving/ModelBase fallback while this branch tests
  * whether the original Geo model fixes the UV bleed at the root.
  */
-public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
+public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil>
+        implements IResourceManagerReloadListener {
+    private static final float BABY_PANIC_ANIMATION_MULTIPLIER = 1.0F;
+    // SLOW_PANIC_AND_PLAYER_RIDDEN_LOCOMOTION_V1 / QUARTER_SPEED_RIDDEN_PANIC_AND_STRICT_TREE_BLOCKS_V2
 
     private static final String[] SADDLE_BONES = new String[] {
             "saddle",
@@ -98,22 +107,14 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     private static boolean loggedTextureFallback;
     private static boolean loggedBeforeGeoRender;
 
-    private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V12_5_SILENT_TAIL_FLIP_2026_06_28";
+    private static final String RENDERER_BUILD_TAG = "BLOCKBENCH_MULTI_ANIMATION_JSON_V12_6_STRIKE_ISOLATION_2026_07_23"; // MUMAKIL_STRIKE_RENDER_ISOLATION_V2_1
     private static final boolean DEBUG_LOGS = false;
     private static final boolean USE_BLOCKBENCH_TRUMPET = true;
     private static final boolean USE_BLOCKBENCH_EAR_FLAP = true;
     private static final boolean USE_BLOCKBENCH_TAIL_FLIP = true;
     private static final boolean USE_BLOCKBENCH_STRIKES = true;
 
-    /*
-     * Verification mode:
-     * true = trumpet plays every 320 ticks so you can immediately confirm this renderer is active.
-     * false = restore the rarer chance-based event after the Blockbench path is confirmed.
-     */
-    private static final boolean DEBUG_FORCE_BLOCKBENCH_TRUMPET_EVERY_CYCLE = false;
-
-    private static final float BLOCKBENCH_TRUMPET_FALLBACK_LENGTH_SECONDS = 4.25F;
-    private static final int BLOCKBENCH_TRUMPET_DURATION_TICKS = 53;
+    private static final float BLOCKBENCH_TRUMPET_FALLBACK_LENGTH_SECONDS = 2.625F;
     private static final int BLOCKBENCH_EAR_FLAP_DURATION_TICKS = 45;
     private static final int BLOCKBENCH_TAIL_FLIP_DURATION_TICKS = 40;
     private static final int BLOCKBENCH_STRIKE_DURATION_TICKS = 36;
@@ -122,8 +123,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
      * Random ambient animation cadence.
      * These are deterministic per entity, but visually random in-game.
      */
-    private static final int AMBIENT_TRUMPET_INTERVAL_TICKS = 360;
-    private static final int AMBIENT_TRUMPET_CHANCE_MODULO = 4;
     private static final int AMBIENT_EAR_FLAP_INTERVAL_TICKS = 180;
     private static final int AMBIENT_EAR_FLAP_CHANCE_MODULO = 2;
     private static final int AMBIENT_TAIL_FLIP_INTERVAL_TICKS = 140;
@@ -145,28 +144,28 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             "animations/entity/mumakil/mumakil.animations.json"
     );
 
-    /*
-     * V9 sound event names. These are registered in assets/lotrmoremobs/sounds.json.
-     * Strike, step, angry, and death sounds are best played from LOTREntityMumakil.
-     */
-    private static final String SOUND_MUMAKIL_TRUMPET = "lotrmoremobs:mumakil.trumpet";
-    private static final String SOUND_MUMAKIL_EARS = "lotrmoremobs:mumakil.ears";
-
     private static boolean loggedRendererBuild;
     private static boolean loggedBlockbenchTrumpetApplied;
     private static boolean loggedBlockbenchEarFlapApplied;
     private static boolean loggedBlockbenchTailFlipApplied;
     private static boolean loggedBlockbenchStrikeApplied;
 
-    private final Map<Integer, Integer> lastTrumpetSoundCycleByEntity = new LinkedHashMap<Integer, Integer>();
-    private final Map<Integer, Integer> lastEarSoundCycleByEntity = new LinkedHashMap<Integer, Integer>();
-    private final Map<Integer, Boolean> trumpetSoundActiveByEntity = new LinkedHashMap<Integer, Boolean>();
-    private final Map<Integer, Boolean> earSoundActiveByEntity = new LinkedHashMap<Integer, Boolean>();
-
     private static boolean attemptedLoadBlockbenchAnimationFile;
     private static Map<String, BlockbenchAnimation> loadedBlockbenchAnimations;
     private static boolean attemptedLoadBlockbenchTrumpetAnimation;
     private static BlockbenchAnimation loadedBlockbenchTrumpetAnimation;
+
+    /*
+     * Geo models are immutable after GeckoLib builds them, but their bones are
+     * reused and mutable. Cache identity-based lookups for the lifetime of the
+     * resource set, then clear them on a resource reload.
+     */
+    private final Map<ResourceLocation, Boolean> resourceAvailability =
+            new HashMap<ResourceLocation, Boolean>();
+    private final Map<GeoModel, Map<String, GeoBone>> bonesByModel =
+            new IdentityHashMap<GeoModel, Map<String, GeoBone>>();
+    private final Map<GeoBone, List<GeoBone>> childrenByBone =
+            new IdentityHashMap<GeoBone, List<GeoBone>>();
 
     private static final float[][] BB_TRUMPET_BODY_SWAY = new float[][] {
             {0.0000F, 0.0000F, 0.0000F, 0.0000F},
@@ -276,10 +275,28 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         super(new LOTRGeoModelMumakil());
         this.shadowSize = 5.0F;
 
+        IResourceManager resourceManager =
+                Minecraft.getMinecraft().getResourceManager();
+        if (resourceManager instanceof IReloadableResourceManager) {
+            ((IReloadableResourceManager)resourceManager)
+                    .registerReloadListener(this);
+        }
+
         if (DEBUG_LOGS && !loggedRendererBuild) {
             loggedRendererBuild = true;
             System.out.println("[LOTRMoreMobs] Mumakil Geo renderer build loaded: " + RENDERER_BUILD_TAG);
         }
+    }
+
+    @Override
+    public void onResourceManagerReload(IResourceManager resourceManager) {
+        this.resourceAvailability.clear();
+        this.bonesByModel.clear();
+        this.childrenByBone.clear();
+        attemptedLoadBlockbenchAnimationFile = false;
+        loadedBlockbenchAnimations = null;
+        attemptedLoadBlockbenchTrumpetAnimation = false;
+        loadedBlockbenchTrumpetAnimation = null;
     }
 
     /**
@@ -321,6 +338,8 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         if (entity.isInvisible()) {
             return;
         }
+
+        this.shadowSize = 5.0F * entity.getMumakilRenderScale();
 
         boolean renderSaddle = LOTRGeoModelMumakil.shouldRenderSaddle(entity);
         boolean renderHowdahOrWarEquipment = LOTRGeoModelMumakil.shouldRenderHowdahOrWarEquipment(entity);
@@ -371,11 +390,27 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             if (!isSitting && entity.isEntityAlive()) {
                 limbSwingAmount = entity.prevLimbSwingAmount
                         + (entity.limbSwingAmount - entity.prevLimbSwingAmount) * partialTicks;
-                limbSwing = entity.limbSwing - entity.limbSwingAmount * (1.0F - partialTicks);
+                boolean playerRidden =
+                        entity.riddenByEntity instanceof EntityPlayer;
+                limbSwing = playerRidden
+                        ? entity.getPlayerRiddenLocomotionPhase(partialTicks)
+                        : entity.limbSwing
+                        - entity.limbSwingAmount * (1.0F - partialTicks);
 
                 if (entity.isChild()) {
                     limbSwing *= 3.0F;
                 }
+
+                /*
+                 * The entity owns a continuously accumulated half-rate phase
+                 * for player riding. Interpolating that phase here avoids the
+                 * discontinuities caused by scaling the absolute native
+                 * limbSwing value on individual frames. Swing amplitude and
+                 * actual movement remain native.
+                 */
+                 if (entity.isBabyPanicAnimationActive()) {
+                     limbSwing *= BABY_PANIC_ANIMATION_MULTIPLIER;
+                 }
 
                 if (limbSwingAmount > 1.0F) {
                     limbSwingAmount = 1.0F;
@@ -398,6 +433,11 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
 
             GlStateManager.pushMatrix();
             try {
+                // Babies reuse the exact adult Geo model, texture, equipment bones, and animations.
+                // Scale before the model offset so the complete rendered body stays proportionally aligned.
+                float mumakilRenderScale = entity.getMumakilRenderScale();
+                GL11.glScalef(mumakilRenderScale, mumakilRenderScale, mumakilRenderScale);
+
                 // Move the visible Geo model relative to the entity hitbox.
                 // This does NOT change the real hitbox.
                 GlStateManager.translate(0.0F, 0.0F, 3.5F);
@@ -449,7 +489,11 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
                 Minecraft.getMinecraft().renderEngine.bindTexture(textureLocation);
                 this.renderMumakilHurtOverlay(geoModel, entity, partialTicks);
             } finally {
-                GlStateManager.popMatrix();
+                /*
+                 * Leave the cached GeoModel neutral for any subsequent
+                 * renderer path or Mumakil render in this frame.
+                 */
+                this.resetMumakilStrikeBoneState(geoModel);                GlStateManager.popMatrix();
             }
         } finally {
             GlStateManager.popMatrix();
@@ -529,17 +573,17 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         boolean shouldLogThisPass = DEBUG_LOGS && logWarBones && !loggedWarBoneVisibilityStates[visible ? 1 : 0];
 
         for (int i = 0; i < boneNames.length; ++i) {
-            Optional<GeoBone> bone = geoModel.getBone(boneNames[i]);
+            GeoBone bone = this.getCachedBone(geoModel, boneNames[i]);
 
             if (shouldLogThisPass) {
                 System.out.println("[LOTRMoreMobs] Mumakil Geo war bone visibility: bone="
                         + boneNames[i]
-                        + " found=" + bone.isPresent()
+                        + " found=" + (bone != null)
                         + " requestedVisible=" + visible);
             }
 
-            if (bone.isPresent()) {
-                this.setBoneTreeVisibility(bone.get(), hidden);
+            if (bone != null) {
+                this.setBoneTreeVisibility(bone, hidden);
             }
         }
 
@@ -556,79 +600,91 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         geoBone.setHidden(hidden, false);
         geoBone.setCubesHidden(hidden);
 
-        for (GeoBone childBone : this.getChildBonesSafe(geoBone)) {
+        for (GeoBone childBone : this.getCachedChildBones(geoBone)) {
             this.setBoneTreeVisibility(childBone, hidden);
         }
     }
 
-    private java.util.List<GeoBone> getChildBonesSafe(GeoBone geoBone) {
-        java.util.List<GeoBone> children = new java.util.ArrayList<GeoBone>();
-
-        try {
-            java.lang.reflect.Method method = geoBone.getClass().getMethod("getChildBones");
-            Object value = method.invoke(geoBone);
-            this.collectGeoBones(value, children);
-        } catch (Exception e) {
+    private List<GeoBone> getCachedChildBones(GeoBone geoBone) {
+        List<GeoBone> cached = this.childrenByBone.get(geoBone);
+        if (cached != null) {
+            return cached;
         }
 
-        if (!children.isEmpty()) {
-            return children;
+        List<GeoBone> children = geoBone.childBones;
+        if (children == null || children.isEmpty()) {
+            cached = Collections.emptyList();
+        } else {
+            cached = Collections.unmodifiableList(
+                    new ArrayList<GeoBone>(children)
+            );
         }
 
-        String[] childFieldNames = new String[] {
-                "childBones",
-                "children",
-                "childBoneList"
-        };
-
-        for (int i = 0; i < childFieldNames.length; ++i) {
-            try {
-                java.lang.reflect.Field field = geoBone.getClass().getDeclaredField(childFieldNames[i]);
-                field.setAccessible(true);
-                Object value = field.get(geoBone);
-                this.collectGeoBones(value, children);
-            } catch (Exception e) {
-            }
-        }
-
-        return children;
+        this.childrenByBone.put(geoBone, cached);
+        return cached;
     }
 
-    private void collectGeoBones(Object value, java.util.List<GeoBone> children) {
-        if (value == null) {
-            return;
-        }
-
-        if (value instanceof GeoBone) {
-            children.add((GeoBone)value);
-            return;
-        }
-
-        if (value instanceof java.util.Collection) {
-            java.util.Collection collection = (java.util.Collection)value;
-            for (Object object : collection) {
-                if (object instanceof GeoBone) {
-                    children.add((GeoBone)object);
-                }
-            }
-            return;
-        }
-
-        if (value instanceof java.util.Map) {
-            java.util.Map map = (java.util.Map)value;
-            for (Object object : map.values()) {
-                if (object instanceof GeoBone) {
-                    children.add((GeoBone)object);
-                }
-            }
-        }
+    /**
+     * MUMAKIL_STRIKE_RENDER_ISOLATION_V2_1
+     *
+     * GeckoLib caches and reuses the loaded GeoModel and its mutable
+     * GeoBone objects. A strike sampled for one Mumakil can therefore leave
+     * rotations behind for the next Mumakil rendered with that model.
+     *
+     * Clear every bone authored by either strike animation. This explicitly
+     * includes the root "body" bone, which the normal idle/walk pose does not
+     * otherwise overwrite.
+     */
+    private void resetMumakilStrikeBoneState(GeoModel geoModel) {
+        this.resetBlockbenchAnimationBonesToDefault(
+                geoModel,
+                this.getBlockbenchAnimation(
+                        BLOCKBENCH_STRIKE_LEFT_ANIMATION_NAME
+                )
+        );
+        this.resetBlockbenchAnimationBonesToDefault(
+                geoModel,
+                this.getBlockbenchAnimation(
+                        BLOCKBENCH_STRIKE_RIGHT_ANIMATION_NAME
+                )
+        );
     }
 
+    private void resetBlockbenchAnimationBonesToDefault(
+            GeoModel geoModel,
+            BlockbenchAnimation animation
+    ) {
+        if (geoModel == null
+                || animation == null
+                || animation.boneRotationKeyframes == null) {
+            return;
+        }
+
+        for (String boneName
+                : animation.boneRotationKeyframes.keySet()) {
+            this.setBoneRotation(
+                    geoModel,
+                    boneName,
+                    degreesToRadians(
+                            this.getDefaultBlockbenchBaseXDegrees(
+                                    boneName
+                            )
+                    ),
+                    0.0F,
+                    0.0F
+            );
+        }
+    }
     private void applyMumakilBoneAnimations(GeoModel geoModel, LOTREntityMumakil entity, float limbSwing, float limbSwingAmount, float ageInTicks, float partialTicks) {
         if (geoModel == null || entity == null) {
             return;
         }
 
+        /*
+         * Clear any strike pose left by the Mumakil rendered immediately
+         * before this one.
+         */
+        this.resetMumakilStrikeBoneState(geoModel);
         float moveAmount = clamp(limbSwingAmount, 0.0F, 1.0F);
         float idleAmount = 1.0F - moveAmount * 0.45F;
 
@@ -654,13 +710,10 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
          * This deliberately does NOT use the old Java trumpet math. During the active trumpet window,
          * body_sway, upper_back, head, ears, and trunk bones are set from the Blockbench keyframes only.
          */
-        float trumpetProgress = DEBUG_FORCE_BLOCKBENCH_TRUMPET_EVERY_CYCLE
-                ? getOccasionalProgress(entity, ageInTicks, AMBIENT_TRUMPET_INTERVAL_TICKS, BLOCKBENCH_TRUMPET_DURATION_TICKS, 1, 37)
-                : getOccasionalProgress(entity, ageInTicks,
-                AMBIENT_TRUMPET_INTERVAL_TICKS,
-                BLOCKBENCH_TRUMPET_DURATION_TICKS,
-                AMBIENT_TRUMPET_CHANCE_MODULO,
-                37);
+        float trumpetProgress =
+                entity.getMumakilTrumpetAnimationProgress(
+                        partialTicks
+                );
         boolean blockbenchTrumpetActive = USE_BLOCKBENCH_TRUMPET
                 && trumpetProgress >= 0.0F
                 && this.getBlockbenchAnimation(BLOCKBENCH_TRUMPET_ANIMATION_NAME) != null;
@@ -682,13 +735,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         boolean blockbenchStrikeActive = USE_BLOCKBENCH_STRIKES
                 && strikeProgress > 0.0F
                 && this.getBlockbenchAnimation(strikeAnimationName) != null;
-
-        this.playAmbientSoundOnStart(this.trumpetSoundActiveByEntity, entity, blockbenchTrumpetActive,
-                SOUND_MUMAKIL_TRUMPET, 2.2F, 0.92F, 0.12F);
-
-        this.playAmbientSoundOnStart(this.earSoundActiveByEntity, entity, blockbenchEarFlapActive,
-                SOUND_MUMAKIL_EARS, 1.85F, 0.78F, 0.08F);
-
 
         /*
          * Body/head/ear/trunk idle and walk motion.
@@ -842,108 +888,6 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
         }
     }
 
-    private void playAmbientSoundOnStart(Map<Integer, Boolean> activeByEntity, LOTREntityMumakil entity, boolean active,
-                                         String soundName, float volume, float basePitch, float pitchRange) {
-        if (activeByEntity == null || entity == null || soundName == null) {
-            return;
-        }
-
-        int entityId = entity.getEntityId();
-        Boolean wasActive = activeByEntity.get(Integer.valueOf(entityId));
-
-        if (active) {
-            if (!Boolean.TRUE.equals(wasActive)) {
-                activeByEntity.put(Integer.valueOf(entityId), Boolean.TRUE);
-                this.playEntitySound(entity, soundName, volume, basePitch, pitchRange);
-            }
-        } else if (wasActive != null) {
-            activeByEntity.remove(Integer.valueOf(entityId));
-        }
-    }
-
-    private void playWindowSoundOnce(Map<Integer, Integer> playedCyclesByEntity, LOTREntityMumakil entity, float ageInTicks,
-                                     int intervalTicks, String soundName, float volume, float basePitch, float pitchRange) {
-        if (playedCyclesByEntity == null || entity == null || soundName == null || intervalTicks <= 0) {
-            return;
-        }
-
-        int tick = (int)ageInTicks;
-        int cycle = tick / intervalTicks;
-        int entityId = entity.getEntityId();
-
-        Integer lastCycle = playedCyclesByEntity.get(Integer.valueOf(entityId));
-        if (lastCycle != null && lastCycle.intValue() == cycle) {
-            return;
-        }
-
-        playedCyclesByEntity.put(Integer.valueOf(entityId), Integer.valueOf(cycle));
-        this.playEntitySound(entity, soundName, volume, basePitch, pitchRange);
-    }
-
-    private void playEntitySound(LOTREntityMumakil entity, String soundName, float volume, float basePitch, float pitchRange) {
-        if (entity == null || soundName == null) {
-            return;
-        }
-
-        float randomOffset = 0.0F;
-        try {
-            randomOffset = (entity.getRNG().nextFloat() - entity.getRNG().nextFloat()) * pitchRange;
-        } catch (Exception e) {
-        }
-
-        float pitch = basePitch + randomOffset;
-
-        /*
-         * Renderer-triggered ambient events are client-side only. In 1.7.10, calling
-         * Entity#playSound from the renderer can be swallowed depending on the side/world,
-         * so play directly into the active client World and log the attempt.
-         */
-        try {
-            if (Minecraft.getMinecraft() != null && Minecraft.getMinecraft().theWorld != null) {
-                Minecraft.getMinecraft().theWorld.playSound(
-                        entity.posX,
-                        entity.posY + (double)(entity.height * 0.5F),
-                        entity.posZ,
-                        soundName,
-                        volume,
-                        pitch,
-                        false
-                );
-                if (DEBUG_LOGS) {
-                    System.out.println("[LOTRMoreMobs] Playing Mumakil client animation sound: sound="
-                            + soundName
-                            + " volume=" + volume
-                            + " pitch=" + pitch
-                            + " build=" + RENDERER_BUILD_TAG);
-                }
-                return;
-            }
-        } catch (Exception e) {
-            if (DEBUG_LOGS) {
-                System.out.println("[LOTRMoreMobs] Client World#playSound failed for Mumakil sound "
-                        + soundName
-                        + ": " + e);
-            }
-        }
-
-        try {
-            entity.playSound(soundName, volume, pitch);
-            if (DEBUG_LOGS) {
-                System.out.println("[LOTRMoreMobs] Playing Mumakil fallback entity sound: sound="
-                        + soundName
-                        + " volume=" + volume
-                        + " pitch=" + pitch
-                        + " build=" + RENDERER_BUILD_TAG);
-            }
-        } catch (Exception e) {
-            if (DEBUG_LOGS) {
-                System.out.println("[LOTRMoreMobs] Entity#playSound failed for Mumakil sound "
-                        + soundName
-                        + ": " + e);
-            }
-        }
-    }
-
     private void applyJsonBlockbenchTrumpetAnimation(GeoModel geoModel, float progress) {
         BlockbenchAnimation animation = this.getBlockbenchTrumpetAnimation();
         if (animation == null) {
@@ -1020,69 +964,22 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
             return 0.0F;
         }
 
-        /*
-         * Preferred path: LOTREntityMumakil can provide a synced attack-animation timer.
-         * This lets strike_left / strike_right fire exactly when the Mumakil attacks a mob.
-         */
-        Float entityProgress = this.getEntityProvidedMumakilStrikeProgress(entity, partialTicks);
-        if (entityProgress != null && entityProgress.floatValue() > 0.0F) {
-            return clamp(entityProgress.floatValue(), 0.0F, 1.0F);
-        }
-
-        /*
-         * Fallback path: if the entity attack code calls swingItem(), vanilla swing progress can still drive strikes.
-         */
-        try {
-            return clamp(entity.getSwingProgress(partialTicks), 0.0F, 1.0F);
-        } catch (Exception e) {
-            return 0.0F;
-        }
+        return clamp(
+                entity.getMumakilStrikeAnimationProgress(partialTicks),
+                0.0F,
+                1.0F
+        );
     }
 
     private boolean shouldUseLeftStrike(LOTREntityMumakil entity, float ageInTicks, float strikeProgress) {
-        Boolean entitySide = this.getEntityProvidedMumakilStrikeLeft(entity);
-        if (entitySide != null && strikeProgress > 0.0F) {
-            return entitySide.booleanValue();
+        if (entity != null && strikeProgress > 0.0F) {
+            return entity.isMumakilStrikeAnimationLeft();
         }
 
         int entityId = entity == null ? 0 : entity.getEntityId();
         int estimatedStartTick = (int)(ageInTicks - strikeProgress * (float)BLOCKBENCH_STRIKE_DURATION_TICKS);
         int strikeIndex = estimatedStartTick / BLOCKBENCH_STRIKE_DURATION_TICKS;
         return positiveModulo(entityId + strikeIndex, 2) == 0;
-    }
-
-    private Float getEntityProvidedMumakilStrikeProgress(LOTREntityMumakil entity, float partialTicks) {
-        if (entity == null) {
-            return null;
-        }
-
-        try {
-            java.lang.reflect.Method method = entity.getClass().getMethod("getMumakilStrikeAnimationProgress", Float.TYPE);
-            Object value = method.invoke(entity, Float.valueOf(partialTicks));
-            if (value instanceof Number) {
-                return Float.valueOf(((Number)value).floatValue());
-            }
-        } catch (Exception e) {
-        }
-
-        return null;
-    }
-
-    private Boolean getEntityProvidedMumakilStrikeLeft(LOTREntityMumakil entity) {
-        if (entity == null) {
-            return null;
-        }
-
-        try {
-            java.lang.reflect.Method method = entity.getClass().getMethod("isMumakilStrikeAnimationLeft");
-            Object value = method.invoke(entity);
-            if (value instanceof Boolean) {
-                return (Boolean)value;
-            }
-        } catch (Exception e) {
-        }
-
-        return null;
     }
 
     private void setBlockbenchJsonRotation(GeoModel geoModel, BlockbenchAnimation animation, String boneName, float timeSeconds,
@@ -1416,41 +1313,35 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     private void setBoneRotation(GeoModel geoModel, String boneName, float rotationX, float rotationY, float rotationZ) {
-        Optional<GeoBone> bone = geoModel.getBone(boneName);
-        if (!bone.isPresent()) {
+        GeoBone geoBone = this.getCachedBone(geoModel, boneName);
+        if (geoBone == null) {
             return;
         }
 
-        GeoBone geoBone = bone.get();
-        this.setGeoBoneFloat(geoBone, "RotationX", "rotationX", rotationX);
-        this.setGeoBoneFloat(geoBone, "RotationY", "rotationY", rotationY);
-        this.setGeoBoneFloat(geoBone, "RotationZ", "rotationZ", rotationZ);
+        geoBone.setRotationX(rotationX);
+        geoBone.setRotationY(rotationY);
+        geoBone.setRotationZ(rotationZ);
     }
 
-
-    private void setGeoBoneFloat(GeoBone geoBone, String setterSuffix, String fieldName, float value) {
-        String setterName = "set" + setterSuffix;
-
-        try {
-            java.lang.reflect.Method method = geoBone.getClass().getMethod(setterName, float.class);
-            method.invoke(geoBone, Float.valueOf(value));
-            return;
-        } catch (Exception e) {
+    private GeoBone getCachedBone(GeoModel geoModel, String boneName) {
+        if (geoModel == null || boneName == null) {
+            return null;
         }
 
-        try {
-            java.lang.reflect.Method method = geoBone.getClass().getMethod(setterName, Float.class);
-            method.invoke(geoBone, Float.valueOf(value));
-            return;
-        } catch (Exception e) {
+        Map<String, GeoBone> modelBones = this.bonesByModel.get(geoModel);
+        if (modelBones == null) {
+            modelBones = new HashMap<String, GeoBone>();
+            this.bonesByModel.put(geoModel, modelBones);
         }
 
-        try {
-            java.lang.reflect.Field field = geoBone.getClass().getDeclaredField(fieldName);
-            field.setAccessible(true);
-            field.set(geoBone, Float.valueOf(value));
-        } catch (Exception e) {
+        if (modelBones.containsKey(boneName)) {
+            return modelBones.get(boneName);
         }
+
+        Optional<GeoBone> resolved = geoModel.getBone(boneName);
+        GeoBone bone = resolved.isPresent() ? resolved.get() : null;
+        modelBones.put(boneName, bone);
+        return bone;
     }
 
     private static float degreesToRadians(float degrees) {
@@ -1609,10 +1500,51 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil> {
     }
 
     private boolean canLoadResource(ResourceLocation resourceLocation) {
-        try {
-            return Minecraft.getMinecraft().getResourceManager().getResource(resourceLocation) != null;
-        } catch (Exception e) {
+        if (resourceLocation == null) {
             return false;
         }
+
+        Boolean cached = this.resourceAvailability.get(resourceLocation);
+        if (cached != null) {
+            return cached.booleanValue();
+        }
+
+        InputStream stream = null;
+        boolean available = false;
+        try {
+            IResource resource = Minecraft.getMinecraft()
+                    .getResourceManager()
+                    .getResource(resourceLocation);
+            if (resource != null) {
+                stream = resource.getInputStream();
+                available = stream != null;
+
+                /*
+                 * SimpleResource owns a separate metadata stream in 1.7.10.
+                 * Asking for any section parses and closes it when present.
+                 */
+                if (resource.hasMetadata()) {
+                    try {
+                        resource.getMetadata("texture");
+                    } catch (Exception ignored) {
+                    }
+                }
+            }
+        } catch (Exception e) {
+            available = false;
+        } finally {
+            if (stream != null) {
+                try {
+                    stream.close();
+                } catch (Exception ignored) {
+                }
+            }
+        }
+
+        this.resourceAvailability.put(
+                resourceLocation,
+                Boolean.valueOf(available)
+        );
+        return available;
     }
 }

@@ -1,13 +1,23 @@
 package com.enovak.lotrmoremobs;
 
+import net.minecraft.item.ItemStack;
+import com.enovak.lotrmoremobs.trade.MumakilItemTradeInjector; // MUMAKIL_SHANK_SYSTEM_V1_1
+import com.enovak.lotrmoremobs.achievement.MumakilAchievements;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
+import com.enovak.lotrmoremobs.recipe.MumakilHowdahRecipeRegistry; // MUMAKIL_NEAR_HARAD_HOWDAH_RECIPE_V1_1
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.hiring.MumakilUnitTradeInjector;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
+import com.enovak.lotrmoremobs.item.LOTRItemMumakilCalfSpawnEgg; // MUMAKIL_CALF_SPAWN_EGG_V1
+import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdahSpawnEgg;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
 import com.enovak.lotrmoremobs.materials.AddonMaterial;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
+import com.enovak.lotrmoremobs.spawning.MumakilNaturalSpawnRegistry;
+import com.enovak.lotrmoremobs.spawning.MumakilWarFormationSpawnRegistry;
+import com.enovak.lotrmoremobs.spawning.MumakilInvasionFormationRegistry;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.Mod.EventHandler;
 import cpw.mods.fml.common.SidedProxy;
@@ -43,10 +53,14 @@ public class Main {
     public static Item helmOfIsengard;
     public static Item mumakilTusk;
     public static Item mumakilShank;
+    public static Item mumakilCookedShank;
     public static Item mumakilHowdah;
+    public static Item mumakilCalfSpawnEgg;
+    public static Item mumakilHowdahSpawnEgg;
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
+        MumakilConfig.load(event.getSuggestedConfigurationFile());
         network = NetworkRegistry.INSTANCE.newSimpleChannel("lotrmoremobs");
         network.registerMessage(
                 MumakilOpenGuiPacket.Handler.class,
@@ -66,13 +80,41 @@ public class Main {
         mumakilTusk = new LOTRItemMumakilTusk();
         GameRegistry.registerItem(mumakilTusk, "mumakil_tusk");
 
-        mumakilShank = new LOTRItemMumakilShank();
+        mumakilShank = new LOTRItemMumakilShank(false);
         GameRegistry.registerItem(mumakilShank, "mumakil_shank");
+
+        mumakilCookedShank = new LOTRItemMumakilShank(true);
+        GameRegistry.registerItem(mumakilCookedShank, "cooked_mumakil_shank");
+
+        GameRegistry.addSmelting(
+                mumakilShank,
+                new ItemStack(mumakilCookedShank),
+                0.35F
+        );
 
         mumakilHowdah = new LOTRItemMumakilHowdah();
         GameRegistry.registerItem(mumakilHowdah, "mumakil_howdah");
 
+        /*
+         * MUMAKIL_CALF_SPAWN_EGG_V1
+         * A dedicated custom egg spawns the normal Mumakil entity directly
+         * into its wild-baby lifecycle. No duplicate entity ID is needed.
+         */
+        mumakilCalfSpawnEgg = new LOTRItemMumakilCalfSpawnEgg();
+        GameRegistry.registerItem(
+                mumakilCalfSpawnEgg,
+                "mumakil_calf_spawn_egg"
+        );
+
+        mumakilHowdahSpawnEgg =
+                new LOTRItemMumakilHowdahSpawnEgg();
+        GameRegistry.registerItem(
+                mumakilHowdahSpawnEgg,
+                "mumakil_howdah_spawn_egg"
+        );
+
         MumakilUnitTradeInjector.inject();
+        MumakilItemTradeInjector.inject();
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
                 .setUnlocalizedName("atalcare")
@@ -87,5 +129,13 @@ public class Main {
 
     @EventHandler
     public void postInit(FMLPostInitializationEvent event) {
+        /*
+         * Register after LOTR has populated its faction crafting lists.
+         */
+        MumakilAchievements.register();
+        MumakilHowdahRecipeRegistry.register();
+        MumakilNaturalSpawnRegistry.register(); // MUMAKIL_NATURAL_SPAWNING_V1
+        MumakilWarFormationSpawnRegistry.register();
+        MumakilInvasionFormationRegistry.register();
     }
 }

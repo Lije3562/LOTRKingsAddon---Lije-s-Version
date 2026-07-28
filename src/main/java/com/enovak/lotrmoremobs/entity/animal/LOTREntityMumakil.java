@@ -1,13 +1,17 @@
 package com.enovak.lotrmoremobs.entity.animal;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.achievement.MumakilAchievements;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
+import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
 import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
 import lotr.common.entity.LOTREntityUtils;
+import lotr.common.entity.LOTREntityInvasionSpawner;
 import lotr.common.entity.ai.LOTREntityAIAttackOnCollide;
 import lotr.common.entity.ai.LOTREntityAIHorseFollowHiringPlayer;
 import lotr.common.entity.ai.LOTREntityAIHorseMoveToRiderTarget;
@@ -17,31 +21,38 @@ import lotr.common.fac.LOTRFaction;
 import net.minecraft.block.Block;
 import net.minecraft.command.IEntitySelector;
 import net.minecraft.entity.Entity;
+import net.minecraft.entity.EntityAgeable;
 import net.minecraft.entity.EntityCreature;
-import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.IEntityLivingData;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
+import net.minecraft.entity.ai.attributes.AttributeModifier;
+import net.minecraft.entity.ai.attributes.IAttributeInstance;
 import net.minecraft.entity.ai.EntityAIHurtByTarget;
+import net.minecraft.entity.ai.EntityAIMate;
 import net.minecraft.entity.ai.EntityAINearestAttackableTarget;
+import net.minecraft.entity.ai.EntityAIPanic;
 import net.minecraft.entity.ai.EntityAITasks;
 import net.minecraft.entity.ai.RandomPositionGenerator;
 import net.minecraft.entity.monster.IMob;
+import net.minecraft.entity.item.EntityXPOrb;
 import net.minecraft.entity.passive.EntityAnimal;
 import net.minecraft.entity.passive.EntityHorse;
 import net.minecraft.entity.passive.EntityTameable;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.entity.projectile.EntityArrow;
+import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.nbt.NBTTagCompound;
-import net.minecraft.potion.Potion;
-import net.minecraft.potion.PotionEffect;
 import net.minecraft.pathfinding.PathEntity;
 import net.minecraft.pathfinding.PathPoint;
+import net.minecraft.stats.StatList;
 import net.minecraft.util.AxisAlignedBB;
+import net.minecraft.util.ChatComponentTranslation;
 import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
@@ -49,12 +60,11 @@ import net.minecraft.world.World;
 import software.bernie.geckolib3.core.IAnimatable;
 import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
+import net.minecraft.entity.ai.EntityAIFollowParent;
 
 import java.lang.reflect.Field;
-import java.util.HashMap;
-import java.util.Iterator;
 import java.util.List;
-import java.util.Map;
+import java.util.UUID;
 
 public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
@@ -63,7 +73,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private static final boolean DEBUG_COMBAT_LOGS = false;
+    private static final boolean DEBUG_SKIRMISH_AI = false;
     private static final boolean DEBUG_MUMAKIL_MODE = false;
+    private static final boolean DEBUG_BABY_FAMILY_AI = false; // BABY_FAMILY_AI_DIAGNOSTICS_V1
 
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
 
@@ -71,8 +83,63 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // Base stats
     // ---------------------------------------------------------------------
 
-    private static final double MAX_HEALTH = 1000.0D;
+    private static final double MAX_HEALTH = 3000.0D;
     private static final double MOVEMENT_SPEED = 0.30D;
+    private static final double BABY_MAX_HEALTH = 300.0D;
+    private static final double BABY_MOVEMENT_SPEED = 0.4D;
+    public static final float MIN_SPEED_TRAIT = 0.85F;
+    public static final float NORMAL_SPEED_TRAIT = 1.00F;
+    public static final float MAX_SPEED_TRAIT = 1.15F;
+    private static final double SPEED_TRAIT_MUTATION_STANDARD_DEVIATION =
+            0.015D;
+    private static final double PLAYER_RIDDEN_SPEED_MULTIPLIER = 0.5D; // BABY_INVENTORY_AND_PLAYER_SPEED_FIX_V1
+    private static final UUID PLAYER_RIDDEN_SPEED_MODIFIER_UUID = UUID.fromString("2bf8c4fe-3875-4e51-a285-46c1dfa31488");
+    // Baby behavior: BABY_FOLLOW_AND_PANIC_V1
+    private static final double BABY_PANIC_SPEED = 0.6D;
+    private static final double BABY_FOLLOW_SPEED = 0.4D;
+    private static final double BABY_FOLLOW_RANGE = 32.0D;
+    private static final double BABY_FOLLOW_VERTICAL_RANGE = 8.0D;
+    private static final double BABY_FOLLOW_START_DISTANCE_SQ = 144.0D;
+    private static final double BABY_FOLLOW_STOP_DISTANCE_SQ = 81.0D;
+    private static final double BABY_FOLLOW_MAX_DISTANCE_SQ = 1024.0D;
+    private static final double BABY_FOLLOW_REMEMBERED_MAX_DISTANCE_SQ = 4096.0D;
+    private static final int BABY_FOLLOW_SEARCH_INTERVAL = 5;
+    private static final int BABY_FOLLOW_REPATH_INTERVAL = 10;
+    private static final double ADULT_PATH_SEARCH_RANGE = 32.0D;
+    private static final double BABY_PATH_SEARCH_RANGE = 48.0D;
+    // Baby melon lure: BABY_MELON_LURE_V1 / BABY_MELON_LURE_NEAREST_HOLDER_V2
+    private static final double BABY_MELON_FOLLOW_SPEED = 0.5D;
+    private static final double BABY_MELON_FOLLOW_RANGE = 16.0D;
+    private static final double BABY_MELON_STOP_DISTANCE_SQ = 25.0D;
+    private static final double BABY_MELON_MAX_DISTANCE_SQ = 400.0D;
+    private static final int BABY_MELON_SEARCH_INTERVAL = 10;
+    private static final int BABY_MELON_REPATH_INTERVAL = 10;
+    private static final int BABY_MELON_FED_WINDOW_TICKS = 5 * 60 * 20; // BABY_MELON_FED_WINDOW_V1
+    private static final float TAMED_BABY_MELON_HEAL_AMOUNT = 20.0F; // TAMED_BABY_MELON_HEALING_V1
+    private static final int TAMED_BABY_MELON_HEAL_COOLDOWN_TICKS = 30 * 20;
+    private static final int BABY_GROWTH_TICKS = 30 * 60 * 20;
+    private static final int NATURAL_HERD_FAMILY_CHANCE = 4; // MUMAKIL_NATURAL_SPAWNING_V1
+    private static final int NATURAL_HERD_ADULTS_BEFORE_BABIES = 2;
+    private static final int NATURAL_HERD_MAX_BABIES = 2;
+    private static final double BABY_TAMING_ADULT_PROTECTION_RANGE = 24.0D; // BABY_TAMING_ADULT_PROTECTION_V1 / OCCASIONAL_PLAYER_AGGRESSION_V1
+    private static final double BABY_TAMING_ADULT_PROTECTION_VERTICAL_RANGE = 16.0D;
+
+    private static final float ADULT_WIDTH = 7.0F;
+    private static final float ADULT_HEIGHT = 15.0F;
+    private static final float BABY_RENDER_SCALE = 1.0F / 3.0F;
+    private static final float BABY_WIDTH = 2.333F;
+    private static final float BABY_HEIGHT = 5.0F;
+    private static final int AMBIENT_TRUMPET_INTERVAL_TICKS = 360;
+    private static final int AMBIENT_TRUMPET_CHANCE_MODULO = 4;
+    private static final int MUMAKIL_TRUMPET_ANIMATION_TICKS = 53;
+    /*
+     * At 0.40 seconds (8 ticks), the base trunk has completed roughly 46%
+     * of its 0.875-second raise and every trunk segment has begun moving.
+     */
+    public static final int MUMAKIL_TRUMPET_SOUND_DELAY_TICKS = 8;
+    private static final int AMBIENT_EAR_FLAP_INTERVAL_TICKS = 180;
+    private static final int AMBIENT_EAR_FLAP_CHANCE_MODULO = 2;
+
     private static final double KNOCKBACK_RESISTANCE = 20.0D;
     private static final double ATTACK_DAMAGE = 16.0D;
 
@@ -92,7 +159,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private static final double RIDER_HOWDAH_FORWARD = 9.8D;
     private static final double RIDER_HOWDAH_SIDE = 0.0D;
-    private static final double RIDER_HOWDAH_Y = 16.5D;
+    private static final double RIDER_HOWDAH_Y = 17.0D;
 
     // ---------------------------------------------------------------------
     // Wild movement
@@ -121,9 +188,39 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int ANGER_WAVE_RANDOM_DURATION = 61;
     private static final int ANGER_WAVE_MIN_COOLDOWN = 180;
     private static final int ANGER_WAVE_RANDOM_COOLDOWN = 81;
+    public static final double TERRITORIAL_WARNING_RADIUS = 18.0D;
+    public static final double TERRITORIAL_IMMEDIATE_AGGRESSION_RADIUS =
+            10.0D;
+    public static final double TERRITORIAL_WARNING_CANCEL_RADIUS = 24.0D;
+    public static final int TERRITORIAL_WARNING_DURATION_TICKS = 60;
+    public static final int TERRITORIAL_WARNING_MEMORY_TICKS = 400;
+    private static final int TERRITORIAL_WARNING_MEMORY_SLOTS = 4;
+    public static final double WILD_HERD_EVENT_RADIUS = 30.0D;
+    public static final int WILD_HERD_EVENT_COOLDOWN_TICKS = 200;
+    private static final int WILD_HERD_REGROUP_DURATION_TICKS = 160;
+    private static final int WILD_HERD_REPATH_COOLDOWN_TICKS = 20;
+    private static final double WILD_HERD_ADULT_RING_MIN = 6.0D;
+    private static final double WILD_HERD_ADULT_RING_RANGE = 4.0D;
+    private static final double WILD_HERD_REGROUP_START_DISTANCE = 10.0D;
+    private static final double WILD_HERD_REGROUP_COMPLETE_DISTANCE = 8.0D;
+    private static final double WILD_HERD_REGROUP_START_DISTANCE_SQ =
+            WILD_HERD_REGROUP_START_DISTANCE
+                    * WILD_HERD_REGROUP_START_DISTANCE;
+    private static final double WILD_HERD_REGROUP_COMPLETE_DISTANCE_SQ =
+            WILD_HERD_REGROUP_COMPLETE_DISTANCE
+                    * WILD_HERD_REGROUP_COMPLETE_DISTANCE;
 
     private static final String NBT_HIRED_WAR_MUMAKIL = "lotrmoremobs_hiredWarMumakil";
     private static final String NBT_MUMAKIL_MODE = "lotrmoremobs_mumakilMode";
+    private static final String NBT_FORMATION_ORIGIN = "lotrmoremobs_formationOrigin";
+    public static final String NBT_SPEED_TRAIT = "lotrmoremobs_speedTrait";
+    public static final String NBT_HIRED_FORMATION_OWNER =
+            "lotrmoremobs_hiredFormationOwner";
+    public static final String NBT_MUMAK_INVASION_ID =
+            "lotrmoremobs_mumakInvasionId";
+    private static final String NBT_BABY_GROWTH_INITIALIZED = "lotrmoremobs_babyGrowthInitialized";
+    private static final String NBT_BABY_MELON_FED_UNTIL = "lotrmoremobs_babyMelonFedUntilTick";
+    private static final String NBT_TAMED_BABY_MELON_HEAL_UNTIL = "lotrmoremobs_tamedBabyMelonHealUntilTick";
 
     // ---------------------------------------------------------------------
     // Combat / tusk attack / trample
@@ -141,45 +238,61 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double COMBAT_DIRECT_PATH_MAX_RANGE = 16.0D;
     private static final double COMBAT_DIRECT_PATH_MAX_Y_DIFFERENCE = 3.0D;
     private static final double COMBAT_PATH_PROGRESS_THRESHOLD_SQ = 1.0D;
-    private static final float CHARGE_MIN_SPEED = 0.24F;
-    private static final float MAX_CHARGE_DAMAGE = 36.0F;
 
-    private static final double TUSK_ATTACK_RANGE = 6.5D;
-    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 400;
+    private static final double TUSK_ATTACK_RANGE = 8.0D; // MUMAKIL_EDGE_MELEE_AND_REACH_V1
+    private static final int TUSK_ATTACK_COOLDOWN_TICKS = 160;
     private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
     private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
+    private static final double SKIRMISH_RETREAT_DISTANCE = 12.0D;
+    private static final double SKIRMISH_RETREAT_MIN_DISTANCE = 10.0D;
+    private static final double SKIRMISH_RETREAT_MAX_DISTANCE = 14.0D;
+    private static final int SKIRMISH_REENGAGE_COOLDOWN_THRESHOLD = 20;
+    private static final int SKIRMISH_RETREAT_REPATH_COOLDOWN = 20;
+    private static final int SKIRMISH_RETREAT_MAX_FAILED_SEARCHES = 3;
+    private static final int SKIRMISH_STRIKE_INITIAL_FACING_LOCK_TICKS = 10;
+    private static final double SKIRMISH_DRIVER_DANGER_RANGE_SQ = 36.0D;
+    private static final double SKIRMISH_TARGET_REPATH_DISTANCE_SQ = 36.0D;
+    private static final double[] SKIRMISH_RETREAT_ANGLES =
+            new double[] {0.0D, 30.0D, -30.0D, 55.0D, -55.0D};
 
     private static final float TUSK_AOE_DAMAGE = 16.0F;
     private static final double TUSK_AOE_RADIUS = 4.25D;
     private static final double TUSK_AOE_VERTICAL_RANGE = 2.25D;
-    private static final float TUSK_AOE_KNOCKBACK_HORIZONTAL = 3.0F;
-    private static final float TUSK_AOE_KNOCKBACK_VERTICAL = 1.0F;
+    private static final float TUSK_AOE_KNOCKBACK_HORIZONTAL = 5.0F;
+    private static final float TUSK_AOE_KNOCKBACK_VERTICAL = 0.75F; // MUMAKIL_EDGE_MELEE_AND_REACH_V1
 
     private static final int TRAMPLE_SCAN_INTERVAL = 2;
-    private static final int TRAMPLE_COOLDOWN_TICKS = 60;
+    private static final int TRAMPLE_COOLDOWN_TICKS = 60; // TRAMPLE_GLOBAL_COOLDOWN_NO_EFFECTS_V1
     private static final float TRAMPLE_MIN_SPEED = 0.10F;
     private static final float TRAMPLE_DAMAGE = 8.0F;
 
     private static final int PROJECTILE_HURT_RESISTANT_TICKS = 6;
+    private static final int FORMATION_THREAT_MEMORY_TICKS = 100;
 
     // ---------------------------------------------------------------------
     // Tree/obstacle clearing
     // ---------------------------------------------------------------------
 
-    private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 2;
-    private static final int MAX_OBSTACLES_PER_PASS = 96;
+    private static final int AGGRO_OBSTACLE_CLEAR_INTERVAL = 3;
+    private static final int AGGRO_OBSTACLE_SWEEP_RETRY_TICKS = 12;
+    private static final int AGGRO_OBSTACLE_BROKEN_RETRY_TICKS = 6;
+    private static final int AGGRO_OBSTACLE_PROGRESS_CHECK_TICKS = 20;
+    private static final int AGGRO_OBSTACLE_SLICE_COUNT = 13;
+    private static final int AGGRO_OBSTACLE_BLOCK_CHECK_BUDGET = 320;
+    private static final int MAX_OBSTACLES_PER_PASS = 48;
+    private static final double AGGRO_OBSTACLE_PROGRESS_DISTANCE_SQ = 1.0D;
+    private static final int[] AGGRO_OBSTACLE_VERTICAL_SLICE_ORDER =
+            new int[] {0, 3, 2, 1};
 
     // ---------------------------------------------------------------------
     // Sounds / animations
     // ---------------------------------------------------------------------
 
-    private static final float CHARGE_STOMP_SOUND_MIN_SPEED = 0.13F;
-    private static final int CHARGE_STOMP_SOUND_MIN_COOLDOWN = 10;
-    private static final int CHARGE_STOMP_SOUND_RANDOM_COOLDOWN = 7;
-
     private static final int MUMAKIL_STRIKE_ANIMATION_TICKS = 36;
     private static final byte MUMAKIL_STRIKE_LEFT_STATUS = 80;
     private static final byte MUMAKIL_STRIKE_RIGHT_STATUS = 81;
+    private static final byte MUMAKIL_BABY_PANIC_START_STATUS = 82; // SLOW_PANIC_AND_PLAYER_RIDDEN_LOCOMOTION_V1
+    private static final byte MUMAKIL_BABY_PANIC_STOP_STATUS = 83;
 
     // ---------------------------------------------------------------------
     // Idle yaw stabilization
@@ -189,39 +302,148 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float IDLE_YAW_MAX_STEP = 8.0F;
     private static final float IDLE_HEAD_YAW_LIMIT = 45.0F;
     private static final double IDLE_YAW_MOTION_THRESHOLD_SQ = 4.0E-4D;
+    private static final float AI_MOVEMENT_MAX_TURN_RATE = 8.0F;
+    private static final double AI_MOVEMENT_PATH_DIRECTION_MIN_SQ =
+            0.25D;
+    private static final double AI_MOVEMENT_MOTION_THRESHOLD_SQ =
+            2.5E-3D;
+    private static final double AI_CLOSE_COMBAT_FACING_RANGE_SQ =
+            100.0D;
 
     // ---------------------------------------------------------------------
     // Mount inventory / data watcher
     // ---------------------------------------------------------------------
 
     private static final int HORSE_ARMOR_WATCHER_ID = 22;
+    private static final int MOUNTED_DRIVER_HORN_TICKS_WATCHER_ID = 23;
+    private static final int MUMAKIL_TRUMPET_TICKS_WATCHER_ID = 24;
     private static final int MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX = 1;
+    private static final String[] MUMAKIL_INVENTORY_FIELD_NAMES =
+            new String[] {
+                    "horseChest",
+                    "mountInventory",
+                    "horseInventory",
+                    "inventory"
+            };
+    private static volatile boolean mumakilInventoryFieldResolved;
+    private static Field mumakilInventoryField;
 
     // ---------------------------------------------------------------------
     // Runtime state
     // ---------------------------------------------------------------------
 
-    private final Map<Integer, Integer> trampleCooldowns = new HashMap<Integer, Integer>();
+    private int nextTrampleDamageTick;
     private final AnimationFactory animationFactory = new AnimationFactory(this);
     private final DriverTargetProgressState driverTargetProgressState = new DriverTargetProgressState();
 
     private MumakilMode mumakilMode;
+    private MumakilFormationOrigin formationOrigin;
+    private UUID hiredFormationOwnerUuid;
+    private UUID mumakilInvasionId;
+    private float mumakilSpeedTrait = NORMAL_SPEED_TRAIT;
+    private boolean mumakilSpeedTraitInitialized;
+    private boolean babyGrowthInitialized;
+    private long babyMelonFedUntilTick;
+    private long tamedBabyMelonHealUntilTick;
+    private boolean babyLifecycleInitialized;
+    private boolean babyPanicAnimationActive;
+    private EntityPlayer lastMountedPlayerForSafeDismount; // ADULT_TAMING_BLOCK_SAFE_DISMOUNT_V1
+    private EntityPlayer pendingSafeGroundDismountPlayer; // SAFE_DISMOUNT_NETWORK_RETRY_V2
+    private int pendingSafeGroundDismountTicks;
+    private boolean wasBabyMumakil;
     private float lastStableIdleYaw;
     private float lastStableIdleHeadYaw;
     private boolean hasStableIdleYaw;
+    private float playerRiddenLocomotionPhase;
+    private float prevPlayerRiddenLocomotionPhase;
+    private float lastRawLocomotionPhase;
+    private boolean playerRiddenLocomotionInitialized;
+    private boolean wasPlayerRiddenForLocomotion;
 
-    private int chargeStompSoundCooldown;
     private int angerWaveCooldownTicks;
     private int angerWaveActiveTicks;
+    private int territorialWarningTargetEntityId;
+    private int territorialWarningTicksRemaining;
+    private int[] territorialWarningMemoryTargetIds;
+    private long[] territorialWarningMemoryUntil;
+    private int territorialWarningMemoryCursor;
+    private long nextWildHerdEventTick;
+    private int lastWildHerdEventThreatEntityId;
+    private long wildHerdRegroupUntilTick;
+    private int wildHerdRegroupLeaderEntityId;
+    private int wildHerdRegroupThreatEntityId;
+    private double wildHerdRegroupX;
+    private double wildHerdRegroupZ;
+    private double wildHerdRegroupOffsetX;
+    private double wildHerdRegroupOffsetZ;
+    private int nextWildHerdRepathTick;
+    private boolean wildHerdRegroupPathOwned;
     private int tuskAttackCooldownTicks;
+    private int successfulTuskAttackSequence;
+    private boolean mumakilSkirmishWithdrawing;
+    private int lastAggroObstacleClearTick = Integer.MIN_VALUE; // AGGRO_TREE_CORRIDOR_AND_WILD_BABY_FOLLOW_V1
+    private int nextAggroObstacleSweepTick;
+    private int aggroObstacleSliceIndex;
+    private int aggroObstacleSliceLimit;
+    private boolean aggroObstacleSweepBrokeBlocks;
+    private int lastAggroObstacleRegionX = Integer.MIN_VALUE;
+    private int lastAggroObstacleRegionY = Integer.MIN_VALUE;
+    private int lastAggroObstacleRegionZ = Integer.MIN_VALUE;
+    private int nextAggroObstacleProgressCheckTick;
+    private double lastAggroObstacleProgressX;
+    private double lastAggroObstacleProgressZ;
+    private boolean hasAggroObstacleProgressSample;
+    private IInventory cachedMumakilMountInventory;
+    private boolean mumakilMountInventoryReadAttempted;
+    private boolean mumakilHirePreview;
+    private int recentFormationThreatEntityId;
+    private long recentFormationThreatUntilTick;
 
     private int mumakilStrikeAnimationTicks;
     private int prevMumakilStrikeAnimationTicks;
     private boolean mumakilStrikeAnimationLeft;
+    private boolean mumakilTrumpetSoundPlayed;
     private int mumakilAngrySoundTriggerCounter;
 
     public DriverTargetProgressState getDriverTargetProgressState() {
         return this.driverTargetProgressState;
+    }
+
+    public void recordRecentFormationThreat(EntityLivingBase attacker) {
+        if (this.worldObj == null
+                || this.worldObj.isRemote
+                || attacker == null
+                || attacker == this
+                || !attacker.isEntityAlive()) {
+            return;
+        }
+
+        this.recentFormationThreatEntityId = attacker.getEntityId();
+        this.recentFormationThreatUntilTick =
+                this.worldObj.getTotalWorldTime() + FORMATION_THREAT_MEMORY_TICKS;
+    }
+
+    public EntityLivingBase getRecentFormationThreat() {
+        if (this.worldObj == null
+                || this.recentFormationThreatEntityId <= 0
+                || this.worldObj.getTotalWorldTime() >= this.recentFormationThreatUntilTick) {
+            this.clearRecentFormationThreat();
+            return null;
+        }
+
+        Entity entity = this.worldObj.getEntityByID(this.recentFormationThreatEntityId);
+        if (!(entity instanceof EntityLivingBase)
+                || !((EntityLivingBase)entity).isEntityAlive()) {
+            this.clearRecentFormationThreat();
+            return null;
+        }
+
+        return (EntityLivingBase)entity;
+    }
+
+    private void clearRecentFormationThreat() {
+        this.recentFormationThreatEntityId = 0;
+        this.recentFormationThreatUntilTick = 0L;
     }
 
     public static final class DriverTargetProgressState {
@@ -248,30 +470,102 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public LOTREntityMumakil(World world) {
         super(world);
-        // Main physical/hurt box. Wide and tall enough to roughly fit the rendered Mumakil body.
-        this.setSize(7.0F, 15.0F);
+        // Main physical/hurt box. Baby dimensions are applied when the inherited age state becomes negative.
+        this.setSize(ADULT_WIDTH, ADULT_HEIGHT);
         this.resetAngerWaveCooldown();
         this.replaceInheritedRiderTargetAI();
         this.replaceInheritedFollowHiringPlayerAI();
+        this.replaceInheritedFollowParentAI();
+        this.replaceInheritedMateAI();
         this.replaceInheritedHurtByTargetAI();
+        this.removeInheritedPanicAI();
 
-        this.tasks.addTask(4, new EntityAIWildMumakilMove());
-        this.tasks.addTask(5, new EntityAIBlockHiredWarWander());
-        this.targetTasks.addTask(2, new EntityAINearestAttackableTarget(this, EntityPlayer.class, 10, true) {
-            @Override
-            public boolean shouldExecute() {
-                return LOTREntityMumakil.this.isWildMumakil() && super.shouldExecute();
-            }
+        this.tasks.addTask(2, new EntityAIMumakilBabyPanic());
+        this.tasks.addTask(3, new EntityAIMumakilFollowMelon());
+        this.tasks.addTask(4, new EntityAIMumakilBabyFollowAdult());
+        this.tasks.addTask(5, new EntityAIWildMumakilMove());
+        this.tasks.addTask(6, new EntityAIBlockHiredWarWander());
+        /*
+         * Spontaneous territorial selection is owned by the bounded warning
+         * scan. The inherited hurt-by-target replacement remains responsible
+         * for immediate retaliation.
+         */
+    }
 
+    @Override
+    protected void entityInit() {
+        super.entityInit();
+        this.dataWatcher.addObject(
+                MOUNTED_DRIVER_HORN_TICKS_WATCHER_ID,
+                Integer.valueOf(0)
+        );
+        this.dataWatcher.addObject(
+                MUMAKIL_TRUMPET_TICKS_WATCHER_ID,
+                Integer.valueOf(0)
+        );
+    }
 
-            @Override
-            public boolean continueExecuting() {
-                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
-            }
-        });
-        this.targetTasks.addTask(3, this.createWildMobTargetAI(IMob.class));
-        this.targetTasks.addTask(4, this.createWildMobTargetAI(LOTREntityNPC.class));
-        this.targetTasks.addTask(5, this.createWildMobTargetAI(EntityLivingBase.class));
+    public int getMountedDriverHornTicks() {
+        return Math.max(
+                0,
+                this.dataWatcher.getWatchableObjectInt(
+                        MOUNTED_DRIVER_HORN_TICKS_WATCHER_ID
+                )
+        );
+    }
+
+    public void setMountedDriverHornTicks(int ticks) {
+        if (this.worldObj != null && !this.worldObj.isRemote) {
+            this.dataWatcher.updateObject(
+                    MOUNTED_DRIVER_HORN_TICKS_WATCHER_ID,
+                    Integer.valueOf(Math.max(0, ticks))
+            );
+        }
+    }
+
+    public int getMumakilTrumpetAnimationTicks() {
+        return Math.max(
+                0,
+                this.dataWatcher.getWatchableObjectInt(
+                        MUMAKIL_TRUMPET_TICKS_WATCHER_ID
+                )
+        );
+    }
+
+    public float getMumakilTrumpetAnimationProgress(
+            float partialTicks
+    ) {
+        int remaining = this.getMumakilTrumpetAnimationTicks();
+        if (remaining <= 0) {
+            return -1.0F;
+        }
+
+        float elapsed = MUMAKIL_TRUMPET_ANIMATION_TICKS
+                - remaining
+                + MathHelper.clamp_float(
+                        partialTicks,
+                        0.0F,
+                        1.0F
+                );
+        return MathHelper.clamp_float(
+                elapsed
+                        / (float)MUMAKIL_TRUMPET_ANIMATION_TICKS,
+                0.0F,
+                1.0F
+        );
+    }
+
+    public boolean isMumakilTrumpetAnimationActive() {
+        return this.getMumakilTrumpetAnimationTicks() > 0;
+    }
+
+    private void setMumakilTrumpetAnimationTicks(int ticks) {
+        if (this.worldObj != null && !this.worldObj.isRemote) {
+            this.dataWatcher.updateObject(
+                    MUMAKIL_TRUMPET_TICKS_WATCHER_ID,
+                    Integer.valueOf(Math.max(0, ticks))
+            );
+        }
     }
 
     private void replaceInheritedRiderTargetAI() {
@@ -282,6 +576,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         if (inherited != null) {
             this.tasks.addTask(inherited.priority, new EntityAIMumakilMoveToRiderTarget());
+        }
+    }
+
+    private void removeInheritedPanicAI() {
+        while (LOTREntityUtils.removeAITask(
+                this,
+                EntityAIPanic.class
+        ) != null) {
+            // Remove every inherited horse panic task before installing
+            // the Mumakil-specific baby panic task.
         }
     }
 
@@ -307,9 +611,52 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
-    public float getCollisionBorderSize() {
-        // Small melee/raycast padding so normal-reach weapons can hit the large body reliably.
-        return 1.25F;
+    private void replaceInheritedFollowParentAI() {
+        /*
+         * LOTREntityHorse inherits the standard animal follow-parent task.
+         * That task tries to move babies directly beside the adult and conflicts
+         * with the wider Mumakil family roaming radius.
+         *
+         * Our EntityAIMumakilBabyFollowAdult task now owns this behavior.
+         */
+        LOTREntityUtils.removeAITask(
+                this,
+                EntityAIFollowParent.class
+        );
+    }
+
+
+    /**
+     * MUMAK_WIDE_BODY_BREEDING_AI_FIX_V1
+     *
+     * Vanilla EntityAIMate requires the parents' centers to become less than
+     * three blocks apart. Adult Mumak are seven blocks wide, so their bodies
+     * collide long before that condition can be met. Replace only the mating
+     * task with a width-aware version; all other movement ownership remains
+     * unchanged.
+     */
+    private void replaceInheritedMateAI() {
+        EntityAITasks.EntityAITaskEntry inherited =
+                LOTREntityUtils.removeAITask(
+                        this,
+                        EntityAIMate.class
+                );
+
+        int priority = inherited == null ? 2 : inherited.priority;
+        this.tasks.addTask(priority, new EntityAIMumakilMate());
+    }
+public float getCollisionBorderSize() {
+        // Scale the extra melee/raycast padding with the real physical body size.
+        return this.isChild() ? 1.25F * BABY_RENDER_SCALE : 1.25F;
+    }
+
+    @Override
+    public void setScaleForAge(boolean child) {
+        /*
+         * Disable EntityAgeable's automatic child hitbox scaling.
+         * Mumakil dimensions are controlled by applyMumakilPhysicalSize().
+         */
+        super.setScaleForAge(false);
     }
 
     public void registerControllers(AnimationData data) {
@@ -321,6 +668,128 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     public int getHorseType() {
         return 0;
+    }
+
+    @Override
+    public IEntityLivingData onSpawnWithEgg(IEntityLivingData spawnData) {
+        /*
+         * MUMAKIL_NATURAL_SPAWNING_V1
+         *
+         * Let LOTREntityHorse perform its normal spawn initialization, but
+         * keep Mumakil-specific group data so one natural pack can contain
+         * adults and rare babies. Spawn eggs create only the first adult
+         * because they do not continue a shared pack.
+         */
+        super.onSpawnWithEgg(null);
+        this.initializeRandomSpeedTraitIfNeeded();
+
+        MumakilHerdSpawnData herdData;
+        if (spawnData instanceof MumakilHerdSpawnData) {
+            herdData = (MumakilHerdSpawnData)spawnData;
+        } else {
+            int plannedBabyCount = 0;
+            if (this.rand.nextInt(NATURAL_HERD_FAMILY_CHANCE) == 0) {
+                plannedBabyCount = 1 + this.rand.nextInt(
+                        NATURAL_HERD_MAX_BABIES
+                );
+            }
+
+            herdData = new MumakilHerdSpawnData(plannedBabyCount);
+        }
+
+        boolean spawnAsBaby =
+                herdData.memberIndex
+                        >= NATURAL_HERD_ADULTS_BEFORE_BABIES
+                && herdData.babiesSpawned
+                        < herdData.plannedBabyCount;
+
+        if (spawnAsBaby) {
+            this.setGrowingAge(-BABY_GROWTH_TICKS);
+            this.babyGrowthInitialized = true;
+            this.setMumakilMode(MumakilMode.BABY_WILD);
+            ++herdData.babiesSpawned;
+        } else {
+            this.setGrowingAge(0);
+            this.babyGrowthInitialized = false;
+            this.setMumakilMode(MumakilMode.ADULT_WILD);
+        }
+
+        this.applyMumakilLifecycleState(spawnAsBaby, false);
+        this.babyLifecycleInitialized = true;
+        this.wasBabyMumakil = spawnAsBaby;
+        this.setHealth(this.getMaxHealth());
+
+        ++herdData.memberIndex;
+        return herdData;
+    }
+
+
+    /**
+     * MUMAKIL_CALF_SPAWN_EGG_V1
+     *
+     * Converts a freshly created normal Mumakil entity into the exact same
+     * wild-baby lifecycle used by naturally spawned calves. Keeping the
+     * normal entity class means the calf grows into an ordinary Mumakil and
+     * remains compatible with the existing renderer, AI, taming, and breeding.
+     */
+    public void initializeAsSpawnEggCalf() {
+        this.initializeRandomSpeedTraitIfNeeded();
+        this.setBelongsToNPC(false);
+        this.setHorseTamed(false);
+        this.setGrowingAge(-BABY_GROWTH_TICKS);
+
+        this.babyGrowthInitialized = true;
+        this.babyMelonFedUntilTick = 0L;
+        this.tamedBabyMelonHealUntilTick = 0L;
+
+        this.setMumakilMode(MumakilMode.BABY_WILD);
+        this.applyMumakilLifecycleState(true, false);
+
+        this.babyLifecycleInitialized = true;
+        this.wasBabyMumakil = true;
+        this.setHealth(this.getMaxHealth());
+    }
+    @Override
+    public boolean canDespawn() {
+        /*
+         * Wild herds and autonomous natural war formations use normal distance
+         * despawning. Player-hired, tamed, and other NPC-owned Mumak remain
+         * persistent.
+         */
+        return this.isWildMumakil()
+                || this.isNaturalNearHaradFormation();
+    }
+
+    @Override
+    protected void despawnEntity() {
+        boolean naturalFormation = this.isNaturalNearHaradFormation();
+        boolean wasDead = this.isDead;
+        Entity capturedDriver = this.riddenByEntity;
+        super.despawnEntity();
+
+        if (naturalFormation && !wasDead && this.isDead) {
+            MumakilWarFormationFactory.removeNaturalFormationMembers(
+                    this,
+                    capturedDriver
+            );
+        }
+    }
+
+    private static final class MumakilHerdSpawnData
+            implements IEntityLivingData {
+        private final int plannedBabyCount;
+        private int memberIndex;
+        private int babiesSpawned;
+
+        private MumakilHerdSpawnData(int plannedBabyCount) {
+            this.plannedBabyCount = Math.max(
+                    0,
+                    Math.min(
+                            NATURAL_HERD_MAX_BABIES,
+                            plannedBabyCount
+                    )
+            );
+        }
     }
 
 
@@ -373,6 +842,72 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         );
     }
 
+    public MumakilFormationOrigin getFormationOrigin() {
+        if (this.formationOrigin == null) {
+            /*
+             * Old saves predate the origin key. Every pre-existing hired-war
+             * Mumak was player-hired, so that is the backwards-compatible
+             * inference.
+             */
+            this.formationOrigin = this.isHiredWarMumakil()
+                    ? MumakilFormationOrigin.PLAYER_HIRED
+                    : MumakilFormationOrigin.NONE;
+        }
+        return this.formationOrigin;
+    }
+
+    public void setFormationOrigin(MumakilFormationOrigin origin) {
+        this.formationOrigin = origin == null
+                ? MumakilFormationOrigin.NONE
+                : origin;
+    }
+
+    public void capturePlayerHiredFormationOwner(LOTREntityNPC driver) {
+        if (this.worldObj == null
+                || this.worldObj.isRemote
+                || this.getFormationOrigin()
+                != MumakilFormationOrigin.PLAYER_HIRED
+                || driver == null
+                || !driver.hiredNPCInfo.isActive) {
+            return;
+        }
+
+        UUID ownerUuid = driver.hiredNPCInfo.getHiringPlayerUUID();
+        if (ownerUuid != null) {
+            this.hiredFormationOwnerUuid = ownerUuid;
+        }
+    }
+
+    public UUID getPlayerHiredFormationOwnerUuid() {
+        return this.getFormationOrigin()
+                == MumakilFormationOrigin.PLAYER_HIRED
+                ? this.hiredFormationOwnerUuid
+                : null;
+    }
+
+    public EntityPlayer getOnlinePlayerHiredFormationOwner() {
+        UUID ownerUuid = this.getPlayerHiredFormationOwnerUuid();
+        return ownerUuid == null || this.worldObj == null
+                ? null
+                : this.worldObj.func_152378_a(ownerUuid);
+    }
+
+    public void setMumakilInvasionId(UUID invasionId) {
+        this.mumakilInvasionId = invasionId;
+    }
+
+    public UUID getMumakilInvasionId() {
+        return this.getFormationOrigin()
+                == MumakilFormationOrigin.INVASION_NEAR_HARAD
+                ? this.mumakilInvasionId
+                : null;
+    }
+
+    public boolean isNaturalNearHaradFormation() {
+        return this.getFormationOrigin()
+                == MumakilFormationOrigin.NATURAL_NEAR_HARAD;
+    }
+
     public boolean isBabyMumakil() {
         return this.getMumakilMode().isBaby();
     }
@@ -381,13 +916,144 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return this.getMumakilMode().isAdult();
     }
 
+    public float getMumakilSpeedTrait() {
+        return clampSpeedTrait(
+                this.mumakilSpeedTraitInitialized
+                        ? this.mumakilSpeedTrait
+                        : NORMAL_SPEED_TRAIT
+        );
+    }
+
+    private void initializeRandomSpeedTraitIfNeeded() {
+        if (this.mumakilSpeedTraitInitialized) {
+            return;
+        }
+
+        /*
+         * The mean of two uniform samples is triangular and center-weighted:
+         * most new Mumak remain close to 1.00 while 0.85/1.15 are rare.
+         */
+        float centeredSample =
+                (this.rand.nextFloat() + this.rand.nextFloat()) * 0.5F;
+        this.setMumakilSpeedTrait(
+                MIN_SPEED_TRAIT
+                        + centeredSample
+                        * (MAX_SPEED_TRAIT - MIN_SPEED_TRAIT)
+        );
+    }
+
+    private void setMumakilSpeedTrait(float speedTrait) {
+        this.mumakilSpeedTrait = clampSpeedTrait(speedTrait);
+        this.mumakilSpeedTraitInitialized = true;
+        this.applyConfiguredMovementSpeed();
+    }
+
+    private static float clampSpeedTrait(float speedTrait) {
+        if (Float.isNaN(speedTrait) || Float.isInfinite(speedTrait)) {
+            return NORMAL_SPEED_TRAIT;
+        }
+        return MathHelper.clamp_float(
+                speedTrait,
+                MIN_SPEED_TRAIT,
+                MAX_SPEED_TRAIT
+        );
+    }
+
     public boolean isTamedMumakilMode() {
         return this.getMumakilMode().isTamed();
+    }
+
+    public float getMumakilRenderScale() {
+        return this.shouldUseBabyLifecycleState() ? BABY_RENDER_SCALE : 1.0F;
+    }
+
+    private boolean shouldUseBabyLifecycleState() {
+        return this.isChild() && !this.isHiredWarMumakil();
+    }
+
+    private void initializeBabyGrowthTimerIfNeeded() {
+        if (this.shouldUseBabyLifecycleState() && !this.babyGrowthInitialized) {
+            this.setGrowingAge(-BABY_GROWTH_TICKS);
+            this.babyGrowthInitialized = true;
+        }
+    }
+
+    private void updateMumakilLifecycle() {
+        this.initializeBabyGrowthTimerIfNeeded();
+
+        boolean baby = this.shouldUseBabyLifecycleState();
+        if (!this.babyLifecycleInitialized) {
+            this.applyMumakilLifecycleState(baby, false);
+            this.babyLifecycleInitialized = true;
+            this.wasBabyMumakil = baby;
+            return;
+        }
+
+        if (baby != this.wasBabyMumakil) {
+            if (!this.isHiredWarMumakil()) {
+                this.setMumakilMode(
+                        baby
+                                ? (this.isTame() ? MumakilMode.BABY_TAMED : MumakilMode.BABY_WILD)
+                                : (this.isTame() ? MumakilMode.ADULT_TAMED : MumakilMode.ADULT_WILD)
+                );
+            }
+
+            this.applyMumakilLifecycleState(baby, true);
+            if (!baby) {
+                this.babyGrowthInitialized = false;
+            }
+            this.wasBabyMumakil = baby;
+        } else {
+            this.applyMumakilPhysicalSize(baby);
+        }
+    }
+
+    private void applyMumakilLifecycleState(boolean baby, boolean preserveHealthRatio) {
+        double healthRatio = 1.0D;
+        if (preserveHealthRatio) {
+            double currentMaxHealth = Math.max(1.0D, this.getMaxHealth());
+            healthRatio = MathHelper.clamp_double(
+                    this.getHealth() / currentMaxHealth,
+                    0.0D,
+                    1.0D
+            );
+        }
+
+        this.applyMumakilPhysicalSize(baby);
+        this.applyConfiguredAttributes();
+
+        if (preserveHealthRatio) {
+            this.setHealth((float)(healthRatio * this.getMaxHealth()));
+        } else if (this.getHealth() > this.getMaxHealth()) {
+            this.setHealth(this.getMaxHealth());
+        }
+    }
+
+    private void applyMumakilPhysicalSize(boolean baby) {
+        float targetWidth = baby ? BABY_WIDTH : ADULT_WIDTH;
+        float targetHeight = baby ? BABY_HEIGHT : ADULT_HEIGHT;
+
+        if (Math.abs(this.width - targetWidth) > 0.001F
+                || Math.abs(this.height - targetHeight) > 0.001F) {
+            this.setSize(targetWidth, targetHeight);
+
+            /*
+             * EntityAgeable#setSize updates its stored base dimensions, but it may
+             * not immediately update the actual collision box after initialization.
+             * Force the stored dimensions to be applied at a 1.0 scale.
+             */
+            this.setScaleForAge(false);
+        }
     }
 
     private boolean isWildMumakil() {
         MumakilMode mode = this.getMumakilMode();
         return (mode == MumakilMode.BABY_WILD || mode == MumakilMode.ADULT_WILD)
+                && !this.getBelongsToNPC()
+                && this.riddenByEntity == null;
+    }
+    private boolean isWildAdultMumakil() {
+        return this.getMumakilMode() == MumakilMode.ADULT_WILD
                 && !this.getBelongsToNPC()
                 && this.riddenByEntity == null;
     }
@@ -397,12 +1063,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 && !this.getBelongsToNPC()
                 && !this.hasMumakilHowdahEquipped()
                 && !this.isMountEnraged()
+                && !this.isTerritorialWarningActive()
+                && !this.isWildHerdRegroupActive()
                 && this.getAttackTarget() == null;
     }
 
     private boolean shouldWildChaseTarget() {
         EntityLivingBase target = this.getAttackTarget();
-        return this.isWildMumakil()
+        return this.isWildAdultMumakil()
                 && !this.hasMumakilHowdahEquipped()
                 && target != null
                 && this.canTuskAttackTarget(target);
@@ -414,14 +1082,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private void tryAcquireWildMobTarget() {
-        if (!this.isWildMumakil()
+        if (!this.isWildAdultMumakil()
                 || !this.isWildAngerWaveActive()
                 || this.getAttackTarget() != null
+                || this.isTerritorialWarningActive()
+                || this.isWildHerdRegroupActive()
                 || this.ticksExisted % MOB_TARGET_CHECK_INTERVAL != 0) {
             return;
         }
 
-        long perfStart = MumakilPerformanceTracker.startTimer();
+        boolean trackPerformance =
+                MumakilPerformanceTracker.isEnabled();
+        long perfStart = trackPerformance
+                ? MumakilPerformanceTracker.startTimer()
+                : 0L;
         List nearby = this.worldObj.getEntitiesWithinAABB(
                 EntityLivingBase.class,
                 this.boundingBox.expand(MOB_TARGET_RANGE, MOB_TARGET_VERTICAL_RANGE, MOB_TARGET_RANGE)
@@ -433,12 +1107,19 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         for(int i = 0; i < nearby.size(); ++i) {
             EntityLivingBase candidate = (EntityLivingBase)nearby.get(i);
-            if (!this.canTargetWildMob(candidate)) {
+            if (!this.canWarnTerritorialTarget(candidate)
+                    || this.isTerritorialWarningTargetRemembered(
+                    candidate
+            )) {
                 continue;
             }
 
             int priority = this.getWildMobTargetPriority(candidate);
             double distanceSq = this.getDistanceSqToEntity(candidate);
+            if (distanceSq > TERRITORIAL_WARNING_RADIUS
+                    * TERRITORIAL_WARNING_RADIUS) {
+                continue;
+            }
 
             if (priority < bestPriority || priority == bestPriority && distanceSq < bestDistanceSq) {
                 bestTarget = candidate;
@@ -447,14 +1128,514 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
         }
 
-        if (MumakilPerformanceTracker.isEnabled()) {
+        if (trackPerformance) {
             MumakilPerformanceTracker.recordMountTargetScan(this, nearby.size(), System.nanoTime() - perfStart);
         }
 
-        if (bestTarget != null && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
-            this.playMumakilAngrySound();
-            this.setAttackTarget(bestTarget);
+        if (bestTarget != null
+                && (bestPriority < 2 || this.rand.nextInt(4) == 0)) {
+            if (bestDistanceSq <=
+                    TERRITORIAL_IMMEDIATE_AGGRESSION_RADIUS
+                            * TERRITORIAL_IMMEDIATE_AGGRESSION_RADIUS) {
+                this.rememberTerritorialWarningTarget(bestTarget);
+                this.playMumakilAngrySound();
+                this.setAttackTarget(bestTarget);
+                return;
+            }
+
+            this.beginTerritorialWarning(bestTarget);
         }
+    }
+
+    private boolean canWarnTerritorialTarget(
+            EntityLivingBase target
+    ) {
+        if (target instanceof EntityPlayer) {
+            EntityPlayer player = (EntityPlayer)target;
+            return player.isEntityAlive()
+                    && !player.capabilities.isCreativeMode
+                    && !this.isPlayerHoldingMelon(player)
+                    && this.canTuskAttackTarget(player);
+        }
+        return this.canTargetWildMob(target);
+    }
+
+    private void beginTerritorialWarning(EntityLivingBase target) {
+        if (target == null || !this.canWarnTerritorialTarget(target)) {
+            return;
+        }
+
+        this.territorialWarningTargetEntityId = target.getEntityId();
+        this.territorialWarningTicksRemaining =
+                TERRITORIAL_WARNING_DURATION_TICKS;
+        this.getNavigator().clearPathEntity();
+        this.startMumakilTrumpetSequenceNow();
+        this.triggerWildHerdRegroup(target, false);
+        this.faceWildMovePoint(target.posX, target.posZ);
+    }
+
+    private void updateTerritorialWarningAndHerdRegroup() {
+        this.updateTerritorialWarning();
+        this.updateWildHerdRegroup();
+    }
+
+    private void updateTerritorialWarning() {
+        if (!this.isTerritorialWarningActive()) {
+            return;
+        }
+
+        if (!this.isWildAdultMumakil()) {
+            this.clearTerritorialWarning(false);
+            return;
+        }
+
+        Entity entity = this.worldObj.getEntityByID(
+                this.territorialWarningTargetEntityId
+        );
+        if (!(entity instanceof EntityLivingBase)
+                || !this.canWarnTerritorialTarget(
+                (EntityLivingBase)entity
+        )) {
+            this.clearTerritorialWarning(true);
+            return;
+        }
+
+        EntityLivingBase target = (EntityLivingBase)entity;
+        EntityLivingBase urgentTarget = this.getAttackTarget();
+        if (urgentTarget != null) {
+            this.clearTerritorialWarning(
+                    urgentTarget != target
+            );
+            return;
+        }
+
+        double distanceSq = this.getDistanceSqToEntity(target);
+        if (distanceSq
+                > TERRITORIAL_WARNING_CANCEL_RADIUS
+                * TERRITORIAL_WARNING_CANCEL_RADIUS) {
+            this.clearTerritorialWarning(true);
+            return;
+        }
+
+        this.getNavigator().clearPathEntity();
+        this.faceWildMovePoint(target.posX, target.posZ);
+
+        if (distanceSq
+                <= TERRITORIAL_IMMEDIATE_AGGRESSION_RADIUS
+                * TERRITORIAL_IMMEDIATE_AGGRESSION_RADIUS) {
+            this.rememberTerritorialWarningTarget(target);
+            this.playMumakilAngrySound();
+            this.clearTerritorialWarning(false);
+            this.setAttackTarget(target);
+            return;
+        }
+
+        --this.territorialWarningTicksRemaining;
+        if (this.territorialWarningTicksRemaining <= 0) {
+            this.rememberTerritorialWarningTarget(target);
+            this.clearTerritorialWarning(false);
+            this.setAttackTarget(target);
+        }
+    }
+
+    private boolean isTerritorialWarningActive() {
+        return this.territorialWarningTargetEntityId != 0
+                && this.territorialWarningTicksRemaining > 0;
+    }
+
+    private void rememberTerritorialWarningTarget(
+            EntityLivingBase target
+    ) {
+        if (target == null) {
+            return;
+        }
+        if (this.territorialWarningMemoryTargetIds == null) {
+            this.territorialWarningMemoryTargetIds =
+                    new int[TERRITORIAL_WARNING_MEMORY_SLOTS];
+            this.territorialWarningMemoryUntil =
+                    new long[TERRITORIAL_WARNING_MEMORY_SLOTS];
+        }
+
+        int targetId = target.getEntityId();
+        int slot = -1;
+        for (int i = 0;
+             i < this.territorialWarningMemoryTargetIds.length;
+             ++i) {
+            if (this.territorialWarningMemoryTargetIds[i]
+                    == targetId) {
+                slot = i;
+                break;
+            }
+        }
+        if (slot < 0) {
+            slot = this.territorialWarningMemoryCursor;
+            this.territorialWarningMemoryCursor =
+                    (this.territorialWarningMemoryCursor + 1)
+                            % TERRITORIAL_WARNING_MEMORY_SLOTS;
+        }
+        this.territorialWarningMemoryTargetIds[slot] = targetId;
+        this.territorialWarningMemoryUntil[slot] =
+                this.worldObj.getTotalWorldTime()
+                        + TERRITORIAL_WARNING_MEMORY_TICKS;
+    }
+
+    private boolean isTerritorialWarningTargetRemembered(
+            EntityLivingBase target
+    ) {
+        if (target == null
+                || this.territorialWarningMemoryTargetIds == null) {
+            return false;
+        }
+        int targetId = target.getEntityId();
+        long now = this.worldObj.getTotalWorldTime();
+        for (int i = 0;
+             i < this.territorialWarningMemoryTargetIds.length;
+             ++i) {
+            if (this.territorialWarningMemoryTargetIds[i]
+                    == targetId
+                    && now < this.territorialWarningMemoryUntil[i]) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private void clearTerritorialWarning(boolean rememberTarget) {
+        if (rememberTarget) {
+            Entity entity = this.worldObj.getEntityByID(
+                    this.territorialWarningTargetEntityId
+            );
+            if (entity instanceof EntityLivingBase) {
+                this.rememberTerritorialWarningTarget(
+                        (EntityLivingBase)entity
+                );
+            }
+        }
+        this.territorialWarningTargetEntityId = 0;
+        this.territorialWarningTicksRemaining = 0;
+    }
+
+    private void triggerWildHerdRegroup(
+            EntityLivingBase threat,
+            boolean urgentCalfDefense
+    ) {
+        if (this.worldObj == null
+                || this.worldObj.isRemote
+                || threat == null
+                || !threat.isEntityAlive()) {
+            return;
+        }
+
+        long now = this.worldObj.getTotalWorldTime();
+        if (now < this.nextWildHerdEventTick
+                && (!urgentCalfDefense
+                || threat.getEntityId()
+                == this.lastWildHerdEventThreatEntityId)) {
+            return;
+        }
+        this.nextWildHerdEventTick =
+                now + WILD_HERD_EVENT_COOLDOWN_TICKS;
+        this.lastWildHerdEventThreatEntityId =
+                threat.getEntityId();
+
+        boolean trackPerformance =
+                MumakilPerformanceTracker.isEnabled();
+        long scanStart = trackPerformance
+                ? MumakilPerformanceTracker.startTimer()
+                : 0L;
+        List herd = this.worldObj.getEntitiesWithinAABB(
+                LOTREntityMumakil.class,
+                this.boundingBox.expand(
+                        WILD_HERD_EVENT_RADIUS,
+                        BABY_TAMING_ADULT_PROTECTION_VERTICAL_RANGE,
+                        WILD_HERD_EVENT_RADIUS
+                )
+        );
+        double radiusSq =
+                WILD_HERD_EVENT_RADIUS * WILD_HERD_EVENT_RADIUS;
+        LOTREntityMumakil lead = this.isWildAdultMumakil()
+                ? this
+                : findNearestWildAdult(this, herd, radiusSq);
+        if (lead == null) {
+            return;
+        }
+        lead.nextWildHerdEventTick = Math.max(
+                lead.nextWildHerdEventTick,
+                now + WILD_HERD_EVENT_COOLDOWN_TICKS
+        );
+
+        int adultRegroupIndex = 0;
+        for (int i = 0; i < herd.size(); ++i) {
+            LOTREntityMumakil member =
+                    (LOTREntityMumakil)herd.get(i);
+            if (member.isDead
+                    || !member.isEntityAlive()
+                    || !member.isWildMumakil()
+                    || member.getDistanceSqToEntity(this) > radiusSq) {
+                continue;
+            }
+
+            if (member.isBabyMumakil()) {
+                LOTREntityMumakil nearestAdult =
+                        findNearestWildAdult(member, herd, radiusSq);
+                if (nearestAdult != null) {
+                    member.beginWildHerdRegroupToAdult(
+                            nearestAdult,
+                            threat,
+                            now
+                    );
+                }
+                continue;
+            }
+
+            if (urgentCalfDefense) {
+                member.clearTerritorialWarning(false);
+                member.clearWildHerdRegroup();
+                if (member.canTuskAttackTarget(threat)
+                        && member.getAttackTarget() != threat) {
+                    member.getNavigator().clearPathEntity();
+                    member.setAttackTarget(threat);
+                }
+                continue;
+            }
+
+            if (member != lead
+                    && member.getAttackTarget() == null
+                    && !member.isTerritorialWarningActive()) {
+                member.beginWildAdultHerdRegroup(
+                        lead,
+                        threat,
+                        adultRegroupIndex++,
+                        now
+                );
+            }
+        }
+
+        if (urgentCalfDefense) {
+            lead.playMumakilAngrySound();
+        } else {
+            lead.faceWildMovePoint(threat.posX, threat.posZ);
+        }
+
+        if (trackPerformance) {
+            MumakilPerformanceTracker.recordMountTargetScan(
+                    this,
+                    herd.size(),
+                    System.nanoTime() - scanStart
+            );
+        }
+    }
+
+    private static LOTREntityMumakil findNearestWildAdult(
+            LOTREntityMumakil member,
+            List herd,
+            double maximumDistanceSq
+    ) {
+        LOTREntityMumakil nearest = null;
+        double nearestDistanceSq = maximumDistanceSq;
+        for (int i = 0; i < herd.size(); ++i) {
+            LOTREntityMumakil candidate =
+                    (LOTREntityMumakil)herd.get(i);
+            if (candidate == member
+                    || candidate.isDead
+                    || !candidate.isEntityAlive()
+                    || !candidate.isWildAdultMumakil()) {
+                continue;
+            }
+            double distanceSq = member.getDistanceSqToEntity(candidate);
+            if (distanceSq < nearestDistanceSq) {
+                nearestDistanceSq = distanceSq;
+                nearest = candidate;
+            }
+        }
+        return nearest;
+    }
+
+    private void beginWildAdultHerdRegroup(
+            LOTREntityMumakil lead,
+            EntityLivingBase threat,
+            int regroupIndex,
+            long now
+    ) {
+        int stableIndex = Math.abs(this.getEntityId() * 31
+                + regroupIndex * 17);
+        double angle = (stableIndex % 360) * Math.PI / 180.0D;
+        double radius = WILD_HERD_ADULT_RING_MIN
+                + stableIndex % 5
+                * (WILD_HERD_ADULT_RING_RANGE / 4.0D);
+        double offsetX = Math.cos(angle) * radius;
+        double offsetZ = Math.sin(angle) * radius;
+        double regroupX = lead.posX + offsetX;
+        double regroupZ = lead.posZ + offsetZ;
+        double dx = regroupX - this.posX;
+        double dz = regroupZ - this.posZ;
+
+        if (this.isWildHerdRegroupActive()) {
+            if (this.wildHerdRegroupThreatEntityId
+                    == threat.getEntityId()) {
+                return;
+            }
+            this.clearWildHerdRegroup();
+        }
+        if (dx * dx + dz * dz
+                <= WILD_HERD_REGROUP_START_DISTANCE_SQ) {
+            return;
+        }
+
+        this.wildHerdRegroupX = regroupX;
+        this.wildHerdRegroupZ = regroupZ;
+        this.wildHerdRegroupOffsetX = offsetX;
+        this.wildHerdRegroupOffsetZ = offsetZ;
+        this.wildHerdRegroupLeaderEntityId = lead.getEntityId();
+        this.wildHerdRegroupThreatEntityId = threat.getEntityId();
+        this.wildHerdRegroupUntilTick =
+                now + WILD_HERD_REGROUP_DURATION_TICKS;
+        this.nextWildHerdRepathTick = this.ticksExisted;
+        this.wildHerdRegroupPathOwned = false;
+        this.getNavigator().clearPathEntity();
+    }
+
+    private void beginWildHerdRegroupToAdult(
+            LOTREntityMumakil adult,
+            EntityLivingBase threat,
+            long now
+    ) {
+        if (this.isWildHerdRegroupActive()) {
+            if (this.wildHerdRegroupThreatEntityId
+                    == threat.getEntityId()) {
+                return;
+            }
+            this.clearWildHerdRegroup();
+        }
+
+        double dx = adult.posX - this.posX;
+        double dz = adult.posZ - this.posZ;
+        if (dx * dx + dz * dz
+                <= WILD_HERD_REGROUP_START_DISTANCE_SQ) {
+            return;
+        }
+
+        this.wildHerdRegroupLeaderEntityId = adult.getEntityId();
+        this.wildHerdRegroupThreatEntityId = threat.getEntityId();
+        this.wildHerdRegroupX = adult.posX;
+        this.wildHerdRegroupZ = adult.posZ;
+        this.wildHerdRegroupOffsetX = 0.0D;
+        this.wildHerdRegroupOffsetZ = 0.0D;
+        this.wildHerdRegroupUntilTick =
+                now + WILD_HERD_REGROUP_DURATION_TICKS;
+        this.nextWildHerdRepathTick = this.ticksExisted;
+        this.wildHerdRegroupPathOwned = false;
+        this.getNavigator().clearPathEntity();
+    }
+
+    private void updateWildHerdRegroup() {
+        if (!this.isWildHerdRegroupActive()) {
+            if (this.wildHerdRegroupUntilTick != 0L) {
+                this.clearWildHerdRegroup();
+            }
+            return;
+        }
+
+        if (!this.isWildMumakil()) {
+            this.clearWildHerdRegroup();
+            return;
+        }
+        if (this.getAttackTarget() != null) {
+            this.wildHerdRegroupPathOwned = false;
+            this.clearWildHerdRegroup();
+            return;
+        }
+        if (this.isTerritorialWarningActive()) {
+            this.clearWildHerdRegroup();
+            return;
+        }
+
+        LOTREntityMumakil leader = null;
+        if (this.wildHerdRegroupLeaderEntityId != 0) {
+            Entity leaderEntity = this.worldObj.getEntityByID(
+                    this.wildHerdRegroupLeaderEntityId
+            );
+            if (!(leaderEntity instanceof LOTREntityMumakil)
+                    || !((LOTREntityMumakil)leaderEntity)
+                    .isWildAdultMumakil()) {
+                this.clearWildHerdRegroup();
+                return;
+            }
+            leader = (LOTREntityMumakil)leaderEntity;
+            this.wildHerdRegroupX = leader.posX
+                    + (this.isBabyMumakil()
+                    ? 0.0D
+                    : this.wildHerdRegroupOffsetX);
+            this.wildHerdRegroupZ = leader.posZ
+                    + (this.isBabyMumakil()
+                    ? 0.0D
+                    : this.wildHerdRegroupOffsetZ);
+        }
+
+        Entity threat = this.worldObj.getEntityByID(
+                this.wildHerdRegroupThreatEntityId
+        );
+        if (!(threat instanceof EntityLivingBase)
+                || !threat.isEntityAlive()) {
+            this.clearWildHerdRegroup();
+            return;
+        }
+        if (leader != null
+                && !leader.isTerritorialWarningActive()
+                && leader.getAttackTarget() == null
+                && leader.getDistanceSqToEntity(threat)
+                > TERRITORIAL_WARNING_CANCEL_RADIUS
+                * TERRITORIAL_WARNING_CANCEL_RADIUS) {
+            this.clearWildHerdRegroup();
+            return;
+        }
+
+        double dx = this.wildHerdRegroupX - this.posX;
+        double dz = this.wildHerdRegroupZ - this.posZ;
+        double distanceSq = dx * dx + dz * dz;
+
+        if (distanceSq
+                <= WILD_HERD_REGROUP_COMPLETE_DISTANCE_SQ) {
+            this.clearWildHerdRegroup();
+            return;
+        }
+
+        if (this.ticksExisted >= this.nextWildHerdRepathTick
+                && this.getNavigator().noPath()) {
+            this.nextWildHerdRepathTick = this.ticksExisted
+                    + WILD_HERD_REPATH_COOLDOWN_TICKS;
+            this.wildHerdRegroupPathOwned =
+                    this.getNavigator().tryMoveToXYZ(
+                    this.wildHerdRegroupX,
+                    MathHelper.floor_double(this.boundingBox.minY),
+                    this.wildHerdRegroupZ,
+                    this.isBabyMumakil()
+                            ? BABY_FOLLOW_SPEED
+                            : WILD_WANDER_SPEED
+            );
+        }
+    }
+
+    private boolean isWildHerdRegroupActive() {
+        return this.worldObj != null
+                && this.wildHerdRegroupUntilTick
+                > this.worldObj.getTotalWorldTime();
+    }
+
+    private void clearWildHerdRegroup() {
+        if (this.wildHerdRegroupPathOwned
+                && !this.getNavigator().noPath()) {
+            this.getNavigator().clearPathEntity();
+        }
+        this.wildHerdRegroupUntilTick = 0L;
+        this.wildHerdRegroupLeaderEntityId = 0;
+        this.wildHerdRegroupThreatEntityId = 0;
+        this.wildHerdRegroupX = 0.0D;
+        this.wildHerdRegroupZ = 0.0D;
+        this.wildHerdRegroupOffsetX = 0.0D;
+        this.wildHerdRegroupOffsetZ = 0.0D;
+        this.nextWildHerdRepathTick = 0;
+        this.wildHerdRegroupPathOwned = false;
     }
 
     private boolean canTargetWildMob(EntityLivingBase target) {
@@ -479,6 +1660,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             return false;
         }
 
+        if (target instanceof EntityAnimal) {
+            return false;
+        }
+
         if (target instanceof LOTREntityNPC) {
             LOTREntityNPC npc = (LOTREntityNPC)target;
             return !npc.hiredNPCInfo.isActive;
@@ -499,29 +1684,715 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return 2;
     }
 
-    private EntityAIBase createWildMobTargetAI(Class targetClass) {
-        return new EntityAINearestAttackableTarget(this, targetClass, 5, true, false, new IEntitySelector() {
-            @Override
-            public boolean isEntityApplicable(Entity entity) {
-                return entity instanceof EntityLivingBase
-                        && LOTREntityMumakil.this.isWildMumakil()
-                        && LOTREntityMumakil.this.canTargetWildMob((EntityLivingBase)entity);
-            }
-        }) {
-            @Override
-            public boolean shouldExecute() {
-                return LOTREntityMumakil.this.isWildMumakil()
-                        && (LOTREntityMumakil.this.getAttackTarget() != null || LOTREntityMumakil.this.isWildAngerWaveActive())
-                        && super.shouldExecute();
-            }
+    private boolean isPlayerHoldingMelon(EntityPlayer player) {
+        if (player == null || !player.isEntityAlive()) {
+            return false;
+        }
 
-            @Override
-            public boolean continueExecuting() {
-                return LOTREntityMumakil.this.isWildMumakil() && super.continueExecuting();
-            }
-        };
+        ItemStack heldItem = player.getCurrentEquippedItem();
+        if (heldItem == null) {
+            return false;
+        }
+
+        return heldItem.getItem() == Items.melon
+                || Block.getBlockFromItem(heldItem.getItem()) == Blocks.melon_block;
     }
 
+    /*
+     * MUMAKIL_ADULT_BREEDING_AND_FOV_TRANSITION_FIX_V1_1
+     *
+     * Babies retain their existing lure behavior. Among adults, only
+     * player-tamed adults follow melon holders. Wild adults and hired-war
+     * Mumakil are explicitly excluded.
+     */
+    private boolean shouldFollowPlayerHoldingMelon() {
+        MumakilMode mode = this.getMumakilMode();
+        return mode == MumakilMode.BABY_WILD
+                || mode == MumakilMode.BABY_TAMED
+                || mode == MumakilMode.ADULT_TAMED;
+    }
+public boolean isBabyPanicAnimationActive() {
+        return this.babyPanicAnimationActive;
+    }
+
+    private void setBabyPanicAnimationActive(boolean active) {
+        if (this.babyPanicAnimationActive == active) {
+            return;
+        }
+
+        this.babyPanicAnimationActive = active;
+
+        if (!this.worldObj.isRemote) {
+            this.worldObj.setEntityState(
+                    this,
+                    active
+                            ? MUMAKIL_BABY_PANIC_START_STATUS
+                            : MUMAKIL_BABY_PANIC_STOP_STATUS
+            );
+        }
+    }
+    private class EntityAIMumakilBabyPanic extends EntityAIPanic {
+        private EntityAIMumakilBabyPanic() {
+            super(LOTREntityMumakil.this, BABY_PANIC_SPEED);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            return LOTREntityMumakil.this.isBabyMumakil()
+                    && LOTREntityMumakil.this.riddenByEntity == null
+                    && super.shouldExecute();
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return LOTREntityMumakil.this.isBabyMumakil()
+                    && LOTREntityMumakil.this.riddenByEntity == null
+                    && super.continueExecuting();
+        }
+
+        @Override
+        public void startExecuting() {
+            super.startExecuting();
+            LOTREntityMumakil.this.setBabyPanicAnimationActive(true);
+        }
+
+        @Override
+        public void resetTask() {
+            super.resetTask();
+            LOTREntityMumakil.this.setBabyPanicAnimationActive(false);
+        }
+    }
+
+    private class EntityAIMumakilMate extends EntityAIBase {
+        private static final int BREEDING_DELAY_TICKS = 60;
+        private static final double SEARCH_RANGE = 16.0D;
+        private static final double SEARCH_VERTICAL_RANGE = 8.0D;
+        private static final double MOVE_SPEED = 1.0D;
+        private static final double EXTRA_COMPLETION_PADDING = 2.0D;
+
+        private LOTREntityMumakil targetMate;
+        private int breedingDelay;
+
+        private EntityAIMumakilMate() {
+            this.setMutexBits(3);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            if (LOTREntityMumakil.this.getMumakilMode()
+                    != MumakilMode.ADULT_TAMED
+                    || !LOTREntityMumakil.this.isInLove()
+                    || LOTREntityMumakil.this.riddenByEntity != null) {
+                return false;
+            }
+
+            this.targetMate = this.findNearestMate();
+            return this.targetMate != null;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            return this.targetMate != null
+                    && this.targetMate.isEntityAlive()
+                    && this.targetMate.isInLove()
+                    && this.targetMate.getMumakilMode()
+                    == MumakilMode.ADULT_TAMED
+                    && this.targetMate.riddenByEntity == null
+                    && this.breedingDelay < BREEDING_DELAY_TICKS;
+        }
+
+        @Override
+        public void resetTask() {
+            this.targetMate = null;
+            this.breedingDelay = 0;
+        }
+
+        @Override
+        public void updateTask() {
+            LOTREntityMumakil.this.getLookHelper()
+                    .setLookPositionWithEntity(
+                            this.targetMate,
+                            10.0F,
+                            (float)LOTREntityMumakil.this
+                                    .getVerticalFaceSpeed()
+                    );
+
+            double completionDistance =
+                    ((double)LOTREntityMumakil.this.width
+                            + (double)this.targetMate.width)
+                            * 0.5D
+                            + EXTRA_COMPLETION_PADDING;
+            double completionDistanceSq =
+                    completionDistance * completionDistance;
+
+            if (LOTREntityMumakil.this
+                    .getDistanceSqToEntity(this.targetMate)
+                    > completionDistanceSq) {
+                LOTREntityMumakil.this.getNavigator()
+                        .tryMoveToEntityLiving(
+                                this.targetMate,
+                                MOVE_SPEED
+                        );
+            } else if (!LOTREntityMumakil.this
+                    .getNavigator().noPath()) {
+                LOTREntityMumakil.this.getNavigator()
+                        .clearPathEntity();
+            }
+
+            ++this.breedingDelay;
+
+            if (this.breedingDelay >= BREEDING_DELAY_TICKS
+                    && LOTREntityMumakil.this
+                    .getDistanceSqToEntity(this.targetMate)
+                    <= completionDistanceSq) {
+                this.spawnMumakCalf();
+            }
+        }
+
+        private LOTREntityMumakil findNearestMate() {
+            List nearby = LOTREntityMumakil.this.worldObj
+                    .getEntitiesWithinAABB(
+                            LOTREntityMumakil.class,
+                            LOTREntityMumakil.this.boundingBox
+                                    .expand(
+                                            SEARCH_RANGE,
+                                            SEARCH_VERTICAL_RANGE,
+                                            SEARCH_RANGE
+                                    )
+                    );
+
+            LOTREntityMumakil nearest = null;
+            double nearestDistanceSq = Double.MAX_VALUE;
+
+            for (int i = 0; i < nearby.size(); ++i) {
+                LOTREntityMumakil candidate =
+                        (LOTREntityMumakil)nearby.get(i);
+
+                if (!LOTREntityMumakil.this
+                        .canMateWith(candidate)
+                        || candidate.riddenByEntity != null) {
+                    continue;
+                }
+
+                double distanceSq = LOTREntityMumakil.this
+                        .getDistanceSqToEntity(candidate);
+
+                if (distanceSq < nearestDistanceSq) {
+                    nearest = candidate;
+                    nearestDistanceSq = distanceSq;
+                }
+            }
+
+            return nearest;
+        }
+
+        private void spawnMumakCalf() {
+            EntityAgeable childEntity =
+                    LOTREntityMumakil.this
+                            .createChild(this.targetMate);
+
+            if (!(childEntity instanceof LOTREntityMumakil)) {
+                LOTREntityMumakil.this.resetInLove();
+                this.targetMate.resetInLove();
+                return;
+            }
+
+            LOTREntityMumakil child =
+                    (LOTREntityMumakil)childEntity;
+
+            EntityPlayer breedingPlayer =
+                    LOTREntityMumakil.this.func_146083_cb();
+
+            if (breedingPlayer == null) {
+                breedingPlayer = this.targetMate.func_146083_cb();
+            }
+
+            if (breedingPlayer != null) {
+                breedingPlayer.triggerAchievement(
+                        StatList.field_151186_x
+                );
+            }
+
+            LOTREntityMumakil.this.setGrowingAge(6000);
+            this.targetMate.setGrowingAge(6000);
+            LOTREntityMumakil.this.resetInLove();
+            this.targetMate.resetInLove();
+
+            child.setGrowingAge(-24000);
+            child.setLocationAndAngles(
+                    (LOTREntityMumakil.this.posX
+                            + this.targetMate.posX) * 0.5D,
+                    Math.min(
+                            LOTREntityMumakil.this.posY,
+                            this.targetMate.posY
+                    ),
+                    (LOTREntityMumakil.this.posZ
+                            + this.targetMate.posZ) * 0.5D,
+                    LOTREntityMumakil.this.rotationYaw,
+                    0.0F
+            );
+
+            boolean childSpawned =
+                    LOTREntityMumakil.this.worldObj
+                            .spawnEntityInWorld(child);
+            if (childSpawned && breedingPlayer != null) {
+                MumakilAchievements.award(
+                        breedingPlayer,
+                        MumakilAchievements.breedCalf
+                );
+            }
+
+            for (int i = 0; i < 7; ++i) {
+                double velocityX =
+                        LOTREntityMumakil.this.rand.nextGaussian()
+                                * 0.02D;
+                double velocityY =
+                        LOTREntityMumakil.this.rand.nextGaussian()
+                                * 0.02D;
+                double velocityZ =
+                        LOTREntityMumakil.this.rand.nextGaussian()
+                                * 0.02D;
+
+                LOTREntityMumakil.this.worldObj.spawnParticle(
+                        "heart",
+                        child.posX
+                                + (double)(
+                                        LOTREntityMumakil.this.rand
+                                                .nextFloat()
+                                        * child.width * 2.0F
+                                )
+                                - (double)child.width,
+                        child.posY
+                                + 0.5D
+                                + (double)(
+                                        LOTREntityMumakil.this.rand
+                                                .nextFloat()
+                                        * child.height
+                                ),
+                        child.posZ
+                                + (double)(
+                                        LOTREntityMumakil.this.rand
+                                                .nextFloat()
+                                        * child.width * 2.0F
+                                )
+                                - (double)child.width,
+                        velocityX,
+                        velocityY,
+                        velocityZ
+                );
+            }
+
+            if (LOTREntityMumakil.this.worldObj
+                    .getGameRules()
+                    .getGameRuleBooleanValue("doMobLoot")) {
+                LOTREntityMumakil.this.worldObj
+                        .spawnEntityInWorld(
+                                new EntityXPOrb(
+                                        LOTREntityMumakil.this.worldObj,
+                                        child.posX,
+                                        child.posY,
+                                        child.posZ,
+                                        LOTREntityMumakil.this.rand
+                                                .nextInt(7) + 1
+                                )
+                        );
+            }
+        }
+    }
+
+    private class EntityAIMumakilFollowMelon extends EntityAIBase {
+        private EntityPlayer temptingPlayer;
+        private int nextSearchTick;
+        private int nextRepathTick;
+
+        private EntityAIMumakilFollowMelon() {
+            this.setMutexBits(3);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            if (!LOTREntityMumakil.this.shouldFollowPlayerHoldingMelon()
+                    || LOTREntityMumakil.this.riddenByEntity != null
+                    || LOTREntityMumakil.this.ticksExisted < this.nextSearchTick) {
+                return false;
+            }
+
+            this.nextSearchTick = LOTREntityMumakil.this.ticksExisted
+                    + BABY_MELON_SEARCH_INTERVAL;
+
+            List nearbyPlayers = LOTREntityMumakil.this.worldObj.getEntitiesWithinAABB(
+                    EntityPlayer.class,
+                    LOTREntityMumakil.this.boundingBox.expand(
+                            BABY_MELON_FOLLOW_RANGE,
+                            BABY_FOLLOW_VERTICAL_RANGE,
+                            BABY_MELON_FOLLOW_RANGE
+                    )
+            );
+
+            EntityPlayer nearestPlayer = null;
+            double nearestDistanceSq = Double.MAX_VALUE;
+
+            for (int i = 0; i < nearbyPlayers.size(); ++i) {
+                EntityPlayer candidate = (EntityPlayer)nearbyPlayers.get(i);
+                if (!LOTREntityMumakil.this.isPlayerHoldingMelon(candidate)) {
+                    continue;
+                }
+
+                double distanceSq = LOTREntityMumakil.this.getDistanceSqToEntity(candidate);
+                if (distanceSq < nearestDistanceSq) {
+                    nearestPlayer = candidate;
+                    nearestDistanceSq = distanceSq;
+                }
+            }
+
+            if (nearestPlayer == null) {
+                return false;
+            }
+
+            this.temptingPlayer = nearestPlayer;
+            return true;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            if (!LOTREntityMumakil.this.shouldFollowPlayerHoldingMelon()
+                    || LOTREntityMumakil.this.riddenByEntity != null
+                    || !LOTREntityMumakil.this.isPlayerHoldingMelon(this.temptingPlayer)) {
+                return false;
+            }
+
+            return LOTREntityMumakil.this.getDistanceSqToEntity(this.temptingPlayer)
+                    <= BABY_MELON_MAX_DISTANCE_SQ;
+        }
+
+        @Override
+        public void startExecuting() {
+            this.nextRepathTick = 0;
+        }
+
+
+        @Override
+        public void updateTask() {
+            LOTREntityMumakil.this.getLookHelper().setLookPositionWithEntity(
+                    this.temptingPlayer,
+                    10.0F,
+                    (float)LOTREntityMumakil.this.getVerticalFaceSpeed()
+            );
+
+            double distanceSq = LOTREntityMumakil.this.getDistanceSqToEntity(
+                    this.temptingPlayer
+            );
+
+            if (distanceSq <= BABY_MELON_STOP_DISTANCE_SQ) {
+                if (!LOTREntityMumakil.this.getNavigator().noPath()) {
+                    LOTREntityMumakil.this.getNavigator().clearPathEntity();
+                }
+                return;
+            }
+
+            if (LOTREntityMumakil.this.ticksExisted >= this.nextRepathTick) {
+                this.nextRepathTick = LOTREntityMumakil.this.ticksExisted
+                        + BABY_MELON_REPATH_INTERVAL;
+                LOTREntityMumakil.this.getNavigator().tryMoveToEntityLiving(
+                        this.temptingPlayer,
+                        BABY_MELON_FOLLOW_SPEED
+                );
+            }
+
+            PathEntity path = LOTREntityMumakil.this.getNavigator().getPath();
+            if (path != null && !path.isFinished()) {
+                Vec3 nextPathPosition = path.getPosition(LOTREntityMumakil.this);
+                if (nextPathPosition != null) {
+                    LOTREntityMumakil.this.faceWildMovePoint(
+                            nextPathPosition.xCoord,
+                            nextPathPosition.zCoord
+                    );
+                }
+            }
+        }
+
+        @Override
+        public void resetTask() {
+            if (DEBUG_BABY_FAMILY_AI && !LOTREntityMumakil.this.worldObj.isRemote) {
+                System.out.println(
+                        "[LOTRMoreMobs][BabyFamilyAI] melon-reset"
+                                + " baby=" + LOTREntityMumakil.this.getEntityId()
+                                + " player=" + (this.temptingPlayer == null
+                                ? "none"
+                                : this.temptingPlayer.getEntityId())
+                                + " tick=" + LOTREntityMumakil.this.ticksExisted
+                );
+            }
+
+            this.temptingPlayer = null;
+            LOTREntityMumakil.this.getNavigator().clearPathEntity();
+        }
+    }
+    // Baby family return: BABY_REMEMBER_ADULT_AFTER_LURE_V1
+    private class EntityAIMumakilBabyFollowAdult extends EntityAIBase {
+        private LOTREntityMumakil adultMumakil;
+        private int nextSearchTick;
+        private int nextRepathTick;
+        private int nextDiagnosticTick;
+
+        private EntityAIMumakilBabyFollowAdult() {
+            this.setMutexBits(1);
+        }
+
+        @Override
+        public boolean shouldExecute() {
+            if (LOTREntityMumakil.this.getMumakilMode() != MumakilMode.BABY_WILD
+                    || LOTREntityMumakil.this.riddenByEntity != null
+                    || LOTREntityMumakil.this
+                    .isWildHerdRegroupActive()) {
+                return false;
+            }
+
+            if (this.isValidAdultMumakil(this.adultMumakil)) {
+                double rememberedDistanceSq = LOTREntityMumakil.this
+                        .getDistanceSqToEntity(this.adultMumakil);
+
+                if (rememberedDistanceSq > BABY_FOLLOW_START_DISTANCE_SQ
+                        && rememberedDistanceSq
+                        <= BABY_FOLLOW_REMEMBERED_MAX_DISTANCE_SQ) {
+                    this.debugThrottled(
+                            "should=true remembered"
+                                    + " adult=" + this.adultMumakil.getEntityId()
+                                    + " distance=" + this.formatDistance(rememberedDistanceSq)
+                    );
+                    return true;
+                }
+
+                if (rememberedDistanceSq
+                        <= BABY_FOLLOW_REMEMBERED_MAX_DISTANCE_SQ) {
+                    this.debugThrottled(
+                            "should=false inside-radius"
+                                    + " adult=" + this.adultMumakil.getEntityId()
+                                    + " distance=" + this.formatDistance(rememberedDistanceSq)
+                    );
+                    return false;
+                }
+            }
+
+            this.adultMumakil = null;
+
+            if (LOTREntityMumakil.this.ticksExisted < this.nextSearchTick) {
+                return false;
+            }
+
+            this.nextSearchTick = LOTREntityMumakil.this.ticksExisted
+                    + BABY_FOLLOW_SEARCH_INTERVAL;
+
+            List nearby = LOTREntityMumakil.this.worldObj.getEntitiesWithinAABB(
+                    LOTREntityMumakil.class,
+                    LOTREntityMumakil.this.boundingBox.expand(
+                            BABY_FOLLOW_RANGE,
+                            BABY_FOLLOW_VERTICAL_RANGE,
+                            BABY_FOLLOW_RANGE
+                    )
+            );
+
+            LOTREntityMumakil nearestAdult = null;
+            double nearestDistanceSq = Double.MAX_VALUE;
+            boolean babyTamed = LOTREntityMumakil.this.isTamedMumakilMode();
+            int livingAdults = 0;
+            int hiredAdults = 0;
+            int tameMismatchAdults = 0;
+            int compatibleAdults = 0;
+
+            for (int i = 0; i < nearby.size(); ++i) {
+                LOTREntityMumakil candidate = (LOTREntityMumakil)nearby.get(i);
+
+                if (candidate == LOTREntityMumakil.this
+                        || candidate.isDead
+                        || !candidate.isEntityAlive()
+                        || !candidate.isAdultMumakil()) {
+                    continue;
+                }
+
+                ++livingAdults;
+
+                if (candidate.isHiredWarMumakil()) {
+                    ++hiredAdults;
+                    continue;
+                }
+
+                if (candidate.isTamedMumakilMode() != babyTamed) {
+                    ++tameMismatchAdults;
+                    continue;
+                }
+
+                ++compatibleAdults;
+                double distanceSq = LOTREntityMumakil.this
+                        .getDistanceSqToEntity(candidate);
+
+                if (distanceSq > BABY_FOLLOW_MAX_DISTANCE_SQ
+                        || distanceSq >= nearestDistanceSq) {
+                    continue;
+                }
+
+                nearestAdult = candidate;
+                nearestDistanceSq = distanceSq;
+            }
+
+            this.adultMumakil = nearestAdult;
+
+            this.debugThrottled(
+                    "scan"
+                            + " nearby=" + nearby.size()
+                            + " livingAdults=" + livingAdults
+                            + " hiredRejected=" + hiredAdults
+                            + " tameRejected=" + tameMismatchAdults
+                            + " compatible=" + compatibleAdults
+                            + " selected=" + (nearestAdult == null
+                            ? "none"
+                            : nearestAdult.getEntityId())
+                            + " distance=" + (nearestAdult == null
+                            ? "n/a"
+                            : this.formatDistance(nearestDistanceSq))
+                            + " should=" + (nearestAdult != null
+                            && nearestDistanceSq > BABY_FOLLOW_START_DISTANCE_SQ)
+            );
+
+            return this.adultMumakil != null
+                    && nearestDistanceSq > BABY_FOLLOW_START_DISTANCE_SQ;
+        }
+
+        @Override
+        public boolean continueExecuting() {
+            if (LOTREntityMumakil.this.getMumakilMode() != MumakilMode.BABY_WILD
+                    || LOTREntityMumakil.this.riddenByEntity != null
+                    || LOTREntityMumakil.this
+                    .isWildHerdRegroupActive()
+                    || !this.isValidAdultMumakil(this.adultMumakil)
+                    || this.adultMumakil.isTamedMumakilMode()
+                    != LOTREntityMumakil.this.isTamedMumakilMode()) {
+                this.debugEvent(
+                        "continue=false invalid"
+                                + " adult=" + (this.adultMumakil == null
+                                ? "none"
+                                : this.adultMumakil.getEntityId())
+                );
+                return false;
+            }
+
+            double distanceSq = LOTREntityMumakil.this.getDistanceSqToEntity(
+                    this.adultMumakil
+            );
+            boolean continueFollowing = distanceSq > BABY_FOLLOW_STOP_DISTANCE_SQ
+                    && distanceSq <= BABY_FOLLOW_REMEMBERED_MAX_DISTANCE_SQ;
+
+            if (!continueFollowing) {
+                this.debugEvent(
+                        "continue=false distance"
+                                + " adult=" + this.adultMumakil.getEntityId()
+                                + " distance=" + this.formatDistance(distanceSq)
+                );
+            }
+
+            return continueFollowing;
+        }
+
+        @Override
+        public void startExecuting() {
+            this.nextRepathTick = 0;
+            this.debugEvent(
+                    "start"
+                            + " adult=" + (this.adultMumakil == null
+                            ? "none"
+                            : this.adultMumakil.getEntityId())
+            );
+        }
+
+        @Override
+        public void updateTask() {
+            LOTREntityMumakil.this.getLookHelper().setLookPositionWithEntity(
+                    this.adultMumakil,
+                    10.0F,
+                    (float)LOTREntityMumakil.this.getVerticalFaceSpeed()
+            );
+
+            if (LOTREntityMumakil.this.ticksExisted >= this.nextRepathTick) {
+                this.nextRepathTick = LOTREntityMumakil.this.ticksExisted
+                        + BABY_FOLLOW_REPATH_INTERVAL;
+
+                double distanceSq = LOTREntityMumakil.this.getDistanceSqToEntity(
+                        this.adultMumakil
+                );
+                boolean accepted = LOTREntityMumakil.this.getNavigator()
+                        .tryMoveToEntityLiving(
+                                this.adultMumakil,
+                                BABY_FOLLOW_SPEED
+                        );
+
+                this.debugThrottled(
+                        "path"
+                                + " adult=" + this.adultMumakil.getEntityId()
+                                + " distance=" + this.formatDistance(distanceSq)
+                                + " accepted=" + accepted
+                                + " noPath=" + LOTREntityMumakil.this
+                                .getNavigator().noPath()
+                );
+            }
+        }
+
+        @Override
+        public void resetTask() {
+            this.debugEvent(
+                    "reset"
+                            + " adult=" + (this.adultMumakil == null
+                            ? "none"
+                            : this.adultMumakil.getEntityId())
+            );
+
+            LOTREntityMumakil.this.getNavigator().clearPathEntity();
+
+            if (LOTREntityMumakil.this.getMumakilMode() != MumakilMode.BABY_WILD
+                    || !this.isValidAdultMumakil(this.adultMumakil)) {
+                this.adultMumakil = null;
+            }
+        }
+
+        private boolean isValidAdultMumakil(LOTREntityMumakil candidate) {
+            return candidate != null
+                    && candidate != LOTREntityMumakil.this
+                    && !candidate.isDead
+                    && candidate.isEntityAlive()
+                    && candidate.getMumakilMode() == MumakilMode.ADULT_WILD
+                    && !candidate.getBelongsToNPC();
+        }
+
+        private String formatDistance(double distanceSq) {
+            return String.format("%.2f", Math.sqrt(Math.max(0.0D, distanceSq)));
+        }
+
+        private void debugThrottled(String message) {
+            if (!DEBUG_BABY_FAMILY_AI
+                    || LOTREntityMumakil.this.worldObj.isRemote
+                    || LOTREntityMumakil.this.ticksExisted
+                    < this.nextDiagnosticTick) {
+                return;
+            }
+
+            this.nextDiagnosticTick = LOTREntityMumakil.this.ticksExisted + 20;
+            this.debugEvent(message);
+        }
+
+        private void debugEvent(String message) {
+            if (!DEBUG_BABY_FAMILY_AI
+                    || LOTREntityMumakil.this.worldObj.isRemote) {
+                return;
+            }
+
+            System.out.println(
+                    "[LOTRMoreMobs][BabyFamilyAI]"
+                            + " baby=" + LOTREntityMumakil.this.getEntityId()
+                            + " tick=" + LOTREntityMumakil.this.ticksExisted
+                            + " mode=" + LOTREntityMumakil.this.getMumakilMode()
+                            + " " + message
+            );
+        }
+    }
     private class EntityAIWildMumakilMove extends EntityAIBase {
         private int nextChasePathTick;
         private int nextWanderPathTick;
@@ -575,9 +2446,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
             if (LOTREntityMumakil.this.ticksExisted >= this.nextChasePathTick) {
-                long perfStart = MumakilPerformanceTracker.startTimer();
+                /*
+                 * AGGRO_TREE_CORRIDOR_AND_WILD_BABY_FOLLOW_V1
+                 * Remove leaf/log collision before asking the navigator for
+                 * the next chase route.
+                 */
+                LOTREntityMumakil.this.clearAggroObstaclesForMovement(true);
+
+                boolean trackPerformance =
+                        MumakilPerformanceTracker.isEnabled();
+                long perfStart = trackPerformance
+                        ? MumakilPerformanceTracker.startTimer()
+                        : 0L;
                 boolean pathAccepted = LOTREntityMumakil.this.getNavigator().tryMoveToEntityLiving(target, WILD_CHASE_SPEED);
-                if (MumakilPerformanceTracker.isEnabled()) {
+                if (trackPerformance) {
                     MumakilPerformanceTracker.recordMountPathRequest(
                             LOTREntityMumakil.this,
                             System.nanoTime() - perfStart,
@@ -642,7 +2524,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return;
             }
 
-            long perfStart = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long perfStart = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             boolean pathAccepted = LOTREntityMumakil.this.getNavigator().tryMoveToXYZ(
                     wanderTarget.xCoord,
                     wanderTarget.yCoord,
@@ -651,7 +2537,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             );
             boolean pathUsable = pathAccepted && !LOTREntityMumakil.this.getNavigator().noPath();
 
-            if (MumakilPerformanceTracker.isEnabled()) {
+            if (trackPerformance) {
                 MumakilPerformanceTracker.recordMountPathRequest(
                         LOTREntityMumakil.this,
                         System.nanoTime() - perfStart,
@@ -716,8 +2602,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     public boolean hasMumakilHowdahEquipped() {
-        return this.hasMumakilHowdahInventoryStack()
-                || this.getMumakilSyncedArmorIndex() > 0;
+        return !this.isChild()
+                && (this.hasMumakilHowdahInventoryStack()
+                || this.getMumakilSyncedArmorIndex() > 0);
     }
 
     private boolean hasMumakilHowdahInventoryStack() {
@@ -735,12 +2622,27 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 || stack != null && stack.getItem() == Items.saddle;
     }
 
+    private boolean hasMumakilSaddleInventoryStack() {
+        ItemStack stack = this.getMumakilInventoryStack(0);
+        return stack != null && stack.getItem() == Items.saddle;
+    }
+
     private int getMumakilSyncedArmorIndex() {
         try {
             return this.dataWatcher.getWatchableObjectInt(HORSE_ARMOR_WATCHER_ID);
         } catch (Exception e) {
             return 0;
         }
+    }
+
+    /**
+     * Client render state comes from the horse armor watcher. Keeping this
+     * accessor separate prevents the renderer from probing the inherited horse
+     * inventory every frame while preserving the inventory as server authority.
+     */
+    public boolean hasMumakilSyncedHowdahEquipped() {
+        return !this.isChild()
+                && this.getMumakilSyncedArmorIndex() > 0;
     }
 
     private void setMumakilSyncedArmorIndex(int armorIndex) {
@@ -755,7 +2657,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             return;
         }
 
-        int desiredArmorIndex = this.hasMumakilHowdahInventoryStack() ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0;
+        int desiredArmorIndex = !this.isChild() && this.hasMumakilHowdahInventoryStack()
+                ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX
+                : 0;
 
         if (this.getMumakilSyncedArmorIndex() != desiredArmorIndex) {
             this.setMumakilSyncedArmorIndex(desiredArmorIndex);
@@ -770,8 +2674,77 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    /**
+     * Enforces the player-equipment dependency after a completed inventory
+     * mutation. Removing the slot first makes repeated container/tick callbacks
+     * idempotent; the exact stack (including NBT) is then returned or dropped.
+     */
+    public boolean enforceTamedAdultHowdahRequiresSaddle(
+            EntityPlayer responsiblePlayer
+    ) {
+        if (this.worldObj == null
+                || this.worldObj.isRemote
+                || this.getMumakilMode() != MumakilMode.ADULT_TAMED
+                || this.hasMumakilSaddleInventoryStack()) {
+            return false;
+        }
+
+        IInventory inventory = this.getMumakilMountInventory();
+        if (inventory == null || inventory.getSizeInventory() <= 1) {
+            return false;
+        }
+
+        ItemStack howdah = inventory.getStackInSlot(1);
+        if (howdah == null || howdah.getItem() != Main.mumakilHowdah) {
+            return false;
+        }
+
+        inventory.setInventorySlotContents(1, null);
+        inventory.markDirty();
+        this.setMumakilSyncedArmorIndex(0);
+
+        boolean mayReturnToPlayer =
+                responsiblePlayer != null
+                        && !responsiblePlayer.isDead
+                        && responsiblePlayer.worldObj == this.worldObj;
+        if (mayReturnToPlayer
+                && responsiblePlayer.inventory
+                .addItemStackToInventory(howdah)) {
+            responsiblePlayer.inventory.markDirty();
+            return true;
+        }
+
+        if (howdah.stackSize > 0) {
+            this.entityDropItem(howdah, this.height * 0.5F);
+        }
+        return true;
+    }
+
+    public void setMumakilHowdahPreviewEquipped(boolean equipped) {
+        if (this.worldObj.isRemote && !this.addedToChunk) {
+            this.mumakilHirePreview = equipped;
+            this.setMumakilSyncedArmorIndex(
+                    equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0
+            );
+        } else {
+            /*
+             * This marker belongs only to detached client GUI entities.
+             * Mounting, spawning, or equipping a real world Mumak can never
+             * retain preview rendering state.
+             */
+            this.mumakilHirePreview = false;
+        }
+    }
+
+    public boolean isMumakilHirePreview() {
+        return this.mumakilHirePreview
+                && this.worldObj != null
+                && this.worldObj.isRemote
+                && !this.addedToChunk;
+    }
+
     private ItemStack getMumakilInventoryStack(int slot) {
-        IInventory inventory = this.findMumakilMountInventory();
+        IInventory inventory = this.getMumakilMountInventory();
         if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
             return null;
         }
@@ -780,7 +2753,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean setMumakilInventoryStack(int slot, ItemStack stack) {
-        IInventory inventory = this.findMumakilMountInventory();
+        IInventory inventory = this.getMumakilMountInventory();
         if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
             return false;
         }
@@ -795,79 +2768,69 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return true;
     }
 
-    private boolean tryEquipMumakilHowdah(EntityPlayer player) {
-        if (this.getBelongsToNPC()) {
-            return false;
+    public IInventory getMumakilMountInventory() {
+        /*
+         * EntityHorse constructs this inventory before the Mumak subclass and
+         * keeps the same instance for its lifetime. Cache it per entity; a
+         * missing/inaccessible field is also remembered so ticks do not retry.
+         */
+        if (this.cachedMumakilMountInventory != null) {
+            return this.cachedMumakilMountInventory;
+        }
+        if (this.mumakilMountInventoryReadAttempted) {
+            return null;
         }
 
-        ItemStack held = player.getCurrentEquippedItem();
-
-        if (!this.hasMumakilSaddleEquipped()) {
-            return false;
-        }
-
-        if (this.hasMumakilHowdahEquipped()) {
-            return false;
-        }
-
-        if (this.worldObj.isRemote) {
-            return true;
-        }
-
-        ItemStack howdahStack = new ItemStack(Main.mumakilHowdah);
-        if (!this.setMumakilInventoryStack(1, howdahStack)) {
-            return false;
-        }
-
-        if (!player.capabilities.isCreativeMode) {
-            --held.stackSize;
-            if (held.stackSize <= 0) {
-                player.inventory.setInventorySlotContents(player.inventory.currentItem, null);
+        this.mumakilMountInventoryReadAttempted = true;
+        Field inventoryField = resolveMumakilInventoryField();
+        if (inventoryField != null) {
+            try {
+                Object value = inventoryField.get(this);
+                if (value instanceof IInventory) {
+                    this.cachedMumakilMountInventory = (IInventory)value;
+                }
+            } catch (Exception ignored) {
             }
         }
-
-        player.swingItem();
-        return true;
+        return this.cachedMumakilMountInventory;
     }
 
-    private IInventory findMumakilMountInventory() {
-        String[] inventoryFieldNames = new String[] {
-                "horseChest",
-                "mountInventory",
-                "horseInventory",
-                "inventory"
-        };
+    private static Field resolveMumakilInventoryField() {
+        if (mumakilInventoryFieldResolved) {
+            return mumakilInventoryField;
+        }
 
-        for (int i = 0; i < inventoryFieldNames.length; ++i) {
-            Field field = this.findMumakilField(this.getClass(), inventoryFieldNames[i]);
-            if (field != null) {
+        synchronized (LOTREntityMumakil.class) {
+            if (!mumakilInventoryFieldResolved) {
+                mumakilInventoryField =
+                        findMumakilInventoryField(
+                                LOTREntityMumakil.class
+                        );
+                mumakilInventoryFieldResolved = true;
+            }
+        }
+        return mumakilInventoryField;
+    }
+
+    private static Field findMumakilInventoryField(Class type) {
+        for (int i = 0;
+             i < MUMAKIL_INVENTORY_FIELD_NAMES.length;
+             ++i) {
+            Class current = type;
+            while (current != null && current != Object.class) {
                 try {
-                    Object value = field.get(this);
-                    if (value instanceof IInventory) {
-                        return (IInventory)value;
-                    }
+                    Field field = current.getDeclaredField(
+                            MUMAKIL_INVENTORY_FIELD_NAMES[i]
+                    );
+                    field.setAccessible(true);
+                    return field;
+                } catch (NoSuchFieldException e) {
+                    current = current.getSuperclass();
                 } catch (Exception e) {
+                    return null;
                 }
             }
         }
-
-        return null;
-    }
-
-    private Field findMumakilField(Class type, String name) {
-        Class current = type;
-        while (current != null && current != Object.class) {
-            try {
-                Field field = current.getDeclaredField(name);
-                field.setAccessible(true);
-                return field;
-            } catch (NoSuchFieldException e) {
-                current = current.getSuperclass();
-            } catch (Exception e) {
-                return null;
-            }
-        }
-
         return null;
     }
 
@@ -877,87 +2840,500 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     public double getMountedYOffset() {
+        double scale = this.getMumakilRenderScale();
+
         if (this.hasMumakilHowdahEquipped()) {
-            return RIDER_HOWDAH_Y;
+            return RIDER_HOWDAH_Y * scale;
         }
 
         if (this.hasMumakilSaddleEquipped()) {
-            return RIDER_SADDLE_Y;
+            return RIDER_SADDLE_Y * scale;
         }
 
-        return RIDER_WILD_Y;
+        return RIDER_WILD_Y * scale;
     }
 
     public void updateRiderPosition() {
         if (this.riddenByEntity != null) {
-            boolean hasHowdah = this.hasMumakilHowdahEquipped();
-
-            double forwardOffset;
-            double sideOffset;
-
-            if (hasHowdah) {
-                forwardOffset = RIDER_HOWDAH_FORWARD;
-                sideOffset = RIDER_HOWDAH_SIDE;
-            } else if (this.hasMumakilSaddleEquipped()) {
-                forwardOffset = RIDER_SADDLE_FORWARD;
-                sideOffset = RIDER_SADDLE_SIDE;
-            } else {
-                forwardOffset = RIDER_WILD_FORWARD;
-                sideOffset = RIDER_WILD_SIDE;
-            }
-
-            double verticalOffset = this.getMountedYOffset() + this.riddenByEntity.getYOffset();
-
-            /*
-             * Important:
-             * For howdah riders, use renderYawOffset because that is the yaw used by the
-             * visible Mumakil body/howdah. Using rotationYaw can put the rider beside the
-             * howdah when the body and path-facing yaw disagree.
-             *
-             * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
-             * own look/target logic so his allegiances and aggro can control the mount
-             * normally through LOTR's hired-horse AI.
-             */
-            float placementYaw = hasHowdah ? this.renderYawOffset : this.rotationYaw;
-            float yawRadians = placementYaw * 3.1415927F / 180.0F;
-
-            double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
-            double forwardZ = MathHelper.cos(yawRadians) * forwardOffset;
-
-            double sideX = MathHelper.cos(yawRadians) * sideOffset;
-            double sideZ = MathHelper.sin(yawRadians) * sideOffset;
-
-            this.riddenByEntity.setPosition(
-                    this.posX + forwardX + sideX,
-                    this.posY + verticalOffset,
-                    this.posZ + forwardZ + sideZ
-            );
-
-            /*
-             * Keep player riding comfortable, but do not force NPC driver rotation.
-             * Forcing the NPC driver's rotation/head yaw was what caused the earlier glitch.
-             */
-            if (hasHowdah && this.riddenByEntity instanceof EntityPlayer) {
-                this.riddenByEntity.rotationYaw = placementYaw;
-                this.riddenByEntity.prevRotationYaw = placementYaw;
-            }
+            this.positionRiderAtMumakilAnchor(this.riddenByEntity);
         }
     }
 
+    /**
+     * Shared pure attachment transform for the real driver and client-only
+     * hiring-preview driver. This does not mount or tick the supplied entity.
+     */
+    public void positionRiderAtMumakilAnchor(Entity rider) {
+        Vec3 anchor = this.getMumakilRiderAnchor(rider);
+        if (anchor == null) {
+            return;
+        }
+
+        rider.setPosition(
+                anchor.xCoord,
+                anchor.yCoord,
+                anchor.zCoord
+        );
+    }
+
+    /**
+     * Returns the shared server/render world-space rider-feet anchor. Player
+     * projectile placement uses this same transform and then restores the
+     * bow-created eye/hand offset relative to the shooter.
+     */
+    public Vec3 getMumakilRiderAnchor(Entity rider) {
+        if (rider == null) {
+            return null;
+        }
+
+        boolean hasHowdah = this.hasMumakilHowdahEquipped();
+        double forwardOffset;
+        double sideOffset;
+
+        if (hasHowdah) {
+            forwardOffset = RIDER_HOWDAH_FORWARD;
+            sideOffset = RIDER_HOWDAH_SIDE;
+        } else if (this.hasMumakilSaddleEquipped()) {
+            forwardOffset = RIDER_SADDLE_FORWARD;
+            sideOffset = RIDER_SADDLE_SIDE;
+        } else {
+            forwardOffset = RIDER_WILD_FORWARD;
+            sideOffset = RIDER_WILD_SIDE;
+        }
+
+        double scale = this.getMumakilRenderScale();
+        forwardOffset *= scale;
+        sideOffset *= scale;
+
+        double verticalOffset = this.getMountedYOffset() + rider.getYOffset();
+
+        /*
+         * Use the visible body yaw for every rider anchor. rotationYaw can differ
+         * from the body while navigating, which otherwise lets unsaddled riders
+         * drift away from the intended back position as the Mumak turns.
+         *
+         * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
+         * own look/target logic so his allegiances and aggro can control the mount
+         * normally through LOTR's hired-horse AI.
+         */
+        float placementYaw = this.renderYawOffset;
+        float yawRadians = placementYaw * 3.1415927F / 180.0F;
+
+        double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
+        double forwardZ = MathHelper.cos(yawRadians) * forwardOffset;
+
+        double sideX = MathHelper.cos(yawRadians) * sideOffset;
+        double sideZ = MathHelper.sin(yawRadians) * sideOffset;
+
+        return Vec3.createVectorHelper(
+                this.posX + forwardX + sideX,
+                this.posY + verticalOffset,
+                this.posZ + forwardZ + sideZ
+        );
+    }
+
     public boolean shouldRiderSit() {
+        /*
+         * Keep the real mount relationship, but let riders stand when a
+         * howdah provides a platform. RenderLiving uses this hook only for the
+         * visual biped riding pose.
+         */
         return !this.hasMumakilHowdahEquipped();
     }
 
+    private boolean hasActiveBabyMelonFedWindow() {
+        return this.isBabyMumakil()
+                && this.worldObj != null
+                && this.worldObj.getTotalWorldTime() < this.babyMelonFedUntilTick;
+    }
+
+    private boolean tryHealTamedMumakWithMelon(EntityPlayer player) {
+        MumakilMode mode = this.getMumakilMode();
+        boolean baby = mode == MumakilMode.BABY_TAMED;
+        boolean adult = mode == MumakilMode.ADULT_TAMED;
+        if ((!baby && !adult)
+                || !this.isPlayerHoldingMelon(player)) {
+            return false;
+        }
+
+        /*
+         * Babies always consume this interaction. Adults fall through to the
+         * inherited breeding path when no heal is available.
+         */
+        if (this.worldObj.isRemote) {
+            return baby || this.getHealth() < this.getMaxHealth();
+        }
+
+        if (!this.isOwner(player)) {
+            this.worldObj.setEntityState(this, (byte)6);
+            return true;
+        }
+
+        long worldTime = this.worldObj.getTotalWorldTime();
+        if (this.getHealth() >= this.getMaxHealth()
+                || worldTime < this.tamedBabyMelonHealUntilTick) {
+            return baby;
+        }
+
+        ItemStack heldItem = player.getCurrentEquippedItem();
+        if (heldItem == null) {
+            return true;
+        }
+
+        this.heal(TAMED_BABY_MELON_HEAL_AMOUNT);
+        this.tamedBabyMelonHealUntilTick =
+                worldTime + TAMED_BABY_MELON_HEAL_COOLDOWN_TICKS;
+
+        if (!player.capabilities.isCreativeMode) {
+            --heldItem.stackSize;
+            if (heldItem.stackSize <= 0) {
+                player.inventory.setInventorySlotContents(
+                        player.inventory.currentItem,
+                        null
+                );
+            }
+            player.inventory.markDirty();
+        }
+
+        player.swingItem();
+
+        this.worldObj.playSoundAtEntity(
+                this,
+                "random.eat",
+                1.0F,
+                0.9F + this.rand.nextFloat() * 0.2F
+        );
+        this.worldObj.setEntityState(this, (byte)7);
+        return true;
+    }
+    private boolean tryFeedWildBabyMelon(EntityPlayer player) {
+        if (this.getMumakilMode() != MumakilMode.BABY_WILD
+                || !this.isPlayerHoldingMelon(player)) {
+            return false;
+        }
+
+        /*
+         * Return true on both sides so the melon click is treated as feeding,
+         * rather than falling through into horse mounting. Inventory, timer,
+         * sound, and particles are changed only on the server.
+         */
+        if (this.worldObj.isRemote) {
+            return true;
+        }
+
+        ItemStack heldItem = player.getCurrentEquippedItem();
+        if (heldItem == null) {
+            return false;
+        }
+
+        this.babyMelonFedUntilTick = this.worldObj.getTotalWorldTime()
+                + BABY_MELON_FED_WINDOW_TICKS;
+
+        if (!player.capabilities.isCreativeMode) {
+            --heldItem.stackSize;
+            if (heldItem.stackSize <= 0) {
+                player.inventory.setInventorySlotContents(
+                        player.inventory.currentItem,
+                        null
+                );
+            }
+            player.inventory.markDirty();
+        }
+
+        player.swingItem();
+
+        this.worldObj.playSoundAtEntity(
+                this,
+                "random.eat",
+                1.0F,
+                0.9F + this.rand.nextFloat() * 0.2F
+        );
+
+        /*
+         * EntityHorse handles status 7 as positive heart feedback. This class
+         * passes unrecognized status bytes to super.handleHealthUpdate().
+         */
+        this.worldObj.setEntityState(this, (byte)7);
+        return true;
+    }
+    // Recently fed wild-baby mounting: BABY_FED_MOUNT_GATE_V1
+    private void alertNearbyWildAdultsToBabyTaming(EntityPlayer player) {
+        if (this.worldObj.isRemote
+                || player == null
+                || !player.isEntityAlive()
+                || player.capabilities.isCreativeMode) {
+            return;
+        }
+
+        this.alertNearbyWildAdultsToBabyThreat(player);
+    }
+
+    private void alertNearbyWildAdultsToBabyAttack(DamageSource source) {
+        if (this.worldObj.isRemote
+                || this.getMumakilMode() != MumakilMode.BABY_WILD) {
+            return;
+        }
+
+        EntityLivingBase attacker =
+                this.resolveBabyHerdDefenseAttacker(source);
+
+        if (attacker == null
+                || attacker == this
+                || !attacker.isEntityAlive()) {
+            return;
+        }
+
+        this.alertNearbyWildAdultsToBabyThreat(attacker);
+    }
+
+    private EntityLivingBase resolveBabyHerdDefenseAttacker(
+            DamageSource source
+    ) {
+        if (source == null) {
+            return null;
+        }
+
+        /*
+         * EntityDamageSourceIndirect normally reports the shooter through
+         * getEntity(). Keep an explicit arrow fallback for modded or unusual
+         * projectile damage sources that expose only the arrow itself.
+         */
+        Entity responsibleEntity = source.getEntity();
+
+        if (!(responsibleEntity instanceof EntityLivingBase)) {
+            Entity directDamageEntity = source.getSourceOfDamage();
+
+            if (directDamageEntity instanceof EntityArrow) {
+                Entity arrowShooter =
+                        ((EntityArrow)directDamageEntity).shootingEntity;
+
+                if (arrowShooter instanceof EntityLivingBase) {
+                    responsibleEntity = arrowShooter;
+                }
+            } else if (directDamageEntity instanceof EntityLivingBase) {
+                responsibleEntity = directDamageEntity;
+            }
+        }
+
+        return responsibleEntity instanceof EntityLivingBase
+                ? (EntityLivingBase)responsibleEntity
+                : null;
+    }
+
+    private void alertNearbyWildAdultsToBabyThreat(
+            EntityLivingBase attacker
+    ) {
+        if (this.worldObj.isRemote
+                || attacker == null
+                || !attacker.isEntityAlive()) {
+            return;
+        }
+        this.triggerWildHerdRegroup(attacker, true);
+    }
+
+    // Recently fed wild-baby mounting: BABY_FED_MOUNT_GATE_V1
+    private boolean tryMountFedWildBaby(EntityPlayer player) {
+        if (player == null
+                || this.getMumakilMode() != MumakilMode.BABY_WILD
+                || player.isSneaking()
+                || player.ridingEntity != null
+                || this.riddenByEntity != null
+                || player.getCurrentEquippedItem() != null) {
+            return false;
+        }
+
+        /*
+         * Wild babies consume an empty-hand mounting attempt here instead of
+         * falling through to EntityHorse, whose normal child interaction does
+         * not mount the player.
+         */
+        if (!this.hasActiveBabyMelonFedWindow()) {
+            if (!this.worldObj.isRemote) {
+                // Vanilla horse failure feedback; handled by the superclass.
+                this.worldObj.setEntityState(this, (byte)6);
+            }
+            return true;
+        }
+
+        if (!this.worldObj.isRemote) {
+            this.getNavigator().clearPathEntity();
+            player.mountEntity(this);
+
+            /*
+             * Alert adults only after mounting actually succeeds. Feeding,
+             * melon-luring, failed unfed clicks, and ordinary nearby movement
+             * do not run this scan.
+             */
+            if (player.ridingEntity == this
+                    && this.riddenByEntity == player) {
+                this.alertNearbyWildAdultsToBabyTaming(player);
+            }
+        }
+
+        return true;
+    }
+    private boolean tryMountTamedBaby(EntityPlayer player) {
+        if (player == null
+                || this.getMumakilMode() != MumakilMode.BABY_TAMED
+                || player.isSneaking()
+                || player.ridingEntity != null
+                || this.riddenByEntity != null
+                || player.getCurrentEquippedItem() != null) {
+            return false;
+        }
+
+        /*
+         * A tamed baby keeps its owner. Only that owner may mount it through
+         * this custom child-mount path. A saddle is not required merely to sit
+         * on the Mumakil; it is still required for normal riding control.
+         */
+        if (!this.isOwner(player)) {
+            if (!this.worldObj.isRemote) {
+                this.worldObj.setEntityState(this, (byte)6);
+            }
+            return true;
+        }
+
+        if (!this.worldObj.isRemote) {
+            this.getNavigator().clearPathEntity();
+            player.mountEntity(this);
+        }
+
+        return true;
+    }
+    private boolean shouldRejectWildBabyHowdahRightClick(
+            EntityPlayer player
+    ) {
+        if (player == null) {
+            return false;
+        }
+
+        ItemStack held = player.getCurrentEquippedItem();
+        return held != null
+                && held.getItem() == Main.mumakilHowdah
+                && this.getMumakilMode() == MumakilMode.BABY_WILD;
+    }
+
+    private boolean tryMountTamedMumakWithEquipment(
+            EntityPlayer player
+    ) {
+        if (player == null
+                || player.isSneaking()
+                || this.getBelongsToNPC()
+                || !this.isTame()) {
+            return false;
+        }
+
+        ItemStack held = player.getCurrentEquippedItem();
+        if (held == null
+                || held.getItem() != Items.saddle
+                && held.getItem() != Main.mumakilHowdah) {
+            return false;
+        }
+
+        /*
+         * A tamed baby has always been owner-ridable only. Adults retain the
+         * inherited LOTR horse mounting policy. In either case the equipment
+         * item is never consumed or inserted by this ordinary right-click.
+         */
+        if (this.getMumakilMode() == MumakilMode.BABY_TAMED
+                && !this.isOwner(player)) {
+            if (!this.worldObj.isRemote) {
+                this.worldObj.setEntityState(this, (byte)6);
+            }
+            return true;
+        }
+
+        if (player.ridingEntity == null
+                && this.riddenByEntity == null
+                && !this.worldObj.isRemote) {
+            this.getNavigator().clearPathEntity();
+            player.mountEntity(this);
+        }
+        return true;
+    }
+
+    private boolean handleTamedMumakInventoryInteraction(
+            EntityPlayer player
+    ) {
+        if (player == null || !player.isSneaking() || !this.isTame()) {
+            return false;
+        }
+
+        if (this.canPlayerUseMumakilInventory(player)) {
+            this.openGUI(player);
+        } else if (!this.worldObj.isRemote) {
+            player.addChatMessage(
+                    new ChatComponentTranslation(
+                            "chat.lotrmoremobs.mumak.ownerOnly"
+                    )
+            );
+        }
+        return true;
+    }
+    private boolean shouldRejectWildAdultTamingAttempt(EntityPlayer player) {
+        return player != null
+                && this.getMumakilMode() == MumakilMode.ADULT_WILD
+                && !this.isTame()
+                && !this.getBelongsToNPC()
+                && !player.isSneaking()
+                && player.ridingEntity == null
+                && this.riddenByEntity == null
+                && player.getCurrentEquippedItem() == null;
+    }
     public boolean interact(EntityPlayer player) {
         if (this.shouldRouteHiredWarBodyClick()) {
             return this.interactHiredWarDriver(player);
         }
 
+        /*
+         * BABY_HOWDAH_RIGHT_CLICK_BLOCK_V1
+         * Stop the click before tryEquipMumakilHowdah() or EntityHorse can
+         * process it. Do not consume the item.
+         */
+        if (this.shouldRejectWildBabyHowdahRightClick(player)) {
+            if (!this.worldObj.isRemote) {
+                this.worldObj.setEntityState(this, (byte)6);
+            }
+            return true;
+        }
+
+        /*
+         * ADULT_TAMING_BLOCK_SAFE_DISMOUNT_V1
+         * Adult Mumakil cannot enter vanilla horse mounting/taming.
+         * Baby taming remains available through the melon-fed baby path.
+         */
+        if (this.shouldRejectWildAdultTamingAttempt(player)) {
+            if (!this.worldObj.isRemote) {
+                this.worldObj.setEntityState(this, (byte)6);
+            }
+            return true;
+        }
         if (this.getBelongsToNPC()) {
             return super.interact(player);
         }
 
-        if (this.tryEquipMumakilHowdah(player)) {
+        if (this.tryHealTamedMumakWithMelon(player)) {
+            return true;
+        }
+
+        if (this.tryFeedWildBabyMelon(player)) {
+            return true;
+        }
+
+        if (this.handleTamedMumakInventoryInteraction(player)) {
+            return true;
+        }
+
+        if (this.tryMountTamedMumakWithEquipment(player)) {
+            return true;
+        }
+
+        if (this.tryMountFedWildBaby(player)) {
+            return true;
+        }
+
+        if (this.tryMountTamedBaby(player)) {
             return true;
         }
 
@@ -1022,14 +3398,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return driver;
     }
 
+    public boolean canPlayerUseMumakilInventory(EntityPlayer player) {
+        return player != null
+                && !this.getBelongsToNPC()
+                && this.isTame()
+                && this.isOwner(player);
+    }
     public void openGUI(EntityPlayer player) {
-        if (this.getBelongsToNPC()) {
+        if (!this.canPlayerUseMumakilInventory(player)) {
             return;
         }
 
         if (!this.worldObj.isRemote) {
             this.updateMumakilHowdahSyncState();
-            IInventory inventory = this.findMumakilMountInventory();
+            IInventory inventory = this.getMumakilMountInventory();
 
             if (inventory != null && player instanceof EntityPlayerMP) {
                 EntityPlayerMP playerMP = (EntityPlayerMP)player;
@@ -1091,6 +3473,14 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             return driverTarget != null
                     && driverTarget.isEntityAlive()
                     && this.getAttackTarget() == driverTarget;
+        }
+
+        if (this.getMumakilMode() == MumakilMode.ADULT_TAMED) {
+            EntityLivingBase target = this.getAttackTarget();
+            EntityLivingBase revengeTarget = this.getAITarget();
+            return target != null
+                    && target == revengeTarget
+                    && (!(target instanceof EntityPlayer) || !this.isOwner((EntityPlayer)target));
         }
 
         return this.isWildMumakil();
@@ -1155,10 +3545,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
             boolean measuresPath = LOTREntityMumakil.this.hasExpectedRiderTargetPathRequest();
-            long start = measuresPath ? MumakilPerformanceTracker.startTimer() : 0L;
+            boolean trackPerformance =
+                    measuresPath
+                            && MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             boolean execute = super.shouldExecute();
 
-            if (measuresPath && MumakilPerformanceTracker.isEnabled()) {
+            if (trackPerformance) {
                 MumakilPerformanceTracker.recordRiderTargetPathRequest(
                         LOTREntityMumakil.this,
                         System.nanoTime() - start,
@@ -1193,6 +3588,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    private enum MumakilSkirmishState {
+        APPROACH,
+        ATTACK,
+        WITHDRAW,
+        REENGAGE
+    }
+
     private class EntityAIMumakilAttackOnCollide extends LOTREntityAIAttackOnCollide {
         private int controlledTargetId = -1;
         private boolean newTargetPathPending;
@@ -1206,6 +3608,18 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         private double lastProgressZ;
         private int nextProgressCheckTick;
         private int noProgressTicks;
+        private MumakilSkirmishState skirmishState =
+                MumakilSkirmishState.APPROACH;
+        private int observedSuccessfulTuskSequence;
+        private int nextRetreatPathTick;
+        private int failedRetreatPathSearches;
+        private double retreatX;
+        private double retreatY;
+        private double retreatZ;
+        private double retreatTargetX;
+        private double retreatTargetZ;
+        private boolean hasRetreatDestination;
+        private boolean retreatReachabilityChecked;
 
         private EntityAIMumakilAttackOnCollide() {
             super(LOTREntityMumakil.this, WILD_ATTACK_SPEED, true);
@@ -1219,7 +3633,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
             if (LOTREntityMumakil.this.isHiredWarMumakil()) {
-                long start = MumakilPerformanceTracker.startTimer();
+                boolean trackPerformance =
+                        MumakilPerformanceTracker.isEnabled();
+                long start = trackPerformance
+                        ? MumakilPerformanceTracker.startTimer()
+                        : 0L;
                 EntityLivingBase target = LOTREntityMumakil.this.getAttackTarget();
                 boolean execute = target != null && target.isEntityAlive();
 
@@ -1230,18 +3648,24 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     this.updateControlledPath(target, true);
                 }
 
-                MumakilPerformanceTracker.recordMountAttackShould(
-                        LOTREntityMumakil.this,
-                        System.nanoTime() - start
-                );
+                if (trackPerformance) {
+                    MumakilPerformanceTracker.recordMountAttackShould(
+                            LOTREntityMumakil.this,
+                            System.nanoTime() - start
+                    );
+                }
                 return execute;
             }
 
             boolean measuresPath = LOTREntityMumakil.this.getAttackTarget() != null;
-            long start = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             boolean execute = super.shouldExecute();
 
-            if (MumakilPerformanceTracker.isEnabled()) {
+            if (trackPerformance) {
                 long elapsed = System.nanoTime() - start;
                 MumakilPerformanceTracker.recordMountAttackShould(LOTREntityMumakil.this, elapsed);
                 if (measuresPath) {
@@ -1263,21 +3687,31 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return false;
             }
 
-            long start = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             boolean execute = super.continueExecuting();
             if (execute && LOTREntityMumakil.this.isHiredWarMumakil()) {
                 this.resetControlledPathForNewTarget(this.attackTarget);
             }
-            MumakilPerformanceTracker.recordMountAttackContinue(
-                    LOTREntityMumakil.this,
-                    System.nanoTime() - start
-            );
+            if (trackPerformance) {
+                MumakilPerformanceTracker.recordMountAttackContinue(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start
+                );
+            }
             return execute;
         }
 
         @Override
         public void startExecuting() {
-            long start = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             if (LOTREntityMumakil.this.isHiredWarMumakil()) {
                 if (this.entityPathEntity != null) {
                     LOTREntityMumakil.this.getNavigator().setPath(this.entityPathEntity, this.moveSpeed);
@@ -1287,32 +3721,62 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             } else {
                 super.startExecuting();
             }
-            MumakilPerformanceTracker.recordMountAttackStart(
-                    LOTREntityMumakil.this,
-                    System.nanoTime() - start
-            );
-            MumakilPerformanceTracker.recordMountAttackAIStart(LOTREntityMumakil.this);
+            if (trackPerformance) {
+                MumakilPerformanceTracker.recordMountAttackStart(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start
+                );
+                MumakilPerformanceTracker.recordMountAttackAIStart(
+                        LOTREntityMumakil.this
+                );
+            }
         }
 
         @Override
         public void updateTask() {
-            long start = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
+            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+                this.updateSkirmishState(this.attackTarget);
+            }
             super.updateTask();
-            MumakilPerformanceTracker.recordMountAttackUpdate(
-                    LOTREntityMumakil.this,
-                    System.nanoTime() - start
-            );
+            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+                /*
+                 * A successful tusk hit can happen inside super.updateTask().
+                 * Recheck after the attack so withdrawal starts from that
+                 * exact successful sequence, never from a loaded cooldown.
+                 */
+                this.updateSkirmishState(this.attackTarget);
+            }
+            if (trackPerformance) {
+                MumakilPerformanceTracker.recordMountAttackUpdate(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start
+                );
+            }
         }
 
         @Override
         public void resetTask() {
-            long start = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long start = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
+            this.clearSkirmishState();
             super.resetTask();
-            MumakilPerformanceTracker.recordMountAttackReset(
-                    LOTREntityMumakil.this,
-                    System.nanoTime() - start
-            );
-            MumakilPerformanceTracker.recordMountAttackAIReset(LOTREntityMumakil.this);
+            if (trackPerformance) {
+                MumakilPerformanceTracker.recordMountAttackReset(
+                        LOTREntityMumakil.this,
+                        System.nanoTime() - start
+                );
+                MumakilPerformanceTracker.recordMountAttackAIReset(
+                        LOTREntityMumakil.this
+                );
+            }
         }
 
         @Override
@@ -1320,6 +3784,35 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             if (!LOTREntityMumakil.this.isHiredWarMumakil()) {
                 super.updateLookAndPathing();
                 return;
+            }
+
+            this.updateSkirmishState(this.attackTarget);
+            if (this.skirmishState == MumakilSkirmishState.WITHDRAW) {
+                this.updateRetreatPath(this.attackTarget);
+                if (this.hasRetreatDestination) {
+                    LOTREntityMumakil.this.getLookHelper().setLookPosition(
+                            this.retreatX,
+                            this.retreatY
+                                    + LOTREntityMumakil.this.getEyeHeight(),
+                            this.retreatZ,
+                            30.0F,
+                            30.0F
+                    );
+                }
+                return;
+            }
+
+            double distanceSq =
+                    LOTREntityMumakil.this.getDistanceSqToEntity(
+                            this.attackTarget
+                    );
+            if (LOTREntityMumakil.this.tuskAttackCooldownTicks <= 0
+                    && distanceSq
+                    <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
+                this.skirmishState = MumakilSkirmishState.ATTACK;
+            } else if (this.skirmishState
+                    != MumakilSkirmishState.REENGAGE) {
+                this.skirmishState = MumakilSkirmishState.APPROACH;
             }
 
             LOTREntityMumakil.this.getLookHelper().setLookPositionWithEntity(this.attackTarget, 30.0F, 30.0F);
@@ -1346,7 +3839,470 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.nextProgressCheckTick = LOTREntityMumakil.this.ticksExisted + COMBAT_PATH_PROGRESS_CHECK_TICKS;
             this.noProgressTicks = 0;
             this.entityPathEntity = null;
+            this.clearSkirmishState();
+            this.observedSuccessfulTuskSequence =
+                    LOTREntityMumakil.this.successfulTuskAttackSequence;
             LOTREntityMumakil.this.getNavigator().clearPathEntity();
+        }
+
+        private void updateSkirmishState(EntityLivingBase target) {
+            if (!this.canUseSkirmishState(target)) {
+                this.clearSkirmishState();
+                return;
+            }
+
+            int successfulSequence =
+                    LOTREntityMumakil.this.successfulTuskAttackSequence;
+            if (successfulSequence
+                    != this.observedSuccessfulTuskSequence) {
+                this.observedSuccessfulTuskSequence =
+                        successfulSequence;
+                this.beginWithdrawal(target);
+            }
+
+            if (this.skirmishState
+                    != MumakilSkirmishState.WITHDRAW) {
+                return;
+            }
+
+            if (LOTREntityMumakil.this.tuskAttackCooldownTicks
+                    <= SKIRMISH_REENGAGE_COOLDOWN_THRESHOLD) {
+                this.beginReengagement("cooldown-ready");
+            } else if (this.isDriverInImmediateDanger(target)) {
+                this.beginReengagement("driver-danger");
+            } else if (this.failedRetreatPathSearches
+                    >= SKIRMISH_RETREAT_MAX_FAILED_SEARCHES) {
+                this.beginReengagement("retreat-path-failures");
+            }
+        }
+
+        private boolean canUseSkirmishState(EntityLivingBase target) {
+            if (target == null
+                    || !target.isEntityAlive()
+                    || LOTREntityMumakil.this.riddenByEntity
+                    instanceof EntityPlayer
+                    || !LOTREntityMumakil.this.isHiredWarMumakil()
+                    || !LOTREntityMumakil.this
+                    .hasMumakilHowdahEquipped()
+                    || !MumakilHowdahArcherEventHandler
+                    .hasAnyLivingAttachedArcherSlot(
+                            LOTREntityMumakil.this
+                    )) {
+                return false;
+            }
+
+            if (LOTREntityMumakil.this.hasLivingNPCCombatDriver()) {
+                LOTREntityNPC driver =
+                        (LOTREntityNPC)LOTREntityMumakil.this
+                                .riddenByEntity;
+                return driver.getAttackTarget() == target
+                        && LOTREntityMumakil.this.getAttackTarget()
+                        == target;
+            }
+            return LOTREntityMumakil.this.getAttackTarget() == target;
+        }
+
+        private boolean isDriverInImmediateDanger(
+                EntityLivingBase target
+        ) {
+            if (!LOTREntityMumakil.this
+                    .hasLivingNPCCombatDriver()) {
+                return false;
+            }
+            LOTREntityNPC driver =
+                    (LOTREntityNPC)LOTREntityMumakil.this
+                            .riddenByEntity;
+            return driver.hurtTime > 0
+                    && driver.getDistanceSqToEntity(target)
+                    <= SKIRMISH_DRIVER_DANGER_RANGE_SQ;
+        }
+
+        private void beginWithdrawal(EntityLivingBase target) {
+            this.skirmishState = MumakilSkirmishState.WITHDRAW;
+            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
+                    true;
+            this.failedRetreatPathSearches = 0;
+            this.hasRetreatDestination = false;
+            this.retreatReachabilityChecked = false;
+            this.nextRetreatPathTick =
+                    LOTREntityMumakil.this.ticksExisted;
+            this.retreatTargetX = target.posX;
+            this.retreatTargetZ = target.posZ;
+            this.entityPathEntity = null;
+            LOTREntityMumakil.this.getNavigator().clearPathEntity();
+            this.debugSkirmish(
+                    "transition=WITHDRAW"
+                            + " sequence="
+                            + this.observedSuccessfulTuskSequence
+                            + " cooldown="
+                            + LOTREntityMumakil.this
+                            .tuskAttackCooldownTicks
+                            + " navigatorOwner=attack-on-collide"
+            );
+            this.updateRetreatPath(target);
+        }
+
+        private void beginReengagement(String reason) {
+            this.skirmishState = MumakilSkirmishState.REENGAGE;
+            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
+                    false;
+            this.hasRetreatDestination = false;
+            this.retreatReachabilityChecked = false;
+            this.newTargetPathPending = true;
+            this.noProgressPathPending = false;
+            this.nextControlledPathTick =
+                    LOTREntityMumakil.this.ticksExisted;
+            this.failureBackoffTicks =
+                    COMBAT_PATH_FAILURE_BACKOFF_MIN;
+            LOTREntityMumakil.this.getNavigator().clearPathEntity();
+            this.debugSkirmish(
+                    "transition=REENGAGE"
+                            + " reason="
+                            + reason
+                            + " cooldown="
+                            + LOTREntityMumakil.this
+                            .tuskAttackCooldownTicks
+                            + " navigatorOwner=attack-on-collide"
+            );
+        }
+
+        private void clearSkirmishState() {
+            MumakilSkirmishState previousState =
+                    this.skirmishState;
+            this.skirmishState = MumakilSkirmishState.APPROACH;
+            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
+                    false;
+            this.failedRetreatPathSearches = 0;
+            this.hasRetreatDestination = false;
+            this.retreatReachabilityChecked = false;
+            if (previousState
+                    != MumakilSkirmishState.APPROACH) {
+                this.debugSkirmish(
+                        "transition=APPROACH reason=state-cleared"
+                );
+            }
+        }
+
+        private void updateRetreatPath(EntityLivingBase target) {
+            if (this.skirmishState
+                    != MumakilSkirmishState.WITHDRAW) {
+                return;
+            }
+
+            /*
+             * Do not let path travel pull the body sideways while the
+             * authored tusk strike still owns its facing. The cooldown is
+             * much longer than the 36-tick strike, so withdrawal still has
+             * ample time to complete.
+             */
+            int strikeFacingLockThreshold =
+                    MUMAKIL_STRIKE_ANIMATION_TICKS
+                            - SKIRMISH_STRIKE_INITIAL_FACING_LOCK_TICKS;
+            if (LOTREntityMumakil.this
+                    .mumakilStrikeAnimationTicks
+                    > strikeFacingLockThreshold) {
+                if (!LOTREntityMumakil.this.getNavigator()
+                        .noPath()) {
+                    LOTREntityMumakil.this.getNavigator()
+                            .clearPathEntity();
+                }
+                return;
+            }
+
+            double targetDistanceSq =
+                    LOTREntityMumakil.this.getDistanceSqToEntity(
+                            target
+                    );
+            boolean inRetreatBand =
+                    targetDistanceSq
+                            >= SKIRMISH_RETREAT_MIN_DISTANCE
+                            * SKIRMISH_RETREAT_MIN_DISTANCE
+                    && targetDistanceSq
+                            <= SKIRMISH_RETREAT_MAX_DISTANCE
+                            * SKIRMISH_RETREAT_MAX_DISTANCE;
+
+            if (inRetreatBand
+                    && LOTREntityMumakil.this.getNavigator()
+                    .noPath()) {
+                this.checkTargetReachableFromRetreat(target);
+                return;
+            }
+
+            double targetMoveX = target.posX - this.retreatTargetX;
+            double targetMoveZ = target.posZ - this.retreatTargetZ;
+            boolean targetMoved =
+                    targetMoveX * targetMoveX
+                            + targetMoveZ * targetMoveZ
+                    >= SKIRMISH_TARGET_REPATH_DISTANCE_SQ;
+            boolean needsPath =
+                    !this.hasRetreatDestination
+                    || targetMoved
+                    || LOTREntityMumakil.this.getNavigator().noPath();
+
+            int currentTick = LOTREntityMumakil.this.ticksExisted;
+            if (!needsPath
+                    || currentTick < this.nextRetreatPathTick) {
+                return;
+            }
+
+            PathEntity retreatPath =
+                    this.findValidatedRetreatPath(target);
+            this.nextRetreatPathTick =
+                    currentTick
+                            + SKIRMISH_RETREAT_REPATH_COOLDOWN;
+            this.retreatTargetX = target.posX;
+            this.retreatTargetZ = target.posZ;
+
+            if (retreatPath != null
+                    && LOTREntityMumakil.this.getNavigator()
+                    .setPath(retreatPath, this.moveSpeed)) {
+                this.failedRetreatPathSearches = 0;
+                this.hasRetreatDestination = true;
+                this.retreatReachabilityChecked = false;
+                this.debugSkirmish(
+                        "retreat-path=accepted"
+                                + " destination="
+                                + this.retreatX
+                                + ","
+                                + this.retreatY
+                                + ","
+                                + this.retreatZ
+                                + " navigatorOwner=attack-on-collide"
+                );
+                return;
+            }
+
+            ++this.failedRetreatPathSearches;
+            this.hasRetreatDestination = false;
+            this.debugSkirmish(
+                    "retreat-path=rejected"
+                            + " failures="
+                            + this.failedRetreatPathSearches
+            );
+            if (this.failedRetreatPathSearches
+                    >= SKIRMISH_RETREAT_MAX_FAILED_SEARCHES) {
+                this.beginReengagement("retreat-path-failures");
+            }
+        }
+
+        private void checkTargetReachableFromRetreat(
+                EntityLivingBase target
+        ) {
+            if (this.retreatReachabilityChecked) {
+                return;
+            }
+
+            this.retreatReachabilityChecked = true;
+            PathEntity returnPath =
+                    LOTREntityMumakil.this.getNavigator()
+                            .getPathToEntityLiving(target);
+            if (returnPath == null) {
+                this.beginReengagement(
+                        "target-unreachable-from-retreat"
+                );
+            }
+        }
+
+        private PathEntity findValidatedRetreatPath(
+                EntityLivingBase target
+        ) {
+            double awayX =
+                    LOTREntityMumakil.this.posX - target.posX;
+            double awayZ =
+                    LOTREntityMumakil.this.posZ - target.posZ;
+            double awayLength =
+                    Math.sqrt(awayX * awayX + awayZ * awayZ);
+
+            if (awayLength < 0.001D) {
+                double yawRadians = Math.toRadians(
+                        LOTREntityMumakil.this.renderYawOffset
+                );
+                awayX = Math.sin(yawRadians);
+                awayZ = -Math.cos(yawRadians);
+            } else {
+                awayX /= awayLength;
+                awayZ /= awayLength;
+            }
+
+            for (int i = 0;
+                    i < SKIRMISH_RETREAT_ANGLES.length;
+                    ++i) {
+                double angle = Math.toRadians(
+                        SKIRMISH_RETREAT_ANGLES[i]
+                );
+                double cos = Math.cos(angle);
+                double sin = Math.sin(angle);
+                double directionX = awayX * cos - awayZ * sin;
+                double directionZ = awayX * sin + awayZ * cos;
+                double destinationX =
+                        target.posX
+                                + directionX
+                                * SKIRMISH_RETREAT_DISTANCE;
+                double destinationZ =
+                        target.posZ
+                                + directionZ
+                                * SKIRMISH_RETREAT_DISTANCE;
+                double destinationY =
+                        this.findRetreatGroundY(
+                                destinationX,
+                                destinationZ
+                        );
+
+                if (Double.isNaN(destinationY)) {
+                    continue;
+                }
+
+                PathEntity path =
+                        LOTREntityMumakil.this.getNavigator()
+                                .getPathToXYZ(
+                                        destinationX,
+                                        destinationY,
+                                        destinationZ
+                                );
+                PathPoint finalPoint =
+                        path == null
+                                ? null
+                                : path.getFinalPathPoint();
+                if (finalPoint == null) {
+                    continue;
+                }
+                double finalX = finalPoint.xCoord + 0.5D;
+                double finalZ = finalPoint.zCoord + 0.5D;
+                double finalTargetX = finalX - target.posX;
+                double finalTargetZ = finalZ - target.posZ;
+                double finalTargetDistanceSq =
+                        finalTargetX * finalTargetX
+                                + finalTargetZ * finalTargetZ;
+                if (finalTargetDistanceSq
+                        < SKIRMISH_RETREAT_MIN_DISTANCE
+                        * SKIRMISH_RETREAT_MIN_DISTANCE
+                        || finalTargetDistanceSq
+                        > SKIRMISH_RETREAT_MAX_DISTANCE
+                        * SKIRMISH_RETREAT_MAX_DISTANCE) {
+                    continue;
+                }
+
+                this.retreatX = finalX;
+                this.retreatY = finalPoint.yCoord;
+                this.retreatZ = finalZ;
+                return path;
+            }
+
+            return null;
+        }
+
+        private void debugSkirmish(String message) {
+            if (!DEBUG_SKIRMISH_AI
+                    || LOTREntityMumakil.this.worldObj == null
+                    || LOTREntityMumakil.this.worldObj.isRemote) {
+                return;
+            }
+            System.out.println(
+                    "[LOTRMoreMobs][MumakSkirmish]"
+                            + " mumak="
+                            + LOTREntityMumakil.this.getEntityId()
+                            + " tick="
+                            + LOTREntityMumakil.this.ticksExisted
+                            + " state="
+                            + this.skirmishState
+                            + " "
+                            + message
+            );
+        }
+
+        private double findRetreatGroundY(
+                double destinationX,
+                double destinationZ
+        ) {
+            int blockX = MathHelper.floor_double(destinationX);
+            int blockZ = MathHelper.floor_double(destinationZ);
+            int halfWidth =
+                    MathHelper.ceiling_float_int(
+                            LOTREntityMumakil.this.width * 0.5F
+                    );
+
+            if (!this.isRetreatChunkAreaLoaded(
+                    blockX,
+                    blockZ,
+                    halfWidth
+            )) {
+                return Double.NaN;
+            }
+
+            int baseY = MathHelper.floor_double(
+                    LOTREntityMumakil.this.posY
+            );
+            for (int offset = 4; offset >= -6; --offset) {
+                int groundY = baseY + offset;
+                if (groundY <= 0
+                        || groundY
+                        + MathHelper.ceiling_float_int(
+                                LOTREntityMumakil.this.height
+                        )
+                        >= 256
+                        || !LOTREntityMumakil.this.worldObj
+                        .blockExists(blockX, groundY, blockZ)
+                        || !LOTREntityMumakil.this.worldObj
+                        .getBlock(blockX, groundY - 1, blockZ)
+                        .getMaterial().blocksMovement()) {
+                    continue;
+                }
+
+                AxisAlignedBB destinationBox =
+                        AxisAlignedBB.getBoundingBox(
+                                destinationX
+                                        - LOTREntityMumakil.this.width
+                                        * 0.5D,
+                                groundY,
+                                destinationZ
+                                        - LOTREntityMumakil.this.width
+                                        * 0.5D,
+                                destinationX
+                                        + LOTREntityMumakil.this.width
+                                        * 0.5D,
+                                groundY
+                                        + LOTREntityMumakil.this.height,
+                                destinationZ
+                                        + LOTREntityMumakil.this.width
+                                        * 0.5D
+                        );
+                if (LOTREntityMumakil.this.worldObj
+                        .getCollidingBoundingBoxes(
+                                LOTREntityMumakil.this,
+                                destinationBox
+                        ).isEmpty()) {
+                    return groundY;
+                }
+            }
+
+            return Double.NaN;
+        }
+
+        private boolean isRetreatChunkAreaLoaded(
+                int blockX,
+                int blockZ,
+                int radius
+        ) {
+            int minChunkX = blockX - radius >> 4;
+            int maxChunkX = blockX + radius >> 4;
+            int minChunkZ = blockZ - radius >> 4;
+            int maxChunkZ = blockZ + radius >> 4;
+
+            for (int chunkX = minChunkX;
+                    chunkX <= maxChunkX;
+                    ++chunkX) {
+                for (int chunkZ = minChunkZ;
+                        chunkZ <= maxChunkZ;
+                        ++chunkZ) {
+                    if (!LOTREntityMumakil.this.worldObj
+                            .getChunkProvider()
+                            .chunkExists(chunkX, chunkZ)) {
+                        return false;
+                    }
+                }
+            }
+
+            return true;
         }
 
         private void updateControlledPath(EntityLivingBase target, boolean preparingStart) {
@@ -1371,7 +4327,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 return;
             }
 
-            long pathSearchStart = MumakilPerformanceTracker.startTimer();
+            boolean trackPerformance =
+                    MumakilPerformanceTracker.isEnabled();
+            long pathSearchStart = trackPerformance
+                    ? MumakilPerformanceTracker.startTimer()
+                    : 0L;
             PathEntity path = null;
 
             if (reason == MumakilPerformanceTracker.COMBAT_PATH_REASON_NEW_TARGET
@@ -1383,7 +4343,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 path = LOTREntityMumakil.this.getNavigator().getPathToEntityLiving(target);
             }
 
-            long pathSearchNanos = System.nanoTime() - pathSearchStart;
+            long pathSearchNanos = trackPerformance
+                    ? System.nanoTime() - pathSearchStart
+                    : 0L;
             boolean accepted = path != null;
             long pathInstallNanos = 0L;
 
@@ -1391,28 +4353,35 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 if (preparingStart) {
                     this.entityPathEntity = path;
                 } else {
-                    long pathInstallStart = MumakilPerformanceTracker.startTimer();
+                    long pathInstallStart = trackPerformance
+                            ? MumakilPerformanceTracker.startTimer()
+                            : 0L;
                     accepted = LOTREntityMumakil.this.getNavigator().setPath(path, this.moveSpeed);
-                    pathInstallNanos = System.nanoTime() - pathInstallStart;
+                    if (trackPerformance) {
+                        pathInstallNanos =
+                                System.nanoTime() - pathInstallStart;
+                    }
                 }
             }
 
-            long elapsed = pathSearchNanos + pathInstallNanos;
-            MumakilPerformanceTracker.recordCombatPathRequest(
-                    LOTREntityMumakil.this,
-                    elapsed,
-                    accepted,
-                    reason
-            );
-            MumakilPerformanceTracker.recordCombatPathDetail(
-                    LOTREntityMumakil.this,
-                    pathSearchNanos,
-                    pathInstallNanos,
-                    accepted,
-                    reason,
-                    targetDistanceSq,
-                    preparingStart
-            );
+            if (trackPerformance) {
+                long elapsed = pathSearchNanos + pathInstallNanos;
+                MumakilPerformanceTracker.recordCombatPathRequest(
+                        LOTREntityMumakil.this,
+                        elapsed,
+                        accepted,
+                        reason
+                );
+                MumakilPerformanceTracker.recordCombatPathDetail(
+                        LOTREntityMumakil.this,
+                        pathSearchNanos,
+                        pathInstallNanos,
+                        accepted,
+                        reason,
+                        targetDistanceSq,
+                        preparingStart
+                );
+            }
 
             this.lastPathTargetX = target.posX;
             this.lastPathTargetY = target.posY;
@@ -1530,13 +4499,11 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         @Override
         public boolean shouldExecute() {
-            boolean blockedByDriver = LOTREntityMumakil.this.hasActiveLivingSouthronDriver();
-            boolean execute = !blockedByDriver
-                    && !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+            boolean execute = !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
                     && super.shouldExecute();
             MumakilPerformanceTracker.recordMountFollowShould(
                     LOTREntityMumakil.this,
-                    blockedByDriver,
+                    false,
                     execute
             );
             return execute;
@@ -1544,8 +4511,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         @Override
         public boolean continueExecuting() {
-            return !LOTREntityMumakil.this.hasActiveLivingSouthronDriver()
-                    && !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+            return !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
                     && super.continueExecuting();
         }
 
@@ -1581,9 +4547,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         @Override
         public boolean shouldExecute() {
-            return !(LOTREntityMumakil.this.isHiredWarMumakil()
-                    && LOTREntityMumakil.this.hasLivingNPCCombatDriver())
-                    && super.shouldExecute();
+            if (LOTREntityMumakil.this.isBabyMumakil()
+                    || LOTREntityMumakil.this.isHiredWarMumakil()
+                    && LOTREntityMumakil.this.hasLivingNPCCombatDriver()) {
+                return false;
+            }
+
+            EntityLivingBase attacker = LOTREntityMumakil.this.getAITarget();
+            if (LOTREntityMumakil.this.getMumakilMode() == MumakilMode.ADULT_TAMED
+                    && attacker instanceof EntityPlayer
+                    && LOTREntityMumakil.this.isOwner((EntityPlayer)attacker)) {
+                return false;
+            }
+
+            return super.shouldExecute();
         }
     }
 
@@ -1603,16 +4580,50 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    @Override
+    public int getMaxSpawnedInChunk() {
+        return 7;
+    }
+
     protected void applyEntityAttributes() {
         super.applyEntityAttributes();
         this.applyConfiguredAttributes();
     }
 
     private void applyConfiguredAttributes() {
-        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(MAX_HEALTH);
-        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed).setBaseValue(MOVEMENT_SPEED);
-        this.getEntityAttribute(SharedMonsterAttributes.knockbackResistance).setBaseValue(KNOCKBACK_RESISTANCE);
-        this.getEntityAttribute(SharedMonsterAttributes.attackDamage).setBaseValue(ATTACK_DAMAGE);
+        boolean baby = this.shouldUseBabyLifecycleState();
+
+        this.getEntityAttribute(SharedMonsterAttributes.maxHealth).setBaseValue(
+                baby ? BABY_MAX_HEALTH : MAX_HEALTH
+        );
+
+        this.applyConfiguredMovementSpeed();
+
+        this.getEntityAttribute(SharedMonsterAttributes.followRange).setBaseValue(
+                baby ? BABY_PATH_SEARCH_RANGE : ADULT_PATH_SEARCH_RANGE
+        );
+
+        this.getEntityAttribute(SharedMonsterAttributes.knockbackResistance)
+                .setBaseValue(KNOCKBACK_RESISTANCE);
+
+        this.getEntityAttribute(SharedMonsterAttributes.attackDamage)
+                .setBaseValue(ATTACK_DAMAGE);
+    }
+
+    private void applyConfiguredMovementSpeed() {
+        if (this.getEntityAttribute(SharedMonsterAttributes.movementSpeed)
+                == null) {
+            return;
+        }
+
+        double intendedBaseSpeed = this.shouldUseBabyLifecycleState()
+                ? BABY_MOVEMENT_SPEED
+                : MOVEMENT_SPEED;
+        this.getEntityAttribute(SharedMonsterAttributes.movementSpeed)
+                .setBaseValue(
+                        intendedBaseSpeed
+                                * (double)this.getMumakilSpeedTrait()
+                );
     }
 
     protected void onLOTRHorseSpawn() {
@@ -1628,10 +4639,71 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     public void writeEntityToNBT(NBTTagCompound nbt) {
         super.writeEntityToNBT(nbt);
         nbt.setInteger(NBT_MUMAKIL_MODE, this.getMumakilMode().getId());
+        nbt.setInteger(
+                NBT_FORMATION_ORIGIN,
+                this.getFormationOrigin().getId()
+        );
+        nbt.setFloat(NBT_SPEED_TRAIT, this.getMumakilSpeedTrait());
+        if (this.hiredFormationOwnerUuid != null
+                && this.getFormationOrigin()
+                == MumakilFormationOrigin.PLAYER_HIRED) {
+            nbt.setString(
+                    NBT_HIRED_FORMATION_OWNER,
+                    this.hiredFormationOwnerUuid.toString()
+            );
+        }
+        if (this.mumakilInvasionId != null
+                && this.getFormationOrigin()
+                == MumakilFormationOrigin.INVASION_NEAR_HARAD) {
+            nbt.setString(
+                    NBT_MUMAK_INVASION_ID,
+                    this.mumakilInvasionId.toString()
+            );
+        }
+        nbt.setBoolean(NBT_BABY_GROWTH_INITIALIZED, this.babyGrowthInitialized);
+        nbt.setLong(NBT_BABY_MELON_FED_UNTIL, this.babyMelonFedUntilTick);
+        nbt.setLong(NBT_TAMED_BABY_MELON_HEAL_UNTIL, this.tamedBabyMelonHealUntilTick);
     }
 
     public void readEntityFromNBT(NBTTagCompound nbt) {
         super.readEntityFromNBT(nbt);
+
+        this.formationOrigin = nbt.hasKey(NBT_FORMATION_ORIGIN)
+                ? MumakilFormationOrigin.fromId(
+                nbt.getInteger(NBT_FORMATION_ORIGIN)
+        )
+                : null;
+        this.hiredFormationOwnerUuid = null;
+        if (nbt.hasKey(NBT_HIRED_FORMATION_OWNER)) {
+            try {
+                this.hiredFormationOwnerUuid = UUID.fromString(
+                        nbt.getString(NBT_HIRED_FORMATION_OWNER)
+                );
+            } catch (IllegalArgumentException ignored) {
+                this.hiredFormationOwnerUuid = null;
+            }
+        }
+        this.mumakilInvasionId = null;
+        if (nbt.hasKey(NBT_MUMAK_INVASION_ID)) {
+            try {
+                this.mumakilInvasionId = UUID.fromString(
+                        nbt.getString(NBT_MUMAK_INVASION_ID)
+                );
+            } catch (IllegalArgumentException ignored) {
+                this.mumakilInvasionId = null;
+            }
+        }
+        /*
+         * Old worlds have no trait key and must retain exactly the historical
+         * 1.00 movement factor. Loading never consumes random numbers.
+         */
+        this.mumakilSpeedTrait = nbt.hasKey(NBT_SPEED_TRAIT)
+                ? clampSpeedTrait(nbt.getFloat(NBT_SPEED_TRAIT))
+                : NORMAL_SPEED_TRAIT;
+        this.mumakilSpeedTraitInitialized = true;
+        this.babyGrowthInitialized = nbt.getBoolean(NBT_BABY_GROWTH_INITIALIZED);
+        this.babyMelonFedUntilTick = nbt.getLong(NBT_BABY_MELON_FED_UNTIL);
+        this.tamedBabyMelonHealUntilTick = nbt.getLong(NBT_TAMED_BABY_MELON_HEAL_UNTIL);
 
         MumakilMode loadedMode = nbt.hasKey(NBT_MUMAKIL_MODE)
                 ? MumakilMode.fromId(nbt.getInteger(NBT_MUMAKIL_MODE))
@@ -1644,7 +4716,17 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.setMumakilMode(
                 loadedMode == null ? this.inferNonHiredMumakilMode() : loadedMode
         );
-        this.applyConfiguredAttributes();
+        if (this.formationOrigin == null
+                && this.isHiredWarMumakil()) {
+            this.formationOrigin =
+                    MumakilFormationOrigin.PLAYER_HIRED;
+        }
+
+        this.initializeBabyGrowthTimerIfNeeded();
+        boolean baby = this.shouldUseBabyLifecycleState();
+        this.applyMumakilLifecycleState(baby, false);
+        this.babyLifecycleInitialized = true;
+        this.wasBabyMumakil = baby;
 
         if (this.angerWaveCooldownTicks <= 0 && this.angerWaveActiveTicks <= 0) {
             this.resetAngerWaveCooldown();
@@ -1652,7 +4734,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected double clampChildHealth(double health) {
-        return MathHelper.clamp_double(health, 100.0D, MAX_HEALTH);
+        return MathHelper.clamp_double(health, 100.0D, BABY_MAX_HEALTH);
     }
 
     protected double clampChildJump(double jump) {
@@ -1660,19 +4742,328 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected double clampChildSpeed(double speed) {
-        return MathHelper.clamp_double(speed, 0.18D, MOVEMENT_SPEED);
+        return MathHelper.clamp_double(speed, 0.18D, BABY_MOVEMENT_SPEED);
     }
 
+    /*
+     * MUMAKIL_ADULT_BREEDING_AND_FOV_TRANSITION_FIX_V1_1
+     *
+     * LOTREntityHorse.interact() enters love mode when a tame, full-grown
+     * mount accepts the held breeding item. This explicit mode gate keeps
+     * babies, wild adults, and hired-war Mumakil out of that path.
+     */
+    @Override
     public boolean isBreedingItem(ItemStack itemstack) {
-        return itemstack != null && itemstack.getItem() == Items.wheat;
+        return this.getMumakilMode() == MumakilMode.ADULT_TAMED
+                && itemstack != null
+                && (itemstack.getItem() == Items.melon
+                || Block.getBlockFromItem(itemstack.getItem())
+                == Blocks.melon_block);
     }
 
+    @Override
+    public boolean canMateWith(EntityAnimal otherAnimal) {
+        if (!(otherAnimal instanceof LOTREntityMumakil)) {
+            return false;
+        }
 
-    // ---------------------------------------------------------------------
+        LOTREntityMumakil otherMumakil =
+                (LOTREntityMumakil)otherAnimal;
+
+        return this.getMumakilMode() == MumakilMode.ADULT_TAMED
+                && otherMumakil.getMumakilMode()
+                == MumakilMode.ADULT_TAMED
+                && super.canMateWith(otherAnimal);
+    }
+
+    @Override
+    public EntityAgeable createChild(EntityAgeable otherParent) {
+        EntityAgeable childEntity = super.createChild(otherParent);
+
+        if (!(childEntity instanceof LOTREntityMumakil)) {
+            return childEntity;
+        }
+
+        LOTREntityMumakil child =
+                (LOTREntityMumakil)childEntity;
+
+        if (otherParent instanceof LOTREntityMumakil) {
+            LOTREntityMumakil otherMumakil =
+                    (LOTREntityMumakil)otherParent;
+            double parentAverage =
+                    ((double)this.getMumakilSpeedTrait()
+                            + (double)otherMumakil
+                            .getMumakilSpeedTrait()) * 0.5D;
+            double mutation =
+                    this.rand.nextGaussian()
+                            * SPEED_TRAIT_MUTATION_STANDARD_DEVIATION;
+            child.setMumakilSpeedTrait(
+                    (float)(parentAverage + mutation)
+            );
+        } else {
+            child.setMumakilSpeedTrait(NORMAL_SPEED_TRAIT);
+        }
+
+        /*
+         * The LOTR horse base marks offspring tame when both parents are
+         * tame, but it does not copy an owner UUID. Preserve the first
+         * available parent owner so the newborn becomes a usable BABY_TAMED
+         * Mumakil.
+         */
+        String ownerId = this.func_152119_ch();
+
+        if ((ownerId == null || ownerId.length() == 0)
+                && otherParent instanceof LOTREntityMumakil) {
+            ownerId = ((LOTREntityMumakil)otherParent)
+                    .func_152119_ch();
+        }
+
+        if (ownerId != null && ownerId.length() > 0) {
+            child.func_152120_b(ownerId);
+            child.setHorseTamed(true);
+        }
+
+        /*
+         * Saddle, howdah, archers, and hired-war state are intentionally not
+         * inherited. The existing Mumakil lifecycle supplies the newborn's
+         * 30-minute baby growth timer on its first update.
+         */
+        return child;
+    }
+// ---------------------------------------------------------------------
     // Main server tick update
     // ---------------------------------------------------------------------
 
+    private void updatePlayerRiddenSpeedModifier() {
+        IAttributeInstance movementAttribute = this.getEntityAttribute(
+                SharedMonsterAttributes.movementSpeed
+        );
+
+        if (movementAttribute == null) {
+            return;
+        }
+
+        AttributeModifier existingModifier = movementAttribute.getModifier(
+                PLAYER_RIDDEN_SPEED_MODIFIER_UUID
+        );
+        boolean playerRiding = this.riddenByEntity instanceof EntityPlayer;
+
+        if (playerRiding && existingModifier == null) {
+            movementAttribute.applyModifier(
+                    new AttributeModifier(
+                            PLAYER_RIDDEN_SPEED_MODIFIER_UUID,
+                            "Mumakil player-ridden speed",
+                            PLAYER_RIDDEN_SPEED_MULTIPLIER - 1.0D,
+                            2
+                    )
+            );
+        } else if (!playerRiding && existingModifier != null) {
+            movementAttribute.removeModifier(existingModifier);
+        }
+    }
+    private void updateSafeTamedPlayerDismount() {
+        if (this.worldObj.isRemote) {
+            return;
+        }
+
+        if (this.riddenByEntity instanceof EntityPlayer) {
+            this.lastMountedPlayerForSafeDismount =
+                    (EntityPlayer)this.riddenByEntity;
+            this.pendingSafeGroundDismountPlayer = null;
+            this.pendingSafeGroundDismountTicks = 0;
+            return;
+        }
+
+        if (this.lastMountedPlayerForSafeDismount != null) {
+            EntityPlayer dismountedPlayer =
+                    this.lastMountedPlayerForSafeDismount;
+            this.lastMountedPlayerForSafeDismount = null;
+
+            if (this.isTame()
+                    && !dismountedPlayer.isDead
+                    && dismountedPlayer.isEntityAlive()
+                    && dismountedPlayer.worldObj == this.worldObj
+                    && dismountedPlayer.ridingEntity == null
+                    && this.getDistanceSqToEntity(dismountedPlayer) <= 1024.0D) {
+                this.pendingSafeGroundDismountPlayer = dismountedPlayer;
+                this.pendingSafeGroundDismountTicks = 5;
+            }
+        }
+
+        if (this.pendingSafeGroundDismountPlayer == null) {
+            return;
+        }
+
+        EntityPlayer pendingPlayer =
+                this.pendingSafeGroundDismountPlayer;
+
+        if (pendingPlayer.isDead
+                || !pendingPlayer.isEntityAlive()
+                || pendingPlayer.worldObj != this.worldObj
+                || pendingPlayer.ridingEntity != null
+                || this.getDistanceSqToEntity(pendingPlayer) > 1024.0D
+                || this.pendingSafeGroundDismountTicks <= 0) {
+            this.pendingSafeGroundDismountPlayer = null;
+            this.pendingSafeGroundDismountTicks = 0;
+            return;
+        }
+
+        /*
+         * Reapply briefly because the normal horse/player dismount update can
+         * restore the high seat position during the first tick.
+         */
+        this.placeDismountedPlayerBesideMumakil(pendingPlayer);
+        --this.pendingSafeGroundDismountTicks;
+
+        if (this.pendingSafeGroundDismountTicks <= 0) {
+            this.pendingSafeGroundDismountPlayer = null;
+        }
+    }
+    private void placeDismountedPlayerBesideMumakil(
+            EntityPlayer player
+    ) {
+        float yawRadians = this.renderYawOffset
+                * 3.1415927F / 180.0F;
+
+        double forwardX = -MathHelper.sin(yawRadians);
+        double forwardZ = MathHelper.cos(yawRadians);
+        double sideX = MathHelper.cos(yawRadians);
+        double sideZ = MathHelper.sin(yawRadians);
+
+        double dismountDistance = Math.max(
+                2.0D,
+                this.width * 0.5D + player.width * 0.5D + 0.75D
+        );
+
+        double[][] offsets = new double[][] {
+                {sideX * dismountDistance, sideZ * dismountDistance},
+                {-sideX * dismountDistance, -sideZ * dismountDistance},
+                {-forwardX * dismountDistance, -forwardZ * dismountDistance},
+                {forwardX * dismountDistance, forwardZ * dismountDistance},
+                {
+                        (sideX - forwardX) * dismountDistance,
+                        (sideZ - forwardZ) * dismountDistance
+                },
+                {
+                        (-sideX - forwardX) * dismountDistance,
+                        (-sideZ - forwardZ) * dismountDistance
+                },
+                {
+                        (sideX + forwardX) * dismountDistance,
+                        (sideZ + forwardZ) * dismountDistance
+                },
+                {
+                        (-sideX + forwardX) * dismountDistance,
+                        (-sideZ + forwardZ) * dismountDistance
+                }
+        };
+
+        for (int i = 0; i < offsets.length; ++i) {
+            double candidateX = this.posX + offsets[i][0];
+            double candidateZ = this.posZ + offsets[i][1];
+
+            if (this.tryPlaceDismountedPlayerOnGround(
+                    player,
+                    candidateX,
+                    candidateZ
+            )) {
+                return;
+            }
+        }
+    }
+
+    private boolean tryPlaceDismountedPlayerOnGround(
+            EntityPlayer player,
+            double x,
+            double z
+    ) {
+        int blockX = MathHelper.floor_double(x);
+        int blockZ = MathHelper.floor_double(z);
+        int baseY = MathHelper.floor_double(this.boundingBox.minY);
+
+        for (int groundY = baseY + 2;
+                groundY >= baseY - 5;
+                --groundY) {
+            Block groundBlock = this.worldObj.getBlock(
+                    blockX,
+                    groundY,
+                    blockZ
+            );
+
+            AxisAlignedBB groundBox =
+                    groundBlock.getCollisionBoundingBoxFromPool(
+                            this.worldObj,
+                            blockX,
+                            groundY,
+                            blockZ
+                    );
+
+            if (groundBox == null) {
+                continue;
+            }
+
+            double standY = groundBox.maxY;
+            double halfWidth = player.width * 0.5D;
+
+            AxisAlignedBB playerBox = AxisAlignedBB.getBoundingBox(
+                    x - halfWidth,
+                    standY,
+                    z - halfWidth,
+                    x + halfWidth,
+                    standY + player.height,
+                    z + halfWidth
+            );
+
+            if (!this.worldObj.getCollidingBoundingBoxes(
+                    player,
+                    playerBox
+            ).isEmpty()) {
+                continue;
+            }
+
+            player.setPosition(x, standY, z);
+
+            if (player instanceof EntityPlayerMP) {
+                EntityPlayerMP serverPlayer = (EntityPlayerMP)player;
+                serverPlayer.playerNetServerHandler.setPlayerLocation(
+                        x,
+                        standY,
+                        z,
+                        player.rotationYaw,
+                        player.rotationPitch
+                );
+            }
+
+            player.motionX = 0.0D;
+            player.motionY = 0.0D;
+            player.motionZ = 0.0D;
+            player.fallDistance = 0.0F;
+            player.onGround = true;
+            player.velocityChanged = true;
+            return true;
+        }
+
+        return false;
+    }
     public void onLivingUpdate() {
+        this.updatePlayerRiddenSpeedModifier();
+
+        /*
+         * BABY_TAMED_RIDING_EQUIPMENT_FIX_V1
+         * EntityHorse's successful taming transition can clear the rider.
+         * Remember the player who was actively taming this wild baby so the
+         * successful attempt can remain mounted.
+         */
+        EntityPlayer successfulBabyTamingRider = null;
+        boolean wasUntamedBabyTamingAttempt = false;
+
+        if (!this.worldObj.isRemote
+                && this.getMumakilMode() == MumakilMode.BABY_WILD
+                && !this.isTame()
+                && this.riddenByEntity instanceof EntityPlayer) {
+            successfulBabyTamingRider = (EntityPlayer)this.riddenByEntity;
+            wasUntamedBabyTamingAttempt = true;
+        }
         long superPerfStart = !this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()
                 ? MumakilPerformanceTracker.startTimer()
                 : 0L;
@@ -1687,6 +5078,54 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 );
             }
         }
+        this.updatePlayerRiddenLocomotionPhase();
+
+        if (!this.worldObj.isRemote
+                && this.getFormationOrigin()
+                == MumakilFormationOrigin.INVASION_NEAR_HARAD
+                && (this.ticksExisted + this.getEntityId()) % 100 == 0) {
+            UUID invasionId = this.getMumakilInvasionId();
+            LOTREntityInvasionSpawner spawner =
+                    invasionId == null
+                            ? null
+                            : LOTREntityInvasionSpawner
+                            .locateInvasionNearby(this, invasionId);
+            if (spawner == null) {
+                Entity capturedDriver = this.riddenByEntity;
+                MumakilWarFormationFactory
+                        .removeNaturalFormationMembers(
+                                this,
+                                capturedDriver
+                        );
+                this.setDead();
+                return;
+            }
+        }
+
+        if (!this.worldObj.isRemote
+                && wasUntamedBabyTamingAttempt
+                && successfulBabyTamingRider != null
+                && this.isTame()) {
+            this.setMumakilMode(MumakilMode.BABY_TAMED);
+            this.babyMelonFedUntilTick = 0L;
+
+            if (!successfulBabyTamingRider.isDead
+                    && successfulBabyTamingRider.isEntityAlive()
+                    && successfulBabyTamingRider.ridingEntity == null
+                    && this.riddenByEntity == null) {
+                successfulBabyTamingRider.mountEntity(this);
+            }
+        }
+        this.updateSafeTamedPlayerDismount();
+
+        if (this.worldObj.isRemote) {
+            this.applyMumakilPhysicalSize(this.isChild());
+        } else {
+            this.updateMumakilLifecycle();
+            this.updateMumakilAmbientAnimationSounds();
+            this.faceAIMovementDirection();
+        }
+
         this.stabilizeIdleYaw();
 
         this.prevMumakilStrikeAnimationTicks = this.mumakilStrikeAnimationTicks;
@@ -1696,6 +5135,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         if (!this.worldObj.isRemote) {
+            if (this.getMumakilMode() == MumakilMode.ADULT_WILD
+                    && !this.isTame()
+                    && this.riddenByEntity instanceof EntityPlayer) {
+                EntityPlayer invalidAdultRider =
+                        (EntityPlayer)this.riddenByEntity;
+                invalidAdultRider.mountEntity(null);
+                this.placeDismountedPlayerBesideMumakil(
+                        invalidAdultRider
+                );
+            }
             if (DEBUG_MUMAKIL_MODE && this.ticksExisted % 100 == 0) {
                 System.out.println(
                         "[LOTRMoreMobs] Mumakil mode"
@@ -1717,14 +5166,19 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             }
 
             this.updateAngerWave();
+            this.updateTerritorialWarningAndHerdRegroup();
             this.tryAcquireWildMobTarget();
             this.tryTuskReachAttack();
             if (!MumakilPerformanceTracker.DEBUG_DISABLE_MUMAKIL_TREE_CLEARING) {
-                long treePerfStart = MumakilPerformanceTracker.startTimer();
+                boolean trackTreePerformance =
+                        MumakilPerformanceTracker.isEnabled();
+                long treePerfStart = trackTreePerformance
+                        ? MumakilPerformanceTracker.startTimer()
+                        : 0L;
                 try {
                     this.clearAggroObstaclesForMovement();
                 } finally {
-                    if (MumakilPerformanceTracker.isEnabled()) {
+                    if (trackTreePerformance) {
                         MumakilPerformanceTracker.recordTreeScan(
                                 this,
                                 System.nanoTime() - treePerfStart
@@ -1732,64 +5186,81 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     }
                 }
             }
-            this.updateChargeStompSound();
             this.applyTrampleDamage();
 
-            if (this.riddenByEntity instanceof EntityLivingBase) {
-                EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
-                float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
+            if (!this.isBabyMumakil()
+                    && this.riddenByEntity instanceof EntityLivingBase) {
+                float momentum = MathHelper.sqrt_double(
+                        this.motionX * this.motionX
+                                + this.motionZ * this.motionZ
+                );
                 this.setSprinting(momentum > 0.18F);
-
-                if (momentum >= CHARGE_MIN_SPEED) {
-                    float strength = Math.min((float)ATTACK_DAMAGE + momentum * 50.0F, MAX_CHARGE_DAMAGE);
-                    Vec3 look = this.getLookVec();
-                    List list = this.worldObj.getEntitiesWithinAABBExcludingEntity(
-                            this,
-                            this.boundingBox
-                                    .addCoord(look.xCoord * 1.5D, 0.0D, look.zCoord * 1.5D)
-                                    .expand(0.75D, 0.5D, 0.75D)
-                    );
-                    boolean hitAnyEntities = false;
-
-                    for(int i = 0; i < list.size(); ++i) {
-                        Entity obj = (Entity)list.get(i);
-                        if (obj instanceof EntityLivingBase) {
-                            EntityLivingBase entity = (EntityLivingBase)obj;
-                            if (entity != rider
-                                    && entity.riddenByEntity == null
-                                    && (!(rider instanceof EntityPlayer) || LOTRMod.canPlayerAttackEntity((EntityPlayer)rider, entity, false))
-                                    && (!(rider instanceof EntityCreature) || LOTRMod.canNPCAttackEntity((EntityCreature)rider, entity, false))) {
-                                boolean flag = entity.attackEntityFrom(DamageSource.causeMobDamage(this), strength);
-                                if (flag) {
-                                    this.applyMumakilHeavyKnockback(entity, 2.0F, 0.55F);
-                                    hitAnyEntities = true;
-                                    if (entity instanceof EntityLiving) {
-                                        EntityLiving entityliving = (EntityLiving)entity;
-                                        if (entityliving.getAttackTarget() == this) {
-                                            entityliving.getNavigator().clearPathEntity();
-                                            entityliving.setAttackTarget(rider);
-                                        }
-                                    }
-                                }
-                            }
-                        }
-                    }
-
-                    if (hitAnyEntities) {
-                        this.playMumakilHitSound();
-                    }
-                }
-            } else if (this.getAttackTarget() != null) {
-                float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-                this.setSprinting(momentum > 0.18F);
-            } else {
-                this.setSprinting(false);
             }
 
             if (MumakilPerformanceTracker.isEnabled()) {
                 MumakilPerformanceTracker.reportIfDue(this);
             }
         }
+    }
+
+    private void updatePlayerRiddenLocomotionPhase() {
+        float rawPhase = this.limbSwing;
+        boolean playerRidden = this.riddenByEntity instanceof EntityPlayer;
+
+        if (!this.playerRiddenLocomotionInitialized) {
+            this.playerRiddenLocomotionPhase = rawPhase;
+            this.prevPlayerRiddenLocomotionPhase = rawPhase;
+            this.lastRawLocomotionPhase = rawPhase;
+            this.playerRiddenLocomotionInitialized = true;
+            this.wasPlayerRiddenForLocomotion = playerRidden;
+            return;
+        }
+
+        this.prevPlayerRiddenLocomotionPhase =
+                this.playerRiddenLocomotionPhase;
+
+        if (playerRidden) {
+            if (!this.wasPlayerRiddenForLocomotion) {
+                this.playerRiddenLocomotionPhase = rawPhase;
+                this.prevPlayerRiddenLocomotionPhase = rawPhase;
+            } else {
+                this.playerRiddenLocomotionPhase +=
+                        (rawPhase - this.lastRawLocomotionPhase) * 0.5F;
+            }
+        } else {
+            /*
+             * AI-controlled rendering continues to use the native phase
+             * exactly, without inheriting a ridden animation offset.
+             */
+            this.playerRiddenLocomotionPhase = rawPhase;
+            this.prevPlayerRiddenLocomotionPhase = rawPhase;
+        }
+
+        this.lastRawLocomotionPhase = rawPhase;
+        this.wasPlayerRiddenForLocomotion = playerRidden;
+    }
+
+    public float getPlayerRiddenLocomotionPhase(float partialTicks) {
+        if (!this.playerRiddenLocomotionInitialized
+                || !this.wasPlayerRiddenForLocomotion) {
+            return this.limbSwing
+                    - this.limbSwingAmount
+                    * (1.0F - MathHelper.clamp_float(
+                    partialTicks,
+                    0.0F,
+                    1.0F
+            ));
+        }
+
+        float interpolation = MathHelper.clamp_float(
+                partialTicks,
+                0.0F,
+                1.0F
+        );
+        return this.prevPlayerRiddenLocomotionPhase
+                + (this.playerRiddenLocomotionPhase
+                - this.prevPlayerRiddenLocomotionPhase)
+                * interpolation;
     }
 
 
@@ -1799,6 +5270,21 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     @Override
     public void setAttackTarget(EntityLivingBase target) {
+        if (target != null && this.isBabyMumakil()) {
+            return;
+        }
+
+        if (target != null
+                && this.isHiredWarMumakil()
+                && this.hasLivingNPCCombatDriver()) {
+            EntityLivingBase driverTarget =
+                    ((LOTREntityNPC)this.riddenByEntity).getAttackTarget();
+            EntityLivingBase formationThreat = this.getRecentFormationThreat();
+            if (target != driverTarget && target != formationThreat) {
+                return;
+            }
+        }
+
         EntityLivingBase previousTarget = this.getAttackTarget();
 
         if (MumakilPerformanceTracker.isEnabled()
@@ -1812,13 +5298,17 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public boolean attackEntityAsMob(Entity target) {
-        if (this.tuskAttackCooldownTicks > 0) {
+        if (this.isBabyMumakil()
+                || this.riddenByEntity instanceof EntityPlayer
+                || this.mumakilSkirmishWithdrawing
+                || this.tuskAttackCooldownTicks > 0) {
             return false;
         }
 
         boolean attacked = super.attackEntityAsMob(target);
         if (attacked && !this.worldObj.isRemote) {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
+            this.recordSuccessfulTuskHit();
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
 
@@ -1837,6 +5327,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         boolean arrowDamage = this.isMumakilArrowDamage(source);
         boolean damaged = super.attackEntityFrom(source, amount);
+
+        if (damaged
+                && !this.worldObj.isRemote
+                && amount > 0.0F
+                && this.getMumakilMode() == MumakilMode.BABY_WILD) {
+            this.alertNearbyWildAdultsToBabyAttack(source);
+        }
 
         if (damaged && !this.worldObj.isRemote && arrowDamage) {
             this.hurtResistantTime = Math.min(this.hurtResistantTime, PROJECTILE_HURT_RESISTANT_TICKS);
@@ -1910,13 +5407,155 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 && !this.isEntityInvulnerable();
     }
 
-    public void knockBack(Entity attacker, float strength, double xRatio, double zRatio) {
-        // A Mumakil's mass lets damage land normally without letting ordinary hits shove the war beast around.
-        super.knockBack(attacker, strength * 0.1F, xRatio, zRatio);
+    /**
+     * MUMAKIL_SAME_SPECIES_SEPARATION_V1_2
+     *
+     * Returning true keeps Minecraft's collision callback active. External
+     * movement is still blocked by addVelocity() and knockBack() below.
+     */
+    @Override
+    public boolean canBePushed() {
+        return true;
+    }
+
+    @Override
+    public void applyEntityCollision(Entity entity) {
+        if (entity instanceof LOTREntityMumakil
+                && entity != this
+                && !this.isDead
+                && !entity.isDead
+                && this.boundingBox != null
+                && entity.boundingBox != null
+                && this.boundingBox.intersectsWith(
+                entity.boundingBox
+        )) {
+            LOTREntityMumakil other =
+                    (LOTREntityMumakil)entity;
+
+            /*
+             * A touching pair can be visited from both entity update loops.
+             * Only the lower entity ID resolves it so the response is not
+             * applied twice.
+             */
+            if (this.getEntityId() > other.getEntityId()) {
+                return;
+            }
+
+            double overlapX = Math.min(
+                    this.boundingBox.maxX,
+                    other.boundingBox.maxX
+            ) - Math.max(
+                    this.boundingBox.minX,
+                    other.boundingBox.minX
+            );
+            double overlapZ = Math.min(
+                    this.boundingBox.maxZ,
+                    other.boundingBox.maxZ
+            ) - Math.max(
+                    this.boundingBox.minZ,
+                    other.boundingBox.minZ
+            );
+
+            if (overlapX <= 0.0D || overlapZ <= 0.0D) {
+                return;
+            }
+
+            double directionX = 0.0D;
+            double directionZ = 0.0D;
+            double overlapDepth;
+
+            /*
+             * Separate along the shallowest horizontal overlap. This is the
+             * shortest route out of the intersection.
+             */
+            if (overlapX < overlapZ) {
+                directionX = other.posX >= this.posX
+                        ? 1.0D
+                        : -1.0D;
+                overlapDepth = overlapX;
+            } else if (overlapZ < overlapX) {
+                directionZ = other.posZ >= this.posZ
+                        ? 1.0D
+                        : -1.0D;
+                overlapDepth = overlapZ;
+            } else {
+                /*
+                 * Deterministic tie-breaker for perfectly centered overlaps.
+                 */
+                int mixedIds = this.getEntityId() * 31
+                        + other.getEntityId() * 17;
+
+                if ((mixedIds & 1) == 0) {
+                    directionX = (mixedIds & 2) == 0
+                            ? 1.0D
+                            : -1.0D;
+                } else {
+                    directionZ = (mixedIds & 2) == 0
+                            ? 1.0D
+                            : -1.0D;
+                }
+
+                overlapDepth = overlapX;
+            }
+
+            /*
+             * Increase the correction with overlap depth, but cap it so
+             * grouped Mumakil spread smoothly instead of launching apart.
+             */
+            double separationSpeed = Math.min(
+                    0.16D,
+                    0.045D + overlapDepth * 0.018D
+            );
+
+            this.applyInternalMumakilSeparationVelocity(
+                    -directionX * separationSpeed,
+                    -directionZ * separationSpeed
+            );
+            other.applyInternalMumakilSeparationVelocity(
+                    directionX * separationSpeed,
+                    directionZ * separationSpeed
+            );
+            return;
+        }
+
+        /*
+         * Smaller entities keep normal collision handling. This Mumakil
+         * ignores the reciprocal push through addVelocity(), while the
+         * smaller entity may still be moved out of its hitbox.
+         */
+        super.applyEntityCollision(entity);
+    }
+
+    private void applyInternalMumakilSeparationVelocity(
+            double x,
+            double z
+    ) {
+        /*
+         * Deliberately bypass this class's external-velocity block.
+         */
+        super.addVelocity(x, 0.0D, z);
+        this.velocityChanged = true;
+    }
+    @Override
+    public void addVelocity(double x, double y, double z) {
+        // External entities cannot add velocity to the Mumakil.
+    }
+
+    @Override
+    public void knockBack(
+            Entity attacker,
+            float strength,
+            double xRatio,
+            double zRatio
+    ) {
+        // Damage lands without moving the Mumakil.
     }
 
     private void tryTuskReachAttack() {
-        if (this.tuskAttackCooldownTicks > 0) {
+        if (this.isBabyMumakil()
+                || this.riddenByEntity instanceof EntityPlayer
+                || this.mumakilSkirmishWithdrawing
+                || this.tuskAttackCooldownTicks > 0) {
             return;
         }
 
@@ -1939,12 +5578,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         if (target.attackEntityFrom(DamageSource.causeMobDamage(this), (float)ATTACK_DAMAGE)) {
             this.tuskAttackCooldownTicks = TUSK_ATTACK_COOLDOWN_TICKS;
+            this.recordSuccessfulTuskHit();
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.75F, 0.5F);
 
             if (this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE)) {
                 this.playMumakilHitSound();
             }
+        }
+    }
+
+    private void recordSuccessfulTuskHit() {
+        ++this.successfulTuskAttackSequence;
+        if (this.successfulTuskAttackSequence == Integer.MIN_VALUE) {
+            this.successfulTuskAttackSequence = 1;
         }
     }
 
@@ -2093,70 +5740,205 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private void applyTrampleDamage() {
-        if (this.worldObj.isRemote || this.ticksExisted % TRAMPLE_SCAN_INTERVAL != 0) {
+
+        if (this.isBabyMumakil()
+
+                || this.worldObj.isRemote
+
+                || this.riddenByEntity instanceof EntityPlayer
+
+                || this.isTerritorialWarningActive()
+
+                || this.isWildHerdRegroupActive()
+
+                || this.ticksExisted % TRAMPLE_SCAN_INTERVAL != 0) {
+
             return;
+
         }
 
-        if (this.ticksExisted % 20 == 0) {
-            this.cleanupTrampleCooldowns();
-        }
+
 
         boolean trampleActive = this.isWildMumakil()
+
                 || this.isMountEnraged()
+
                 || this.riddenByEntity != null;
 
+
+
         if (!trampleActive) {
+
+            return;
+
+        }
+
+
+
+        /*
+
+         * Use actual horizontal displacement from the previous tick rather
+
+         * than stored motion. This prevents residual velocity, collision
+
+         * jitter, or an idle entity with stale motion values from trampling.
+
+         */
+
+        double movedX = this.posX - this.prevPosX;
+
+        double movedZ = this.posZ - this.prevPosZ;
+
+        float actualMovement = MathHelper.sqrt_double(
+
+                movedX * movedX + movedZ * movedZ
+
+        );
+
+
+
+        if (actualMovement < TRAMPLE_MIN_SPEED) {
+            return;
+
+        }
+
+        if (this.ticksExisted < this.nextTrampleDamageTick) {
             return;
         }
 
-        float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-        if (momentum < TRAMPLE_MIN_SPEED) {
-            return;
-        }
+        double directionX = movedX / (double)actualMovement;
 
-        boolean mountedChargeActive = this.riddenByEntity instanceof EntityLivingBase
-                && momentum >= CHARGE_MIN_SPEED;
-        if (mountedChargeActive) {
-            return;
-        }
+        double directionZ = movedZ / (double)actualMovement;
 
-        double directionX = this.motionX / (double)momentum;
-        double directionZ = this.motionZ / (double)momentum;
         AxisAlignedBB trampleBox = this.boundingBox
+
                 .expand(0.85D, 0.5D, 0.85D)
-                .addCoord(directionX * 1.5D, -0.35D, directionZ * 1.5D);
 
-        long perfStart = MumakilPerformanceTracker.startTimer();
-        List nearby = this.worldObj.getEntitiesWithinAABB(EntityLivingBase.class, trampleBox);
-        if (MumakilPerformanceTracker.isEnabled()) {
-            MumakilPerformanceTracker.recordTrampleScan(this, nearby.size(), System.nanoTime() - perfStart);
+                .addCoord(
+
+                        directionX * 1.5D,
+
+                        -0.35D,
+
+                        directionZ * 1.5D
+
+                );
+
+
+
+        boolean trackPerformance =
+                MumakilPerformanceTracker.isEnabled();
+        long perfStart = trackPerformance
+                ? MumakilPerformanceTracker.startTimer()
+                : 0L;
+
+        List nearby = this.worldObj.getEntitiesWithinAABB(
+
+                EntityLivingBase.class,
+
+                trampleBox
+
+        );
+
+
+
+        if (trackPerformance) {
+
+            MumakilPerformanceTracker.recordTrampleScan(
+
+                    this,
+
+                    nearby.size(),
+
+                    System.nanoTime() - perfStart
+
+            );
+
         }
 
-        boolean hitAnyEntities = false;
 
-        for(int i = 0; i < nearby.size(); ++i) {
-            EntityLivingBase target = (EntityLivingBase)nearby.get(i);
+
+        for (int i = 0; i < nearby.size(); ++i) {
+
+            EntityLivingBase target =
+
+                    (EntityLivingBase)nearby.get(i);
+
+
+
             if (!this.canTrample(target)) {
+
                 continue;
+
             }
 
-            Integer cooldownEnd = this.trampleCooldowns.get(target.getEntityId());
-            if (cooldownEnd != null && cooldownEnd > this.ticksExisted) {
+
+
+            /*
+
+             * Normal mob damage can apply vanilla knockback. Preserve and
+
+             * restore the target's existing velocity so trample damage adds
+
+             * no horizontal or vertical knockback of its own.
+
+             */
+
+            double previousMotionX = target.motionX;
+
+            double previousMotionY = target.motionY;
+
+            double previousMotionZ = target.motionZ;
+
+
+
+            if (!target.attackEntityFrom(
+
+                    DamageSource.causeMobDamage(this),
+
+                    TRAMPLE_DAMAGE
+
+            )) {
+
                 continue;
+
             }
 
-            this.trampleCooldowns.put(target.getEntityId(), this.ticksExisted + TRAMPLE_COOLDOWN_TICKS);
-            if (target.attackEntityFrom(DamageSource.causeMobDamage(this), TRAMPLE_DAMAGE)) {
-                target.addPotionEffect(new PotionEffect(Potion.moveSlowdown.id, 40, 0));
-                this.applyTrampleKnockback(target, directionX, directionZ);
-                hitAnyEntities = true;
-            }
-        }
 
-        if (hitAnyEntities) {
+
+            target.motionX = previousMotionX;
+
+            target.motionY = previousMotionY;
+
+            target.motionZ = previousMotionZ;
+
+            target.velocityChanged = true;
+
+
+
+            /*
+
+             * One successful target consumes the global cooldown. A crowd
+
+             * entering the Mumakil's hitbox is therefore not all damaged at
+
+             * once, and another trample cannot occur for five seconds.
+
+             */
+
+            this.nextTrampleDamageTick =
+
+                    this.ticksExisted + TRAMPLE_COOLDOWN_TICKS;
+
             this.playMumakilHitSound();
+
+            break;
+
         }
+
     }
+
+
 
     private boolean canTrample(EntityLivingBase target) {
         if (MumakilPerformanceTracker.isEnabled()) {
@@ -2222,33 +6004,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 && ownerId.equals(player.getUniqueID().toString());
     }
 
-    private void applyTrampleKnockback(EntityLivingBase target, double fallbackX, double fallbackZ) {
-        double deltaX = target.posX - this.posX;
-        double deltaZ = target.posZ - this.posZ;
-        double distance = Math.sqrt(deltaX * deltaX + deltaZ * deltaZ);
 
-        if (distance > 1.0E-4D) {
-            deltaX /= distance;
-            deltaZ /= distance;
-        } else {
-            deltaX = fallbackX;
-            deltaZ = fallbackZ;
-        }
-
-        target.addVelocity(deltaX * 0.75D, 0.42D, deltaZ * 0.75D);
-        target.velocityChanged = true;
-    }
-
-    private void cleanupTrampleCooldowns() {
-        Iterator<Map.Entry<Integer, Integer>> iterator = this.trampleCooldowns.entrySet().iterator();
-
-        while(iterator.hasNext()) {
-            Map.Entry<Integer, Integer> entry = iterator.next();
-            if (entry.getValue() <= this.ticksExisted) {
-                iterator.remove();
-            }
-        }
-    }
 
 
     // ---------------------------------------------------------------------
@@ -2256,117 +6012,306 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private void clearAggroObstaclesForMovement() {
-        if (this.worldObj.isRemote || this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0) {
+        this.clearAggroObstaclesForMovement(false);
+    }
+
+    private void clearAggroObstaclesForMovement(boolean force) {
+        if (this.isBabyMumakil()
+                || this.worldObj.isRemote) {
             return;
         }
 
+        int regionX = MathHelper.floor_double(this.posX);
+        int regionY = MathHelper.floor_double(this.boundingBox.minY);
+        int regionZ = MathHelper.floor_double(this.posZ);
+        boolean firstRegion = this.lastAggroObstacleRegionX == Integer.MIN_VALUE;
+        boolean enteredNewRegion = firstRegion
+                || regionX != this.lastAggroObstacleRegionX
+                || regionY != this.lastAggroObstacleRegionY
+                || regionZ != this.lastAggroObstacleRegionZ;
+
+        if (enteredNewRegion) {
+            this.lastAggroObstacleRegionX = regionX;
+            this.lastAggroObstacleRegionY = regionY;
+            this.lastAggroObstacleRegionZ = regionZ;
+        }
+
+        EntityLivingBase target = this.getAttackTarget();
+        if (target != null && !target.isEntityAlive()) {
+            target = null;
+        }
+
+        /*
+         * Trigger conditions are deliberately state-driven. A new sweep begins
+         * only on a new occupied block region, a real horizontal collision, a
+         * missing combat path, measured lack of progress, or an explicit
+         * pre-path request from the chase AI.
+         */
+        double movedX = this.posX - this.prevPosX;
+        double movedZ = this.posZ - this.prevPosZ;
+        boolean moving = movedX * movedX + movedZ * movedZ > 0.0025D
+                || Math.abs(this.moveForward) > 0.05F
+                || !this.getNavigator().noPath();
+        boolean collidedWhileMoving =
+                moving && this.isCollidedHorizontally;
+        boolean targetNeedsPath = target != null
+                && this.shouldBreakForwardTrees()
+                && this.getDistanceSqToEntity(target)
+                > TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE;
+        boolean targetHasNoPath =
+                targetNeedsPath && this.getNavigator().noPath();
+        boolean failedToProgress =
+                this.updateAggroObstacleProgressState(
+                        target,
+                        targetNeedsPath
+                );
+        boolean regionTrigger =
+                enteredNewRegion && (firstRegion || moving);
+
+        if (this.aggroObstacleSliceLimit <= 0) {
+            boolean shouldStartSweep = force
+                    || regionTrigger
+                    || collidedWhileMoving
+                    || targetHasNoPath
+                    || failedToProgress;
+            if (!shouldStartSweep) {
+                return;
+            }
+
+            /*
+             * A completed obstructed sweep gets a short retry; a clear sweep
+             * gets a longer one. Entering a new region or an explicit chase
+             * request may start immediately, while stationary retries honor
+             * the cooldown.
+             */
+            if (!force
+                    && !regionTrigger
+                    && this.ticksExisted
+                    < this.nextAggroObstacleSweepTick) {
+                return;
+            }
+
+            this.aggroObstacleSliceIndex = 0;
+            this.aggroObstacleSliceLimit =
+                    this.shouldBreakForwardTrees()
+                            ? AGGRO_OBSTACLE_SLICE_COUNT
+                            : 1;
+            this.aggroObstacleSweepBrokeBlocks = false;
+        } else if (!this.shouldBreakForwardTrees()
+                && this.aggroObstacleSliceIndex > 0) {
+            this.finishAggroObstacleSweep();
+            return;
+        }
+
+        /*
+         * Work is staggered by entity ID. Each pass examines one spatial slice
+         * and never more than AGGRO_OBSTACLE_BLOCK_CHECK_BUDGET blocks.
+         */
+        int entityStagger =
+                (this.getEntityId() & Integer.MAX_VALUE)
+                        % AGGRO_OBSTACLE_CLEAR_INTERVAL;
+        if ((this.ticksExisted % AGGRO_OBSTACLE_CLEAR_INTERVAL
+                + entityStagger)
+                % AGGRO_OBSTACLE_CLEAR_INTERVAL != 0
+                || this.lastAggroObstacleClearTick
+                == this.ticksExisted) {
+            return;
+        }
+
+        AxisAlignedBB obstacleSlice =
+                this.createAggroObstacleSlice(
+                        this.aggroObstacleSliceIndex,
+                        target
+                );
+        if (obstacleSlice == null) {
+            this.finishAggroObstacleSweep();
+            return;
+        }
+
+        this.lastAggroObstacleClearTick = this.ticksExisted;
         if (MumakilPerformanceTracker.isEnabled()) {
             MumakilPerformanceTracker.recordTreePass(this);
         }
 
-        Vec3 look = this.getLookVec();
-        double horizontalLookLength = Math.sqrt(look.xCoord * look.xCoord + look.zCoord * look.zCoord);
-        double lookX;
-        double lookZ;
+        int broken = this.clearAggroObstaclesInBox(
+                obstacleSlice,
+                AGGRO_OBSTACLE_BLOCK_CHECK_BUDGET,
+                MAX_OBSTACLES_PER_PASS
+        );
+        this.aggroObstacleSweepBrokeBlocks |= broken > 0;
+        ++this.aggroObstacleSliceIndex;
 
-        if (horizontalLookLength > 1.0E-4D) {
-            lookX = look.xCoord / horizontalLookLength;
-            lookZ = look.zCoord / horizontalLookLength;
-        } else {
-            lookX = -MathHelper.sin(this.rotationYaw * (float)Math.PI / 180.0F);
-            lookZ = MathHelper.cos(this.rotationYaw * (float)Math.PI / 180.0F);
+        if (this.aggroObstacleSliceIndex
+                >= this.aggroObstacleSliceLimit) {
+            this.finishAggroObstacleSweep();
+        }
+    }
+
+    private boolean updateAggroObstacleProgressState(
+            EntityLivingBase target,
+            boolean targetNeedsPath
+    ) {
+        if (target == null || !targetNeedsPath) {
+            this.hasAggroObstacleProgressSample = false;
+            this.nextAggroObstacleProgressCheckTick = 0;
+            return false;
         }
 
-        int remaining = MAX_OBSTACLES_PER_PASS;
-
-        /*
-         * Clear logs/leaves directly under and around the Mumakil.
-         * This fixes the case where the Mumakil is standing on tree blocks.
-         */
-        AxisAlignedBB standingBox = AxisAlignedBB.getBoundingBox(
-                this.posX - 3.5D,
-                this.boundingBox.minY - 1.5D,
-                this.posZ - 3.5D,
-                this.posX + 3.5D,
-                this.boundingBox.minY + 2.0D,
-                this.posZ + 3.5D
-        );
-
-        remaining -= this.clearAggroObstaclesInBox(standingBox, remaining);
-
-        if (remaining <= 0 || !this.shouldBreakForwardTrees()) {
-            return;
+        if (!this.hasAggroObstacleProgressSample) {
+            this.lastAggroObstacleProgressX = this.posX;
+            this.lastAggroObstacleProgressZ = this.posZ;
+            this.nextAggroObstacleProgressCheckTick =
+                    this.ticksExisted
+                            + AGGRO_OBSTACLE_PROGRESS_CHECK_TICKS;
+            this.hasAggroObstacleProgressSample = true;
+            return false;
         }
 
-        /*
-         * Clear around the body while moving.
-         */
-        AxisAlignedBB bodyBox = AxisAlignedBB.getBoundingBox(
-                this.posX - 3.5D,
-                this.boundingBox.minY + 0.25D,
-                this.posZ - 3.5D,
-                this.posX + 3.5D,
-                this.boundingBox.maxY + 1.25D,
-                this.posZ + 3.5D
-        );
-
-        /*
-         * Clear in front of the head/tusks.
-         */
-        double headX = this.posX + lookX * 4.0D;
-        double headZ = this.posZ + lookZ * 4.0D;
-        AxisAlignedBB headAndTusksBox = AxisAlignedBB.getBoundingBox(
-                headX - 2.25D,
-                this.boundingBox.minY + 1.0D,
-                headZ - 2.25D,
-                headX + 2.25D,
-                this.boundingBox.maxY + 1.75D,
-                headZ + 2.25D
-        );
-
-        /*
-         * Clear lower blocks farther forward for trunk/tusk area.
-         */
-        double trunkX = this.posX + lookX * 5.5D;
-        double trunkZ = this.posZ + lookZ * 5.5D;
-        AxisAlignedBB trunkBox = AxisAlignedBB.getBoundingBox(
-                trunkX - 1.5D,
-                this.boundingBox.minY + 0.25D,
-                trunkZ - 1.5D,
-                trunkX + 1.5D,
-                this.boundingBox.maxY + 0.75D,
-                trunkZ + 1.5D
-        );
-
-        remaining -= this.clearAggroObstaclesInBox(headAndTusksBox, remaining);
-
-        if (remaining > 0) {
-            remaining -= this.clearAggroObstaclesInBox(trunkBox, remaining);
+        if (this.ticksExisted
+                < this.nextAggroObstacleProgressCheckTick) {
+            return false;
         }
 
-        if (remaining > 0) {
-            this.clearAggroObstaclesInBox(bodyBox, remaining);
+        double progressX =
+                this.posX - this.lastAggroObstacleProgressX;
+        double progressZ =
+                this.posZ - this.lastAggroObstacleProgressZ;
+        boolean failed = progressX * progressX
+                + progressZ * progressZ
+                < AGGRO_OBSTACLE_PROGRESS_DISTANCE_SQ;
+
+        this.lastAggroObstacleProgressX = this.posX;
+        this.lastAggroObstacleProgressZ = this.posZ;
+        this.nextAggroObstacleProgressCheckTick =
+                this.ticksExisted
+                        + AGGRO_OBSTACLE_PROGRESS_CHECK_TICKS;
+        return failed;
+    }
+
+    private void finishAggroObstacleSweep() {
+        this.aggroObstacleSliceIndex = 0;
+        this.aggroObstacleSliceLimit = 0;
+        this.nextAggroObstacleSweepTick =
+                this.ticksExisted
+                        + (this.aggroObstacleSweepBrokeBlocks
+                        ? AGGRO_OBSTACLE_BROKEN_RETRY_TICKS
+                        : AGGRO_OBSTACLE_SWEEP_RETRY_TICKS);
+        this.aggroObstacleSweepBrokeBlocks = false;
+    }
+
+    private AxisAlignedBB createAggroObstacleSlice(
+            int sliceIndex,
+            EntityLivingBase target
+    ) {
+        /*
+         * Slice 0 immediately clears footing. The remaining twelve passes are
+         * four vertical slices each for the body, near corridor, and far
+         * corridor. This keeps torso/head clearance responsive without ever
+         * scanning the complete multi-thousand-block corridor in one tick.
+         */
+        if (sliceIndex == 0) {
+            return AxisAlignedBB.getBoundingBox(
+                    this.posX - 3.5D,
+                    this.boundingBox.minY - 1.5D,
+                    this.posZ - 3.5D,
+                    this.posX + 3.5D,
+                    this.boundingBox.minY + 2.0D,
+                    this.posZ + 3.5D
+            );
         }
+
+        if (sliceIndex < 1
+                || sliceIndex >= AGGRO_OBSTACLE_SLICE_COUNT) {
+            return null;
+        }
+
+        int group = (sliceIndex - 1) / 4;
+        int orderedSlice =
+                AGGRO_OBSTACLE_VERTICAL_SLICE_ORDER[
+                        (sliceIndex - 1) % 4
+                ];
+        double centerX = this.posX;
+        double centerZ = this.posZ;
+        double halfWidth = 3.5D;
+        double minimumY = this.boundingBox.minY + 0.25D;
+        double maximumY = this.boundingBox.maxY + 1.25D;
+
+        if (group > 0) {
+            double lookX;
+            double lookZ;
+            if (target != null && target.isEntityAlive()) {
+                lookX = target.posX - this.posX;
+                lookZ = target.posZ - this.posZ;
+            } else {
+                Vec3 look = this.getLookVec();
+                lookX = look.xCoord;
+                lookZ = look.zCoord;
+            }
+
+            double lookLength = Math.sqrt(
+                    lookX * lookX + lookZ * lookZ
+            );
+            if (lookLength > 1.0E-4D) {
+                lookX /= lookLength;
+                lookZ /= lookLength;
+            } else {
+                lookX = -MathHelper.sin(
+                        this.rotationYaw
+                                * (float)Math.PI / 180.0F
+                );
+                lookZ = MathHelper.cos(
+                        this.rotationYaw
+                                * (float)Math.PI / 180.0F
+                );
+            }
+
+            double distance = group == 1 ? 4.0D : 8.0D;
+            centerX += lookX * distance;
+            centerZ += lookZ * distance;
+            halfWidth = group == 1 ? 3.0D : 3.25D;
+            maximumY = this.boundingBox.maxY + 1.5D;
+        }
+
+        double sliceHeight =
+                (maximumY - minimumY) / 4.0D;
+        double sliceMinY =
+                minimumY + sliceHeight * orderedSlice;
+        double sliceMaxY =
+                orderedSlice == 3
+                        ? maximumY
+                        : minimumY
+                        + sliceHeight * (orderedSlice + 1)
+                        - 0.001D;
+
+        return AxisAlignedBB.getBoundingBox(
+                centerX - halfWidth,
+                sliceMinY,
+                centerZ - halfWidth,
+                centerX + halfWidth,
+                sliceMaxY,
+                centerZ + halfWidth
+        );
     }
 
     private boolean shouldBreakForwardTrees() {
-        if (this.riddenByEntity != null) {
+        if (this.riddenByEntity instanceof EntityPlayer) {
             return false;
         }
 
-        if (!this.isWildMumakil() && !this.isMountEnraged()) {
+        EntityLivingBase target = this.getAttackTarget();
+        if (target == null || !target.isEntityAlive()) {
             return false;
         }
 
-        if (this.getAttackTarget() == null || this.getNavigator().noPath()) {
-            return false;
-        }
-
-        float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-        return momentum >= CHARGE_MIN_SPEED;
+        return this.isWildAdultMumakil()
+                || this.isHiredWarMumakil()
+                || this.isMountEnraged();
     }
-
-    private int clearAggroObstaclesInBox(AxisAlignedBB obstacleBox, int maximum) {
+    private int clearAggroObstaclesInBox(
+            AxisAlignedBB obstacleBox,
+            int maximumChecks,
+            int maximumBroken
+    ) {
         int minX = MathHelper.floor_double(obstacleBox.minX);
         int maxX = MathHelper.floor_double(obstacleBox.maxX);
         int minY = MathHelper.floor_double(obstacleBox.minY);
@@ -2379,7 +6324,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         for (int x = minX; x <= maxX; ++x) {
             for (int y = minY; y <= maxY; ++y) {
                 for (int z = minZ; z <= maxZ; ++z) {
-                    if (broken >= maximum) {
+                    if (checked >= maximumChecks
+                            || broken >= maximumBroken) {
                         if (MumakilPerformanceTracker.isEnabled()) {
                             MumakilPerformanceTracker.recordTreeBlocksChecked(this, checked);
                         }
@@ -2434,13 +6380,121 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean canBreakAggroObstacle(Block block, int x, int y, int z) {
-        return block.isLeaves(this.worldObj, x, y, z) || block.isWood(this.worldObj, x, y, z);
+        // QUARTER_SPEED_RIDDEN_PANIC_AND_STRICT_TREE_BLOCKS_V2
+        // Strictly tree blocks only: no grass, bushes, crops, or vines.
+        return block.isLeaves(this.worldObj, x, y, z)
+                || block.isWood(this.worldObj, x, y, z);
     }
 
 
     // ---------------------------------------------------------------------
     // Idle yaw stabilization and fallback-facing helpers
     // ---------------------------------------------------------------------
+
+    private void faceAIMovementDirection() {
+        if (this.riddenByEntity instanceof EntityPlayer
+                || this.shouldPreserveAuthoredCombatFacing()) {
+            return;
+        }
+
+        Vec3 directionPoint = this.getAIMovementDirectionPoint();
+        if (directionPoint == null) {
+            return;
+        }
+
+        double deltaX = directionPoint.xCoord - this.posX;
+        double deltaZ = directionPoint.zCoord - this.posZ;
+        if (deltaX * deltaX + deltaZ * deltaZ
+                < AI_MOVEMENT_PATH_DIRECTION_MIN_SQ) {
+            return;
+        }
+
+        float desiredYaw = (float)(
+                Math.atan2(deltaZ, deltaX)
+                        * 180.0D / Math.PI
+        ) - 90.0F;
+        this.renderYawOffset = this.clampYawStep(
+                this.renderYawOffset,
+                desiredYaw,
+                AI_MOVEMENT_MAX_TURN_RATE
+        );
+        this.rotationYaw = this.renderYawOffset;
+
+        float headFromBody = MathHelper.wrapAngleTo180_float(
+                this.rotationYawHead - this.renderYawOffset
+        );
+        this.rotationYawHead = this.renderYawOffset
+                + MathHelper.clamp_float(
+                        headFromBody,
+                        -IDLE_HEAD_YAW_LIMIT,
+                        IDLE_HEAD_YAW_LIMIT
+                );
+    }
+
+    private Vec3 getAIMovementDirectionPoint() {
+        PathEntity path = this.getNavigator().getPath();
+        if (path != null && !path.isFinished()) {
+            int index = path.getCurrentPathIndex();
+            int length = path.getCurrentPathLength();
+            if (index >= 0 && index < length) {
+                Vec3 pathPoint = path.getVectorFromIndex(
+                        this,
+                        index
+                );
+                double pathDeltaX = pathPoint.xCoord - this.posX;
+                double pathDeltaZ = pathPoint.zCoord - this.posZ;
+                if (pathDeltaX * pathDeltaX
+                        + pathDeltaZ * pathDeltaZ
+                        < AI_MOVEMENT_PATH_DIRECTION_MIN_SQ
+                        && index + 1 < length) {
+                    pathPoint = path.getVectorFromIndex(
+                            this,
+                            index + 1
+                    );
+                }
+
+                pathDeltaX = pathPoint.xCoord - this.posX;
+                pathDeltaZ = pathPoint.zCoord - this.posZ;
+                if (pathDeltaX * pathDeltaX
+                        + pathDeltaZ * pathDeltaZ
+                        >= AI_MOVEMENT_PATH_DIRECTION_MIN_SQ) {
+                    return pathPoint;
+                }
+            }
+        }
+
+        double horizontalMotionSq =
+                this.motionX * this.motionX
+                        + this.motionZ * this.motionZ;
+        if (horizontalMotionSq
+                < AI_MOVEMENT_MOTION_THRESHOLD_SQ) {
+            return null;
+        }
+
+        return Vec3.createVectorHelper(
+                this.posX + this.motionX * 8.0D,
+                this.posY,
+                this.posZ + this.motionZ * 8.0D
+        );
+    }
+
+    private boolean shouldPreserveAuthoredCombatFacing() {
+        if (this.mumakilStrikeAnimationTicks > 0
+                || this.isMumakilTrumpetAnimationActive()
+                || this.isTerritorialWarningActive()) {
+            return true;
+        }
+
+        EntityLivingBase target = this.getAttackTarget();
+        return target != null
+                && !this.mumakilSkirmishWithdrawing
+                && target.isEntityAlive()
+                && this.getDistanceSqToEntity(target)
+                <= AI_CLOSE_COMBAT_FACING_RANGE_SQ
+                && (this.canEntityBeSeen(target)
+                || this.getDistanceSqToEntity(target)
+                <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE);
+    }
 
     private void stabilizeIdleYaw() {
         if (!this.isStationaryIdleForYawLock()) {
@@ -2486,6 +6540,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         if (this.riddenByEntity != null
                 || this.getAttackTarget() != null
                 || this.isMountEnraged()
+                || this.isTerritorialWarningActive()
+                || this.isWildHerdRegroupActive()
                 || this.isSprinting()
                 || !this.onGround
                 || Math.abs(this.moveForward) > 0.01F
@@ -2527,7 +6583,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private void updateAngerWave() {
-        if (!this.isWildMumakil()) {
+        if (!this.isWildAdultMumakil()) {
             this.angerWaveActiveTicks = 0;
             if (this.angerWaveCooldownTicks <= 0) {
                 this.resetAngerWaveCooldown();
@@ -2557,39 +6613,143 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean isWildAngerWaveActive() {
-        return this.isWildMumakil() && this.angerWaveActiveTicks > 0;
-    }
-
-    private void updateChargeStompSound() {
-        if (this.chargeStompSoundCooldown > 0) {
-            --this.chargeStompSoundCooldown;
-        }
-
-        EntityLivingBase target = this.getAttackTarget();
-        if (target == null || (!this.isWildMumakil() && !this.isMountEnraged())) {
-            return;
-        }
-
-        if (this.chargeStompSoundCooldown > 0) {
-            return;
-        }
-
-        float momentum = MathHelper.sqrt_double(this.motionX * this.motionX + this.motionZ * this.motionZ);
-        if (momentum >= CHARGE_STOMP_SOUND_MIN_SPEED && !this.getNavigator().noPath()) {
-            this.worldObj.playSoundAtEntity(
-                    this,
-                    "lotrmoremobs:mumakil.step",
-                    1.8F,
-                    0.45F + this.rand.nextFloat() * 0.1F
-            );
-            this.chargeStompSoundCooldown = CHARGE_STOMP_SOUND_MIN_COOLDOWN
-                    + this.rand.nextInt(CHARGE_STOMP_SOUND_RANDOM_COOLDOWN);
-        }
+        return this.isWildAdultMumakil() && this.angerWaveActiveTicks > 0;
     }
 
     private boolean shouldPlayMumakilAngrySoundThisTrigger() {
         ++this.mumakilAngrySoundTriggerCounter;
         return this.mumakilAngrySoundTriggerCounter % 10 == 0;
+    }
+
+    private void updateMumakilAmbientAnimationSounds() {
+        this.updateMumakilTrumpetSequence();
+        this.tryPlayScheduledAnimationSound(
+                AMBIENT_EAR_FLAP_INTERVAL_TICKS,
+                AMBIENT_EAR_FLAP_CHANCE_MODULO,
+                71,
+                "lotrmoremobs:mumakil.ears",
+                1.85F,
+                0.78F,
+                0.08F
+        );
+    }
+
+    private void startMumakilTrumpetSequenceNow() {
+        if (this.worldObj == null
+                || this.worldObj.isRemote
+                || !this.isEntityAlive()
+                || this.getMumakilTrumpetAnimationTicks() > 0) {
+            return;
+        }
+        this.setMumakilTrumpetAnimationTicks(
+                MUMAKIL_TRUMPET_ANIMATION_TICKS
+        );
+        this.mumakilTrumpetSoundPlayed = false;
+    }
+
+    private void updateMumakilTrumpetSequence() {
+        if (!this.isEntityAlive() || this.isDead) {
+            this.setMumakilTrumpetAnimationTicks(0);
+            this.mumakilTrumpetSoundPlayed = true;
+            return;
+        }
+
+        int remaining = this.getMumakilTrumpetAnimationTicks();
+        if (remaining <= 0) {
+            if (!this.shouldStartScheduledAnimation(
+                    AMBIENT_TRUMPET_INTERVAL_TICKS,
+                    AMBIENT_TRUMPET_CHANCE_MODULO,
+                    37
+            )) {
+                return;
+            }
+
+            remaining = MUMAKIL_TRUMPET_ANIMATION_TICKS;
+            this.setMumakilTrumpetAnimationTicks(remaining);
+            this.mumakilTrumpetSoundPlayed = false;
+        }
+
+        int elapsed =
+                MUMAKIL_TRUMPET_ANIMATION_TICKS - remaining;
+        if (!this.mumakilTrumpetSoundPlayed
+                && elapsed
+                >= MUMAKIL_TRUMPET_SOUND_DELAY_TICKS) {
+            boolean baby = this.isBabyMumakil();
+            float basePitch = baby ? 1.08F : 0.92F;
+            float pitchRange = baby ? 0.10F : 0.12F;
+            float pitch = basePitch
+                    + (this.rand.nextFloat()
+                    - this.rand.nextFloat())
+                    * pitchRange;
+            this.worldObj.playSoundAtEntity(
+                    this,
+                    baby
+                            ? "lotrmoremobs:mumakil.calftrumpet"
+                            : "lotrmoremobs:mumakil.trumpet",
+                    baby ? 1.4F : 2.2F,
+                    pitch
+            );
+            this.mumakilTrumpetSoundPlayed = true;
+        }
+
+        --remaining;
+        this.setMumakilTrumpetAnimationTicks(remaining);
+        if (remaining <= 0) {
+            this.mumakilTrumpetSoundPlayed = false;
+        }
+    }
+
+    private boolean shouldStartScheduledAnimation(
+            int intervalTicks,
+            int chanceModulo,
+            int seed
+    ) {
+        if (intervalTicks <= 0
+                || chanceModulo <= 0
+                || this.ticksExisted <= 0
+                || this.ticksExisted % intervalTicks != 0) {
+            return false;
+        }
+
+        int cycle = this.ticksExisted / intervalTicks;
+        return positiveModulo(
+                hashAnimationEvent(
+                        this.getEntityId(),
+                        cycle,
+                        seed
+                ),
+                chanceModulo
+        ) == 0;
+    }
+
+    private void tryPlayScheduledAnimationSound(int intervalTicks, int chanceModulo, int seed,
+                                                String soundName, float volume, float basePitch,
+                                                float pitchRange) {
+        if (!this.shouldStartScheduledAnimation(
+                intervalTicks,
+                chanceModulo,
+                seed
+        )) {
+            return;
+        }
+
+        float pitch = basePitch + (this.rand.nextFloat() - this.rand.nextFloat()) * pitchRange;
+        this.worldObj.playSoundAtEntity(this, soundName, volume, pitch);
+    }
+
+    private static int hashAnimationEvent(int entityId, int cycle, int seed) {
+        int value = entityId;
+        value = value * 31 + cycle;
+        value = value * 31 + seed;
+        value ^= value << 13;
+        value ^= value >> 17;
+        value ^= value << 5;
+        return value;
+    }
+
+    private static int positiveModulo(int value, int modulo) {
+        int result = value % modulo;
+        return result < 0 ? result + modulo : result;
     }
 
     private void playMumakilNormalHitSound() {
@@ -2602,7 +6762,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private void playMumakilAngrySound() {
-        if (!this.shouldPlayMumakilAngrySoundThisTrigger()) {
+        if (this.isBabyMumakil() || !this.shouldPlayMumakilAngrySoundThisTrigger()) {
             return;
         }
 
@@ -2623,17 +6783,64 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         );
     }
 
-    protected void dropFewItems(boolean flag, int i) {
-        this.dropItem(Main.mumakilTusk, 1);
-        if (i > 0 && this.rand.nextInt(4) < i) {
-            this.dropItem(Main.mumakilTusk, 1);
+    @Override
+    protected void func_145780_a(int x, int y, int z, Block block) {
+        this.playSound(
+                "lotrmoremobs:mumakil.step",
+                0.8F,
+                0.82F + this.rand.nextFloat() * 0.12F
+        );
+    }
+
+    protected void dropFewItems(boolean flag, int lootingLevel) {
+        int boundedLooting = Math.max(0, lootingLevel);
+        int shanks;
+        int tusks;
+
+        if (this.isBabyMumakil()) {
+            shanks = Math.min(
+                    4,
+                    2 + this.rand.nextInt(2)
+                            + this.rand.nextInt(boundedLooting + 1)
+            );
+            tusks = Math.min(
+                    6,
+                    1 + this.rand.nextInt(2)
+                            + this.rand.nextInt(boundedLooting + 1)
+            );
+        } else {
+            shanks = 4;
+            tusks = Math.min(
+                    6,
+                    4 + this.rand.nextInt(2)
+                            + this.rand.nextInt(boundedLooting + 1)
+            );
         }
 
-        int shanks = 2 + this.rand.nextInt(4) + this.rand.nextInt(1 + i);
-
-        for(int j = 0; j < shanks; ++j) {
+        for (int j = 0; j < shanks; ++j) {
             this.dropItem(Main.mumakilShank, 1);
         }
+
+        for (int j = 0; j < tusks; ++j) {
+            this.dropItem(Main.mumakilTusk, 1);
+        }
+    }
+
+    @Override
+    public void dropChestItems() {
+        if (this.getFormationOrigin() != MumakilFormationOrigin.NONE
+                || this.isHiredWarMumakil()) {
+            IInventory inventory = this.getMumakilMountInventory();
+            if (inventory != null) {
+                for (int slot = 0; slot < inventory.getSizeInventory(); ++slot) {
+                    inventory.setInventorySlotContents(slot, null);
+                }
+                inventory.markDirty();
+            }
+            return;
+        }
+
+        super.dropChestItems();
     }
 
     protected float getSoundPitch() {
@@ -2645,7 +6852,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected String getHurtSound() {
-        return this.shouldPlayMumakilAngrySoundThisTrigger() ? "lotrmoremobs:mumakil.angry" : null;
+        return !this.isBabyMumakil() && this.shouldPlayMumakilAngrySoundThisTrigger()
+                ? "lotrmoremobs:mumakil.angry"
+                : null;
     }
 
     protected String getDeathSound() {
@@ -2653,7 +6862,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     protected String getAngrySoundName() {
-        return this.shouldPlayMumakilAngrySoundThisTrigger() ? "lotrmoremobs:mumakil.angry" : null;
+        return !this.isBabyMumakil() && this.shouldPlayMumakilAngrySoundThisTrigger()
+                ? "lotrmoremobs:mumakil.angry"
+                : null;
     }
 
     private void startMumakilStrikeAnimation() {
@@ -2686,6 +6897,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     public void handleHealthUpdate(byte status) {
+        if (status == MUMAKIL_BABY_PANIC_START_STATUS
+                || status == MUMAKIL_BABY_PANIC_STOP_STATUS) {
+            this.babyPanicAnimationActive =
+                    status == MUMAKIL_BABY_PANIC_START_STATUS;
+            return;
+        }
+
         if (status == MUMAKIL_STRIKE_LEFT_STATUS || status == MUMAKIL_STRIKE_RIGHT_STATUS) {
             this.mumakilStrikeAnimationLeft = status == MUMAKIL_STRIKE_LEFT_STATUS;
             this.mumakilStrikeAnimationTicks = MUMAKIL_STRIKE_ANIMATION_TICKS;

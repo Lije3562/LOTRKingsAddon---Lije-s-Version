@@ -2,9 +2,11 @@ package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.entity.animal.MumakilFormationOrigin;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.lang.reflect.Field;
 import java.util.Iterator;
+import lotr.common.entity.ai.LOTREntityAIHorseFollowHiringPlayer;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
@@ -16,13 +18,6 @@ public class MumakilHiredMountEventHandler {
 
     private static final float MUMAKIL_MIN_FOLLOW_DIST = 30.0F;
     private static final float MUMAKIL_MAX_NEAR_DIST = 18.0F;
-
-    private static final String[] INVENTORY_FIELDS = new String[] {
-            "horseChest",
-            "mountInventory",
-            "horseInventory",
-            "inventory"
-    };
 
     @SubscribeEvent
     public void onEntityJoinWorld(EntityJoinWorldEvent event) {
@@ -37,6 +32,18 @@ public class MumakilHiredMountEventHandler {
         LOTREntityMumakil mumakil = (LOTREntityMumakil)event.entity;
 
         if (!mumakil.getBelongsToNPC()) {
+            return;
+        }
+
+        /*
+         * Explicit autonomous formations are fully equipped transactionally
+         * before their mount enters the world. Do not apply player-hired
+         * follow tuning to them.
+         */
+        MumakilFormationOrigin origin =
+                mumakil.getFormationOrigin();
+        if (origin != MumakilFormationOrigin.NONE
+                && origin != MumakilFormationOrigin.PLAYER_HIRED) {
             return;
         }
 
@@ -71,9 +78,7 @@ public class MumakilHiredMountEventHandler {
                 continue;
             }
 
-            String aiName = aiTask.getClass().getName();
-
-            if (aiName.endsWith("LOTREntityAIHorseFollowHiringPlayer")) {
+            if (aiTask instanceof LOTREntityAIHorseFollowHiringPlayer) {
                 if (this.setFloatField(aiTask, "minFollowDist", MUMAKIL_MIN_FOLLOW_DIST)) {
                     tuned = true;
                 }
@@ -117,7 +122,7 @@ public class MumakilHiredMountEventHandler {
     }
 
     private boolean setInventoryStack(LOTREntityMumakil mumakil, int slot, ItemStack stack) {
-        IInventory inventory = this.findMountInventory(mumakil);
+        IInventory inventory = mumakil.getMumakilMountInventory();
 
         if (inventory == null || slot < 0 || slot >= inventory.getSizeInventory()) {
             System.out.println("[LOTRMoreMobs] Could not set hired Mumakil inventory slot " + slot);
@@ -127,25 +132,6 @@ public class MumakilHiredMountEventHandler {
         inventory.setInventorySlotContents(slot, stack);
         inventory.markDirty();
         return true;
-    }
-
-    private IInventory findMountInventory(LOTREntityMumakil mumakil) {
-        for (int i = 0; i < INVENTORY_FIELDS.length; ++i) {
-            Field field = this.findField(mumakil.getClass(), INVENTORY_FIELDS[i]);
-
-            if (field != null) {
-                try {
-                    Object value = field.get(mumakil);
-
-                    if (value instanceof IInventory) {
-                        return (IInventory)value;
-                    }
-                } catch (Exception e) {
-                }
-            }
-        }
-
-        return null;
     }
 
     private Field findField(Class type, String name) {

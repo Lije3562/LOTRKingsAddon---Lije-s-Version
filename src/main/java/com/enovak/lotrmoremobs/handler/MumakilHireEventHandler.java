@@ -70,7 +70,7 @@ public class MumakilHireEventHandler {
 
         double alignment = this.getNearHaradAlignment(player);
         if (alignment < REQUIRED_NEAR_HARAD_ALIGNMENT) {
-            this.sendMessage(player, "You need at least 3000 Near Harad alignment to hire a Mumakil. Current: "
+            this.sendMessage(player, "You need at least 3000 Near Harad alignment to hire a Mumak. Current: "
                     + this.formatAlignment(alignment));
             event.setCanceled(true);
             return;
@@ -78,12 +78,12 @@ public class MumakilHireEventHandler {
 
         LOTREntityMumakil mumakil = this.createHiredMumakil(world, player, target);
         if (!world.spawnEntityInWorld(mumakil)) {
-            this.sendMessage(player, "The Mumakil could not be hired here. Try standing in a more open area.");
+            this.sendMessage(player, "The Mumak could not be hired here. Try standing in a more open area.");
             event.setCanceled(true);
             return;
         }
 
-        this.sendMessage(player, "A saddled Mumakil with a howdah has joined your warband.");
+        this.sendMessage(player, "A saddled Mumak with a howdah has joined your warband.");
         System.out.println("[LOTRMoreMobs] Hired Mumakil spawned from Near Harad Warlord for player="
                 + player.getCommandSenderName() + " alignment=" + alignment
                 + " entityId=" + mumakil.getEntityId());

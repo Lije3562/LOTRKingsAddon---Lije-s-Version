@@ -1,32 +1,35 @@
 package com.enovak.lotrmoremobs.item;
 
-import net.minecraft.entity.Entity;
-import net.minecraft.entity.player.EntityPlayer;
+import com.enovak.lotrmoremobs.Main;
 import net.minecraft.item.ItemFood;
-import net.minecraft.item.ItemStack;
-import net.minecraft.potion.Potion;
-import net.minecraft.potion.PotionEffect;
-import net.minecraft.world.World;
 
+/**
+ * MUMAKIL_SHANK_SYSTEM_V1_1
+ *
+ * Raw and cooked Mumakil shanks share the current raw-shank texture.
+ * Held movement effects are managed by MumakilShankHeldEffectHandler.
+ */
 public class LOTRItemMumakilShank extends ItemFood {
-    private static final int HELD_SLOWNESS_REFRESH_INTERVAL = 10;
-    private static final int HELD_SLOWNESS_DURATION = 30;
+    private static final String SHARED_TEXTURE =
+            Main.MODID + ":mumakil_shank";
 
-    public LOTRItemMumakilShank() {
-        super(4, 0.4F, true);
-        this.setUnlocalizedName("mumakil_shank");
-        this.setTextureName("lotrmoremobs:mumakil_shank");
-    }
+    public LOTRItemMumakilShank(boolean cooked) {
+        super(
+                cooked ? 8 : 3,
+                cooked ? 0.8F : 0.3F,
+                true
+        );
 
-    @Override
-    public void onUpdate(ItemStack itemstack, World world, Entity entity, int slot, boolean isHeld) {
-        super.onUpdate(itemstack, world, entity, slot, isHeld);
+        this.setUnlocalizedName(
+                cooked
+                        ? "cooked_mumakil_shank"
+                        : "mumakil_shank"
+        );
 
-        if (!world.isRemote
-                && isHeld
-                && entity instanceof EntityPlayer
-                && entity.ticksExisted % HELD_SLOWNESS_REFRESH_INTERVAL == 0) {
-            ((EntityPlayer)entity).addPotionEffect(new PotionEffect(Potion.moveSlowdown.id, HELD_SLOWNESS_DURATION, 0));
-        }
+        /*
+         * Temporary art choice: the cooked item intentionally reuses the
+         * raw Mumakil shank icon until a separate cooked texture is made.
+         */
+        this.setTextureName(SHARED_TEXTURE);
     }
 }
