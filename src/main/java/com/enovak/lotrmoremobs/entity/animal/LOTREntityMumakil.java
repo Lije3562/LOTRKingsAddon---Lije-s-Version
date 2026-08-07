@@ -2932,13 +2932,9 @@ public boolean isBabyPanicAnimationActive() {
         );
     }
 
+    @Override
     public boolean shouldRiderSit() {
-        /*
-         * Keep the real mount relationship, but let riders stand when a
-         * howdah provides a platform. RenderLiving uses this hook only for the
-         * visual biped riding pose.
-         */
-        return !this.hasMumakilHowdahEquipped();
+        return true;
     }
 
     private boolean hasActiveBabyMelonFedWindow() {

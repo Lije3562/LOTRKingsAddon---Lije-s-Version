@@ -12,12 +12,14 @@ import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilHirePreviewDriver;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilDriver;
 import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilGeoInventoryScaled;
+import com.enovak.lotrmoremobs.render.entity.LOTRRenderMumakilHowdahPlayer;
 import com.enovak.lotrmoremobs.render.tileentity.LOTRRenderMumakilSpawnCageContext;
 import cpw.mods.fml.client.registry.RenderingRegistry;
 import cpw.mods.fml.client.registry.ClientRegistry;
 import cpw.mods.fml.common.FMLCommonHandler;
 import lotr.common.tileentity.LOTRTileEntityMobSpawner;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraftforge.common.MinecraftForge;
 import software.bernie.geckolib3.GeckoLib;
 
@@ -46,6 +48,10 @@ public class ClientProxy extends CommonProxy {
         RenderingRegistry.registerEntityRenderingHandler(
                 LOTREntitySouthronChampion.class,
                 new LOTRRenderMumakilDriver()
+        );
+        RenderingRegistry.registerEntityRenderingHandler(
+                EntityPlayer.class,
+                new LOTRRenderMumakilHowdahPlayer()
         );
 
         this.registerHowdahArcherRenderer();
