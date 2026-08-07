@@ -19,6 +19,7 @@ import com.enovak.lotrmoremobs.handler.MumakilShankHeldEffectHandler;
 import com.enovak.lotrmoremobs.spawning.MumakilFormationReplacementService;
 import cpw.mods.fml.common.FMLCommonHandler;
 import net.minecraftforge.common.MinecraftForge;
+import com.enovak.lotrmoremobs.handler.PickupFilterEventHandler;
 
 public class CommonProxy {
     public void registerRenderers() {
@@ -109,6 +110,9 @@ public class CommonProxy {
 
         FMLCommonHandler.instance().bus().register(
                 shankHeldEffectHandler
+        );
+        MinecraftForge.EVENT_BUS.register(
+                new PickupFilterEventHandler()
         );
     }
 }

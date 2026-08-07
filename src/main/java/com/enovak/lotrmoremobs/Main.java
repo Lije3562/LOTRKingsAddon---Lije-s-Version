@@ -34,6 +34,8 @@ import com.enovak.lotrmoremobs.network.MumakilOpenGuiPacket;
 import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
+import com.enovak.lotrmoremobs.command.CommandPickupFilter;
+import cpw.mods.fml.common.event.FMLServerStartingEvent;
 
 @Mod(
         modid = Main.MODID,
@@ -149,5 +151,9 @@ public class Main {
         MumakilNaturalSpawnRegistry.register(); // MUMAKIL_NATURAL_SPAWNING_V1
         MumakilWarFormationSpawnRegistry.register();
         MumakilInvasionFormationRegistry.register();
+    }
+    @EventHandler
+    public void serverStarting(FMLServerStartingEvent event) {
+        event.registerServerCommand(new CommandPickupFilter());
     }
 }
