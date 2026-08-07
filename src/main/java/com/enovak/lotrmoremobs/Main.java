@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs;
 
+import com.enovak.lotrmoremobs.command.CommandPickupFilter;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.hiring.MumakilUnitTradeInjector;
@@ -7,6 +8,7 @@ import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
 import com.enovak.lotrmoremobs.materials.AddonMaterial;
+import com.enovak.lotrmoremobs.network.MumakilOpenGuiPacket;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
 import cpw.mods.fml.common.Mod;
 import cpw.mods.fml.common.Mod.EventHandler;
@@ -14,16 +16,16 @@ import cpw.mods.fml.common.SidedProxy;
 import cpw.mods.fml.common.event.FMLInitializationEvent;
 import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
+import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.network.NetworkRegistry;
+import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.common.registry.GameRegistry;
+import cpw.mods.fml.relauncher.Side;
 import lotr.common.entity.LOTREntities;
 import lotr.common.item.LOTRItemArmor;
 import lotr.common.item.LOTRItemSword;
 import lotr.common.item.LOTRMaterial;
 import net.minecraft.item.Item;
-import com.enovak.lotrmoremobs.network.MumakilOpenGuiPacket;
-import cpw.mods.fml.common.network.NetworkRegistry;
-import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
-import cpw.mods.fml.relauncher.Side;
 
 @Mod(modid = Main.MODID, name = Main.NAME, version = Main.VERSION)
 public class Main {
@@ -87,5 +89,10 @@ public class Main {
 
     @EventHandler
     public void postInit(FMLPostInitializationEvent event) {
+    }
+
+    @EventHandler
+    public void serverStarting(FMLServerStartingEvent event) {
+        event.registerServerCommand(new CommandPickupFilter());
     }
 }
