@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.handler;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import com.enovak.lotrmoremobs.util.MumakilServerPerformanceDiagnostics;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import java.util.List;
 import lotr.common.LOTRMod;
@@ -61,7 +62,18 @@ public final class MumakilMakeWayEventHandler {
             return;
         }
 
-        scanForwardCorridor(mumakil, direction);
+        long timingStart =
+                MumakilServerPerformanceDiagnostics.startTimer(
+                        mumakil.worldObj
+                );
+        try {
+            scanForwardCorridor(mumakil, direction);
+        } finally {
+            MumakilServerPerformanceDiagnostics.recordMakeWayScan(
+                    mumakil.worldObj,
+                    System.nanoTime() - timingStart
+            );
+        }
     }
 
     private static Vec3 getTravelDirection(LOTREntityMumakil mumakil) {

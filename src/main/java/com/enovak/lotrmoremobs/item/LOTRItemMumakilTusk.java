@@ -11,7 +11,7 @@ public class LOTRItemMumakilTusk extends Item {
     private static final String TUSK_ICON_NAME = Main.MODID + ":mumakil_tusk";
 
     public LOTRItemMumakilTusk() {
-        this.setMaxStackSize(64);
+        this.setMaxStackSize(16);
         this.setCreativeTab(CreativeTabs.tabMaterials);
         this.setUnlocalizedName("mumakil_tusk");
         this.setTextureName(TUSK_ICON_NAME);

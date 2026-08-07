@@ -8,7 +8,8 @@ public enum MumakilFormationOrigin {
     PLAYER_HIRED(1),
     NATURAL_NEAR_HARAD(2),
     INVASION_NEAR_HARAD(3),
-    CREATIVE_SPAWN_EGG(4);
+    CREATIVE_SPAWN_EGG(4),
+    CONQUEST_NEAR_HARAD(5);
 
     private final int id;
 

@@ -79,27 +79,42 @@ public final class MumakilInvasionProgressEventHandler {
             return;
         }
 
+        /*
+         * Use the reflected remaining value when available so weighted kills
+         * cannot overshoot the end of the invasion. Do not discard the kill
+         * entirely if the private LOTR field cannot be resolved at runtime.
+         */
         int remaining = getInvasionRemaining(spawner);
-        if (remaining < 0) {
-            return;
-        }
 
-        data.setBoolean(WEIGHTED_CREDIT_APPLIED_KEY, true);
         boolean nativeNpcPointStillPending =
                 victim instanceof LOTREntityNPC
                         && !data.getBoolean(
                         MumakilFormationCreditEventHandler
                                 .INVASION_CREDIT_APPLIED_KEY
                 );
-        int availableAdditionalPoints = Math.max(
-                0,
-                remaining - (nativeNpcPointStillPending ? 1 : 0)
+
+        int creditedPoints = additionalPoints;
+
+        if (remaining >= 0) {
+            int availableAdditionalPoints = Math.max(
+                    0,
+                    remaining - (nativeNpcPointStillPending ? 1 : 0)
+            );
+
+            creditedPoints = Math.min(
+                    additionalPoints,
+                    availableAdditionalPoints
+            );
+        }
+
+        data.setBoolean(
+                WEIGHTED_CREDIT_APPLIED_KEY,
+                true
         );
-        int creditedPoints = Math.min(
-                additionalPoints,
-                availableAdditionalPoints
-        );
-        for (int i = 0; i < creditedPoints; ++i) {
+
+        for (int i = 0;
+             i < creditedPoints && !spawner.isDead;
+             ++i) {
             spawner.addPlayerKill(player);
         }
     }

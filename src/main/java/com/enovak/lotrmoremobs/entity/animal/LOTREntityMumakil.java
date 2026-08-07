@@ -3,10 +3,13 @@ package com.enovak.lotrmoremobs.entity.animal;
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.achievement.MumakilAchievements;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import com.enovak.lotrmoremobs.handler.MumakilDriverControlEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
 import com.enovak.lotrmoremobs.inventory.ContainerMumakilInventory;
 import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
 import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
+import com.enovak.lotrmoremobs.util.MumakilServerPerformanceDiagnostics;
+import cpw.mods.fml.common.registry.IThrowableEntity;
 import lotr.common.LOTRCommonProxy;
 import lotr.common.LOTRMod;
 import lotr.common.LOTRReflection;
@@ -43,6 +46,8 @@ import net.minecraft.entity.passive.EntityTameable;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.entity.projectile.EntityArrow;
+import net.minecraft.entity.projectile.EntityFireball;
+import net.minecraft.entity.projectile.EntityThrowable;
 import net.minecraft.init.Blocks;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
@@ -63,6 +68,7 @@ import software.bernie.geckolib3.core.manager.AnimationFactory;
 import net.minecraft.entity.ai.EntityAIFollowParent;
 
 import java.lang.reflect.Field;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.UUID;
 
@@ -73,7 +79,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
 
     private static final boolean DEBUG_COMBAT_LOGS = false;
-    private static final boolean DEBUG_SKIRMISH_AI = false;
+    private static final boolean DEBUG_AUTONOMOUS_COMBAT_AI = false;
     private static final boolean DEBUG_MUMAKIL_MODE = false;
     private static final boolean DEBUG_BABY_FAMILY_AI = false; // BABY_FAMILY_AI_DIAGNOSTICS_V1
 
@@ -161,6 +167,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final double RIDER_HOWDAH_SIDE = 0.0D;
     private static final double RIDER_HOWDAH_Y = 17.0D;
 
+    private static final boolean DEBUG_PLAYER_SEAT_AND_ARROW_ORIGIN = false;
+    private static final double DEBUG_PLAYER_SEAT_FIRST_DISTANCE = 10.0D;
+    private static final double DEBUG_PLAYER_SEAT_SECOND_DISTANCE = 30.0D;
+
     // ---------------------------------------------------------------------
     // Wild movement
     // ---------------------------------------------------------------------
@@ -213,6 +223,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final String NBT_HIRED_WAR_MUMAKIL = "lotrmoremobs_hiredWarMumakil";
     private static final String NBT_MUMAKIL_MODE = "lotrmoremobs_mumakilMode";
     private static final String NBT_FORMATION_ORIGIN = "lotrmoremobs_formationOrigin";
+    private static final String NBT_HAS_MUMAKIL_HOWDAH =
+            "lotrmoremobs_hasMumakilHowdah";
     public static final String NBT_SPEED_TRAIT = "lotrmoremobs_speedTrait";
     public static final String NBT_HIRED_FORMATION_OWNER =
             "lotrmoremobs_hiredFormationOwner";
@@ -221,6 +233,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final String NBT_BABY_GROWTH_INITIALIZED = "lotrmoremobs_babyGrowthInitialized";
     private static final String NBT_BABY_MELON_FED_UNTIL = "lotrmoremobs_babyMelonFedUntilTick";
     private static final String NBT_TAMED_BABY_MELON_HEAL_UNTIL = "lotrmoremobs_tamedBabyMelonHealUntilTick";
+    private static final int HOWDAH_ROSTER_LOAD_GRACE_TICKS = 160;
 
     // ---------------------------------------------------------------------
     // Combat / tusk attack / trample
@@ -243,17 +256,32 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int TUSK_ATTACK_COOLDOWN_TICKS = 160;
     private static final double TUSK_ATTACK_FRONT_CONE_DOT = 0.3D;
     private static final double TUSK_ATTACK_CLOSE_RANGE = 2.5D;
-    private static final double SKIRMISH_RETREAT_DISTANCE = 12.0D;
-    private static final double SKIRMISH_RETREAT_MIN_DISTANCE = 10.0D;
-    private static final double SKIRMISH_RETREAT_MAX_DISTANCE = 14.0D;
-    private static final int SKIRMISH_REENGAGE_COOLDOWN_THRESHOLD = 20;
-    private static final int SKIRMISH_RETREAT_REPATH_COOLDOWN = 20;
-    private static final int SKIRMISH_RETREAT_MAX_FAILED_SEARCHES = 3;
-    private static final int SKIRMISH_STRIKE_INITIAL_FACING_LOCK_TICKS = 10;
-    private static final double SKIRMISH_DRIVER_DANGER_RANGE_SQ = 36.0D;
-    private static final double SKIRMISH_TARGET_REPATH_DISTANCE_SQ = 36.0D;
-    private static final double[] SKIRMISH_RETREAT_ANGLES =
-            new double[] {0.0D, 30.0D, -30.0D, 55.0D, -55.0D};
+    private static final double AUTONOMOUS_ATTACK_PASS_TRIGGER_DISTANCE =
+            18.0D;
+    private static final double AUTONOMOUS_PASS_THROUGH_DISTANCE = 11.0D;
+    private static final double AUTONOMOUS_PASS_MIN_TARGET_DISTANCE = 8.0D;
+    private static final double AUTONOMOUS_PASS_MAX_TARGET_DISTANCE = 14.0D;
+    private static final double AUTONOMOUS_TURNAROUND_DISTANCE = 16.0D;
+    private static final double AUTONOMOUS_TURNAROUND_MIN_TARGET_DISTANCE =
+            8.0D;
+    private static final double AUTONOMOUS_TURNAROUND_MAX_TARGET_DISTANCE =
+            24.0D;
+    private static final double AUTONOMOUS_WAYPOINT_REACHED_DISTANCE = 4.0D;
+    private static final double AUTONOMOUS_TARGET_WAYPOINT_REPATH_DISTANCE_SQ =
+            36.0D;
+    private static final double AUTONOMOUS_CLUSTER_SCAN_RANGE = 20.0D;
+    private static final double AUTONOMOUS_CLUSTER_SCAN_VERTICAL_RANGE = 8.0D;
+    private static final int AUTONOMOUS_CLUSTER_CANDIDATE_LIMIT = 32;
+    private static final double AUTONOMOUS_TRAMPLE_CORRIDOR_RADIUS = 4.5D;
+    private static final int AUTONOMOUS_PASS_REPATH_INTERVAL = 15;
+    private static final int AUTONOMOUS_TURN_REPATH_INTERVAL = 20;
+    private static final int AUTONOMOUS_WAYPOINT_MAX_FAILED_SEARCHES = 3;
+    private static final int AUTONOMOUS_WAYPOINT_STAGGER_TICKS = 5;
+    private static final int AUTONOMOUS_STRIKE_FACING_LOCK_TICKS = 6;
+    private static final double[] AUTONOMOUS_PASS_ANGLES =
+            new double[] {0.0D, 20.0D, -20.0D, 40.0D, -40.0D};
+    private static final double[] AUTONOMOUS_TURNAROUND_ANGLES =
+            new double[] {75.0D, -75.0D, 110.0D, -110.0D, 45.0D, -45.0D};
 
     private static final float TUSK_AOE_DAMAGE = 16.0F;
     private static final double TUSK_AOE_RADIUS = 4.25D;
@@ -262,7 +290,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final float TUSK_AOE_KNOCKBACK_VERTICAL = 0.75F; // MUMAKIL_EDGE_MELEE_AND_REACH_V1
 
     private static final int TRAMPLE_SCAN_INTERVAL = 2;
-    private static final int TRAMPLE_COOLDOWN_TICKS = 60; // TRAMPLE_GLOBAL_COOLDOWN_NO_EFFECTS_V1
+    private static final int TRAMPLE_COOLDOWN_TICKS = 30; // TRAMPLE_GLOBAL_COOLDOWN_NO_EFFECTS_V1
     private static final float TRAMPLE_MIN_SPEED = 0.10F;
     private static final float TRAMPLE_DAMAGE = 8.0F;
 
@@ -340,6 +368,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private MumakilFormationOrigin formationOrigin;
     private UUID hiredFormationOwnerUuid;
     private UUID mumakilInvasionId;
+    private boolean authoritativeMumakilHowdahEquipped;
+    private int howdahRosterLoadGraceTicks;
     private float mumakilSpeedTrait = NORMAL_SPEED_TRAIT;
     private boolean mumakilSpeedTraitInitialized;
     private boolean babyGrowthInitialized;
@@ -359,7 +389,13 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private float lastRawLocomotionPhase;
     private boolean playerRiddenLocomotionInitialized;
     private boolean wasPlayerRiddenForLocomotion;
-
+    private int debugSeatPlayerEntityId = -1;
+    private long debugSeatLastSampleTick = Long.MIN_VALUE;
+    private double debugSeatLastMumakX;
+    private double debugSeatLastMumakZ;
+    private double debugSeatTravelDistance;
+    private boolean debugSeatLoggedFirstDistance;
+    private boolean debugSeatLoggedSecondDistance;
     private int angerWaveCooldownTicks;
     private int angerWaveActiveTicks;
     private int territorialWarningTargetEntityId;
@@ -380,7 +416,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean wildHerdRegroupPathOwned;
     private int tuskAttackCooldownTicks;
     private int successfulTuskAttackSequence;
-    private boolean mumakilSkirmishWithdrawing;
+    private boolean mumakilAutonomousCombatPassActive;
     private int lastAggroObstacleClearTick = Integer.MIN_VALUE; // AGGRO_TREE_CORRIDOR_AND_WILD_BABY_FOLLOW_V1
     private int nextAggroObstacleSweepTick;
     private int aggroObstacleSliceIndex;
@@ -862,6 +898,23 @@ public float getCollisionBorderSize() {
                 : origin;
     }
 
+    public boolean isAutonomousWarFormation() {
+        MumakilFormationOrigin origin = this.getFormationOrigin();
+        return origin == MumakilFormationOrigin.NATURAL_NEAR_HARAD
+                || origin == MumakilFormationOrigin.CONQUEST_NEAR_HARAD
+                || origin == MumakilFormationOrigin.INVASION_NEAR_HARAD
+                || origin == MumakilFormationOrigin.CREATIVE_SPAWN_EGG;
+    }
+
+    public boolean isAutonomousCombatPassActive() {
+        return this.isAutonomousWarFormation()
+                && this.mumakilAutonomousCombatPassActive;
+    }
+
+    public int getTuskAttackCooldownTicks() {
+        return Math.max(0, this.tuskAttackCooldownTicks);
+    }
+
     public void capturePlayerHiredFormationOwner(LOTREntityNPC driver) {
         if (this.worldObj == null
                 || this.worldObj.isRemote
@@ -904,8 +957,9 @@ public float getCollisionBorderSize() {
     }
 
     public boolean isNaturalNearHaradFormation() {
-        return this.getFormationOrigin()
-                == MumakilFormationOrigin.NATURAL_NEAR_HARAD;
+        MumakilFormationOrigin origin = this.getFormationOrigin();
+        return origin == MumakilFormationOrigin.NATURAL_NEAR_HARAD
+                || origin == MumakilFormationOrigin.CONQUEST_NEAR_HARAD;
     }
 
     public boolean isBabyMumakil() {
@@ -2603,7 +2657,8 @@ public boolean isBabyPanicAnimationActive() {
 
     public boolean hasMumakilHowdahEquipped() {
         return !this.isChild()
-                && (this.hasMumakilHowdahInventoryStack()
+                && (this.authoritativeMumakilHowdahEquipped
+                || this.hasMumakilHowdahInventoryStack()
                 || this.getMumakilSyncedArmorIndex() > 0);
     }
 
@@ -2657,7 +2712,9 @@ public boolean isBabyPanicAnimationActive() {
             return;
         }
 
-        int desiredArmorIndex = !this.isChild() && this.hasMumakilHowdahInventoryStack()
+        this.authoritativeMumakilHowdahEquipped =
+                !this.isChild() && this.hasMumakilHowdahInventoryStack();
+        int desiredArmorIndex = this.authoritativeMumakilHowdahEquipped
                 ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX
                 : 0;
 
@@ -2668,10 +2725,23 @@ public boolean isBabyPanicAnimationActive() {
 
     public void setMumakilHowdahEquipped(boolean equipped) {
         if (!this.worldObj.isRemote) {
+            this.authoritativeMumakilHowdahEquipped =
+                    equipped && !this.isChild();
             this.setMumakilSyncedArmorIndex(
-                    equipped ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX : 0
+                    this.authoritativeMumakilHowdahEquipped
+                            ? MUMAKIL_HOWDAH_SYNC_ARMOR_INDEX
+                            : 0
             );
         }
+    }
+
+    public boolean tickHowdahRosterLoadGrace() {
+        if (this.howdahRosterLoadGraceTicks <= 0) {
+            return false;
+        }
+
+        --this.howdahRosterLoadGraceTicks;
+        return true;
     }
 
     /**
@@ -2853,6 +2923,7 @@ public boolean isBabyPanicAnimationActive() {
         return RIDER_WILD_Y * scale;
     }
 
+    @Override
     public void updateRiderPosition() {
         if (this.riddenByEntity != null) {
             this.positionRiderAtMumakilAnchor(this.riddenByEntity);
@@ -2869,22 +2940,67 @@ public boolean isBabyPanicAnimationActive() {
             return;
         }
 
+        double beforeX = rider.posX;
+        double beforeY = rider.posY;
+        double beforeZ = rider.posZ;
         rider.setPosition(
                 anchor.xCoord,
                 anchor.yCoord,
                 anchor.zCoord
         );
+
+        if (rider instanceof EntityPlayer) {
+            this.recordPlayerSeatDiagnostic(
+                    (EntityPlayer)rider,
+                    anchor,
+                    beforeX,
+                    beforeY,
+                    beforeZ
+            );
+        }
     }
 
     /**
      * Returns the shared server/render world-space rider-feet anchor. Player
-     * projectile placement uses this same transform and then restores the
-     * bow-created eye/hand offset relative to the shooter.
+     * seats, NPC drivers, and preview riders all use the current visible body
+     * yaw. Player view yaw remains independent and is never used as a second
+     * rider-position authority.
      */
     public Vec3 getMumakilRiderAnchor(Entity rider) {
         if (rider == null) {
             return null;
         }
+
+        if (rider instanceof EntityPlayer) {
+            return this.calculatePlayerSeatPosition(
+                    (EntityPlayer)rider
+            );
+        }
+
+        return this.calculateRiderSeatPosition(
+                rider,
+                this.renderYawOffset
+        );
+    }
+
+    /**
+     * Calculates a player seat from the Mumak's current absolute position and
+     * current body yaw. No player, previous-tick, or cached world position
+     * participates in the calculation. The player argument contributes only
+     * the normal rider Y offset.
+     */
+    public Vec3 calculatePlayerSeatPosition(EntityPlayer player) {
+        if (player == null) {
+            return null;
+        }
+
+        return this.calculateRiderSeatPosition(player, this.renderYawOffset);
+    }
+
+    private Vec3 calculateRiderSeatPosition(
+            Entity rider,
+            float placementYaw
+    ) {
 
         boolean hasHowdah = this.hasMumakilHowdahEquipped();
         double forwardOffset;
@@ -2906,17 +3022,6 @@ public boolean isBabyPanicAnimationActive() {
         sideOffset *= scale;
 
         double verticalOffset = this.getMountedYOffset() + rider.getYOffset();
-
-        /*
-         * Use the visible body yaw for every rider anchor. rotationYaw can differ
-         * from the body while navigating, which otherwise lets unsaddled riders
-         * drift away from the intended back position as the Mumak turns.
-         *
-         * Do NOT force NPC rider yaw here. The hired Southron driver should keep his
-         * own look/target logic so his allegiances and aggro can control the mount
-         * normally through LOTR's hired-horse AI.
-         */
-        float placementYaw = this.renderYawOffset;
         float yawRadians = placementYaw * 3.1415927F / 180.0F;
 
         double forwardX = -MathHelper.sin(yawRadians) * forwardOffset;
@@ -2930,6 +3035,187 @@ public boolean isBabyPanicAnimationActive() {
                 this.posY + verticalOffset,
                 this.posZ + forwardZ + sideZ
         );
+    }
+
+    public static boolean isPlayerSeatDiagnosticsEnabled() {
+        return DEBUG_PLAYER_SEAT_AND_ARROW_ORIGIN;
+    }
+
+    private void recordPlayerSeatDiagnostic(
+            EntityPlayer player,
+            Vec3 anchor,
+            double beforeX,
+            double beforeY,
+            double beforeZ
+    ) {
+        if (!DEBUG_PLAYER_SEAT_AND_ARROW_ORIGIN
+                || this.worldObj == null
+                || this.worldObj.isRemote
+                || player.ridingEntity != this
+                || this.riddenByEntity != player) {
+            return;
+        }
+
+        long worldTick = this.worldObj.getTotalWorldTime();
+        boolean newMountSample =
+                this.debugSeatPlayerEntityId != player.getEntityId()
+                        || this.debugSeatLastSampleTick == Long.MIN_VALUE
+                        || worldTick < this.debugSeatLastSampleTick
+                        || worldTick > this.debugSeatLastSampleTick + 1L;
+        if (newMountSample) {
+            this.debugSeatPlayerEntityId = player.getEntityId();
+            this.debugSeatLastMumakX = this.posX;
+            this.debugSeatLastMumakZ = this.posZ;
+            this.debugSeatTravelDistance = 0.0D;
+            this.debugSeatLoggedFirstDistance = false;
+            this.debugSeatLoggedSecondDistance = false;
+            this.logPlayerSeatDiagnostic(
+                    "MOUNTED",
+                    player,
+                    anchor,
+                    beforeX,
+                    beforeY,
+                    beforeZ
+            );
+        } else {
+            double movementX = this.posX - this.debugSeatLastMumakX;
+            double movementZ = this.posZ - this.debugSeatLastMumakZ;
+            this.debugSeatTravelDistance += Math.sqrt(
+                    movementX * movementX + movementZ * movementZ
+            );
+            this.debugSeatLastMumakX = this.posX;
+            this.debugSeatLastMumakZ = this.posZ;
+
+            if (!this.debugSeatLoggedFirstDistance
+                    && this.debugSeatTravelDistance
+                    >= DEBUG_PLAYER_SEAT_FIRST_DISTANCE) {
+                this.debugSeatLoggedFirstDistance = true;
+                this.logPlayerSeatDiagnostic(
+                        "MOVED_APPROX_10_BLOCKS",
+                        player,
+                        anchor,
+                        beforeX,
+                        beforeY,
+                        beforeZ
+                );
+            }
+
+            if (!this.debugSeatLoggedSecondDistance
+                    && this.debugSeatTravelDistance
+                    >= DEBUG_PLAYER_SEAT_SECOND_DISTANCE) {
+                this.debugSeatLoggedSecondDistance = true;
+                this.logPlayerSeatDiagnostic(
+                        "MOVED_APPROX_30_BLOCKS",
+                        player,
+                        anchor,
+                        beforeX,
+                        beforeY,
+                        beforeZ
+                );
+            }
+        }
+        this.debugSeatLastSampleTick = worldTick;
+    }
+
+    private void logPlayerSeatDiagnostic(
+            String reason,
+            EntityPlayer player,
+            Vec3 anchor,
+            double beforeX,
+            double beforeY,
+            double beforeZ
+    ) {
+        Entity ridingEntity = player.ridingEntity;
+        System.out.println(
+                "[LOTRMoreMobs][MumakPlayerSeat]"
+                        + " reason=" + reason
+                        + " worldTick="
+                        + this.worldObj.getTotalWorldTime()
+                        + " logicalSide="
+                        + (this.worldObj.isRemote ? "CLIENT" : "SERVER")
+                        + " playerEntityId=" + player.getEntityId()
+                        + " mumakEntityId=" + this.getEntityId()
+                        + " playerRidingEntityClass="
+                        + (ridingEntity == null
+                        ? "null"
+                        : ridingEntity.getClass().getName())
+                        + " playerRidingEntityId="
+                        + (ridingEntity == null
+                        ? -1
+                        : ridingEntity.getEntityId())
+                        + " mumakRiddenByEntityIsPlayer="
+                        + (this.riddenByEntity == player)
+                        + " mumakPos=" + formatDiagnosticPosition(
+                        this.posX,
+                        this.posY,
+                        this.posZ
+                )
+                        + " mumakPrevPos=" + formatDiagnosticPosition(
+                        this.prevPosX,
+                        this.prevPosY,
+                        this.prevPosZ
+                )
+                        + " mumakRotationYaw=" + this.rotationYaw
+                        + " mumakRenderYawOffset=" + this.renderYawOffset
+                        + " playerViewYaw=" + player.rotationYaw
+                        + " playerPosBeforeSeatUpdate="
+                        + formatDiagnosticPosition(
+                        beforeX,
+                        beforeY,
+                        beforeZ
+                )
+                        + " playerMinusSeatBeforeUpdate="
+                        + formatDiagnosticPosition(
+                        beforeX - anchor.xCoord,
+                        beforeY - anchor.yCoord,
+                        beforeZ - anchor.zCoord
+                )
+                        + " playerPos=" + formatDiagnosticPosition(
+                        player.posX,
+                        player.posY,
+                        player.posZ
+                )
+                        + " playerPrevPos=" + formatDiagnosticPosition(
+                        player.prevPosX,
+                        player.prevPosY,
+                        player.prevPosZ
+                )
+                        + " playerEyePos=" + formatDiagnosticPosition(
+                        player.posX,
+                        player.posY + player.getEyeHeight(),
+                        player.posZ
+                )
+                        + " calculatedSeatAnchor="
+                        + formatDiagnosticPosition(
+                        anchor.xCoord,
+                        anchor.yCoord,
+                        anchor.zCoord
+                )
+                        + " playerMinusSeatAnchor="
+                        + formatDiagnosticPosition(
+                        player.posX - anchor.xCoord,
+                        player.posY - anchor.yCoord,
+                        player.posZ - anchor.zCoord
+                )
+                        + " arrowPosBeforeAddonHandling=NA"
+                        + " arrowPosAfterAddonHandling=NA"
+                        + " arrowInitialPos=NA"
+                        + " arrowShootingEntityClass=NA"
+                        + " arrowShootingEntityId=-1"
+                        + " arrowChanged=false"
+                        + " arrowPositionChangeCount=0"
+                        + " playerPositionUpdatePath="
+                        + "LOTREntityMumakil.updateRiderPosition"
+                        + " arrowPositionCorrectionPath=NONE"
+        );
+    }
+
+    private static String formatDiagnosticPosition(
+            double x,
+            double y,
+            double z
+    ) {
+        return "(" + x + "," + y + "," + z + ")";
     }
 
     @Override
@@ -3584,11 +3870,11 @@ public boolean isBabyPanicAnimationActive() {
         }
     }
 
-    private enum MumakilSkirmishState {
+    private enum MumakilAutonomousCombatState {
         APPROACH,
-        ATTACK,
-        WITHDRAW,
-        REENGAGE
+        ATTACK_PASS,
+        TRAMPLE_PASS,
+        TURNAROUND
     }
 
     private class EntityAIMumakilAttackOnCollide extends LOTREntityAIAttackOnCollide {
@@ -3604,18 +3890,22 @@ public boolean isBabyPanicAnimationActive() {
         private double lastProgressZ;
         private int nextProgressCheckTick;
         private int noProgressTicks;
-        private MumakilSkirmishState skirmishState =
-                MumakilSkirmishState.APPROACH;
+        private MumakilAutonomousCombatState autonomousCombatState =
+                MumakilAutonomousCombatState.APPROACH;
         private int observedSuccessfulTuskSequence;
-        private int nextRetreatPathTick;
-        private int failedRetreatPathSearches;
-        private double retreatX;
-        private double retreatY;
-        private double retreatZ;
-        private double retreatTargetX;
-        private double retreatTargetZ;
-        private boolean hasRetreatDestination;
-        private boolean retreatReachabilityChecked;
+        private int nextCombatWaypointPathTick;
+        private int failedCombatWaypointSearches;
+        private double combatWaypointX;
+        private double combatWaypointY;
+        private double combatWaypointZ;
+        private double combatWaypointTargetX;
+        private double combatWaypointTargetZ;
+        private double passReferenceX;
+        private double passReferenceZ;
+        private double passDirectionX;
+        private double passDirectionZ;
+        private boolean hasCombatWaypoint;
+        private int turnaroundDirectionSign = 1;
 
         private EntityAIMumakilAttackOnCollide() {
             super(LOTREntityMumakil.this, WILD_ATTACK_SPEED, true);
@@ -3639,9 +3929,21 @@ public boolean isBabyPanicAnimationActive() {
 
                 if (execute) {
                     this.attackTarget = target;
-                    LOTREntityMumakil.this.getNavigator().setAvoidsWater(false);
+                    LOTREntityMumakil.this.getNavigator().setAvoidsWater(
+                            LOTREntityMumakil.this
+                                    .isAutonomousWarFormation()
+                    );
                     this.resetControlledPathForNewTarget(target);
-                    this.updateControlledPath(target, true);
+                    if (this.canUseAutonomousCombatPass(target)) {
+                        this.updateAutonomousCombatState(
+                                target,
+                                true
+                        );
+                    }
+                    if (this.autonomousCombatState
+                            == MumakilAutonomousCombatState.APPROACH) {
+                        this.updateControlledPath(target, true);
+                    }
                 }
 
                 if (trackPerformance) {
@@ -3735,17 +4037,17 @@ public boolean isBabyPanicAnimationActive() {
             long start = trackPerformance
                     ? MumakilPerformanceTracker.startTimer()
                     : 0L;
-            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
-                this.updateSkirmishState(this.attackTarget);
-            }
             super.updateTask();
-            if (LOTREntityMumakil.this.isHiredWarMumakil()) {
+            if (this.canUseAutonomousCombatPass(this.attackTarget)) {
                 /*
                  * A successful tusk hit can happen inside super.updateTask().
-                 * Recheck after the attack so withdrawal starts from that
-                 * exact successful sequence, never from a loaded cooldown.
+                 * Move immediately into the drive-through phase without
+                 * surrendering the navigator to a second AI task.
                  */
-                this.updateSkirmishState(this.attackTarget);
+                this.observeSuccessfulTuskHit(
+                        this.attackTarget,
+                        false
+                );
             }
             if (trackPerformance) {
                 MumakilPerformanceTracker.recordMountAttackUpdate(
@@ -3762,7 +4064,7 @@ public boolean isBabyPanicAnimationActive() {
             long start = trackPerformance
                     ? MumakilPerformanceTracker.startTimer()
                     : 0L;
-            this.clearSkirmishState();
+            this.clearAutonomousCombatState("task-reset");
             super.resetTask();
             if (trackPerformance) {
                 MumakilPerformanceTracker.recordMountAttackReset(
@@ -3782,37 +4084,45 @@ public boolean isBabyPanicAnimationActive() {
                 return;
             }
 
-            this.updateSkirmishState(this.attackTarget);
-            if (this.skirmishState == MumakilSkirmishState.WITHDRAW) {
-                this.updateRetreatPath(this.attackTarget);
-                if (this.hasRetreatDestination) {
+            this.resetControlledPathForNewTarget(this.attackTarget);
+            if (this.canUseAutonomousCombatPass(this.attackTarget)) {
+                this.updateAutonomousCombatState(
+                        this.attackTarget,
+                        false
+                );
+                if (this.autonomousCombatState
+                        != MumakilAutonomousCombatState.APPROACH) {
+                    this.updateCombatWaypointNavigation(
+                            this.attackTarget,
+                            false
+                    );
+                }
+                if (this.hasCombatWaypoint) {
                     LOTREntityMumakil.this.getLookHelper().setLookPosition(
-                            this.retreatX,
-                            this.retreatY
+                            this.combatWaypointX,
+                            this.combatWaypointY
                                     + LOTREntityMumakil.this.getEyeHeight(),
-                            this.retreatZ,
+                            this.combatWaypointZ,
                             30.0F,
                             30.0F
                     );
+                } else {
+                    LOTREntityMumakil.this.getLookHelper()
+                            .setLookPositionWithEntity(
+                                    this.attackTarget,
+                                    30.0F,
+                                    30.0F
+                            );
                 }
-                return;
-            }
-
-            double distanceSq =
-                    LOTREntityMumakil.this.getDistanceSqToEntity(
-                            this.attackTarget
-                    );
-            if (LOTREntityMumakil.this.tuskAttackCooldownTicks <= 0
-                    && distanceSq
-                    <= TUSK_ATTACK_RANGE * TUSK_ATTACK_RANGE) {
-                this.skirmishState = MumakilSkirmishState.ATTACK;
-            } else if (this.skirmishState
-                    != MumakilSkirmishState.REENGAGE) {
-                this.skirmishState = MumakilSkirmishState.APPROACH;
+                if (this.autonomousCombatState
+                        != MumakilAutonomousCombatState.APPROACH) {
+                    return;
+                }
+            } else {
+                this.clearAutonomousCombatState("not-eligible");
             }
 
             LOTREntityMumakil.this.getLookHelper().setLookPositionWithEntity(this.attackTarget, 30.0F, 30.0F);
-            this.resetControlledPathForNewTarget(this.attackTarget);
             this.updateControlledPath(this.attackTarget, false);
         }
 
@@ -3835,55 +4145,110 @@ public boolean isBabyPanicAnimationActive() {
             this.nextProgressCheckTick = LOTREntityMumakil.this.ticksExisted + COMBAT_PATH_PROGRESS_CHECK_TICKS;
             this.noProgressTicks = 0;
             this.entityPathEntity = null;
-            this.clearSkirmishState();
+            this.clearAutonomousCombatState("new-target");
             this.observedSuccessfulTuskSequence =
                     LOTREntityMumakil.this.successfulTuskAttackSequence;
             LOTREntityMumakil.this.getNavigator().clearPathEntity();
         }
 
-        private void updateSkirmishState(EntityLivingBase target) {
-            if (!this.canUseSkirmishState(target)) {
-                this.clearSkirmishState();
+        private void updateAutonomousCombatState(
+                EntityLivingBase target,
+                boolean preparingStart
+        ) {
+            if (!this.canUseAutonomousCombatPass(target)) {
+                this.clearAutonomousCombatState("not-eligible");
                 return;
             }
 
-            int successfulSequence =
-                    LOTREntityMumakil.this.successfulTuskAttackSequence;
-            if (successfulSequence
-                    != this.observedSuccessfulTuskSequence) {
-                this.observedSuccessfulTuskSequence =
-                        successfulSequence;
-                this.beginWithdrawal(target);
-            }
-
-            if (this.skirmishState
-                    != MumakilSkirmishState.WITHDRAW) {
+            if (this.observeSuccessfulTuskHit(
+                    target,
+                    preparingStart
+            )) {
                 return;
             }
 
-            if (LOTREntityMumakil.this.tuskAttackCooldownTicks
-                    <= SKIRMISH_REENGAGE_COOLDOWN_THRESHOLD) {
-                this.beginReengagement("cooldown-ready");
-            } else if (this.isDriverInImmediateDanger(target)) {
-                this.beginReengagement("driver-danger");
-            } else if (this.failedRetreatPathSearches
-                    >= SKIRMISH_RETREAT_MAX_FAILED_SEARCHES) {
-                this.beginReengagement("retreat-path-failures");
+            double targetDistanceSq =
+                    LOTREntityMumakil.this.getDistanceSqToEntity(
+                            target
+                    );
+            boolean closeEnoughForPass =
+                    targetDistanceSq
+                            <= AUTONOMOUS_ATTACK_PASS_TRIGGER_DISTANCE
+                            * AUTONOMOUS_ATTACK_PASS_TRIGGER_DISTANCE;
+
+            if (this.autonomousCombatState
+                    == MumakilAutonomousCombatState.APPROACH) {
+                if (!closeEnoughForPass) {
+                    return;
+                }
+                if (LOTREntityMumakil.this
+                        .tuskAttackCooldownTicks <= 0) {
+                    this.beginAttackPass(
+                            target,
+                            preparingStart,
+                            "attack-ready"
+                    );
+                } else {
+                    this.beginTramplePass(
+                            target,
+                            preparingStart,
+                            "cooldown-active"
+                    );
+                }
+                return;
+            }
+
+            if (this.autonomousCombatState
+                    == MumakilAutonomousCombatState.TRAMPLE_PASS
+                    && LOTREntityMumakil.this
+                    .tuskAttackCooldownTicks <= 0) {
+                if (closeEnoughForPass
+                        || targetDistanceSq
+                        <= AUTONOMOUS_TURNAROUND_MAX_TARGET_DISTANCE
+                        * AUTONOMOUS_TURNAROUND_MAX_TARGET_DISTANCE) {
+                    this.beginAttackPass(
+                            target,
+                            preparingStart,
+                            "cooldown-ready"
+                    );
+                } else {
+                    this.enterApproach("cooldown-ready-target-far");
+                }
             }
         }
 
-        private boolean canUseSkirmishState(EntityLivingBase target) {
+        private boolean observeSuccessfulTuskHit(
+                EntityLivingBase target,
+                boolean preparingStart
+        ) {
+            int successfulSequence =
+                    LOTREntityMumakil.this.successfulTuskAttackSequence;
+            if (successfulSequence
+                    == this.observedSuccessfulTuskSequence) {
+                return false;
+            }
+
+            this.observedSuccessfulTuskSequence =
+                    successfulSequence;
+            this.beginTramplePass(
+                    target,
+                    preparingStart,
+                    "successful-tusk-hit"
+            );
+            return true;
+        }
+
+        private boolean canUseAutonomousCombatPass(
+                EntityLivingBase target
+        ) {
             if (target == null
                     || !target.isEntityAlive()
                     || LOTREntityMumakil.this.riddenByEntity
                     instanceof EntityPlayer
-                    || !LOTREntityMumakil.this.isHiredWarMumakil()
                     || !LOTREntityMumakil.this
-                    .hasMumakilHowdahEquipped()
-                    || !MumakilHowdahArcherEventHandler
-                    .hasAnyLivingAttachedArcherSlot(
-                            LOTREntityMumakil.this
-                    )) {
+                    .isAutonomousWarFormation()
+                    || !LOTREntityMumakil.this
+                    .hasMumakilHowdahEquipped()) {
                 return false;
             }
 
@@ -3898,315 +4263,773 @@ public boolean isBabyPanicAnimationActive() {
             return LOTREntityMumakil.this.getAttackTarget() == target;
         }
 
-        private boolean isDriverInImmediateDanger(
-                EntityLivingBase target
+        private void beginAttackPass(
+                EntityLivingBase target,
+                boolean preparingStart,
+                String reason
         ) {
-            if (!LOTREntityMumakil.this
-                    .hasLivingNPCCombatDriver()) {
-                return false;
-            }
-            LOTREntityNPC driver =
-                    (LOTREntityNPC)LOTREntityMumakil.this
-                            .riddenByEntity;
-            return driver.hurtTime > 0
-                    && driver.getDistanceSqToEntity(target)
-                    <= SKIRMISH_DRIVER_DANGER_RANGE_SQ;
+            this.enterWaypointState(
+                    MumakilAutonomousCombatState.ATTACK_PASS,
+                    target,
+                    reason
+            );
+            this.updateCombatWaypointNavigation(
+                    target,
+                    preparingStart
+            );
         }
 
-        private void beginWithdrawal(EntityLivingBase target) {
-            this.skirmishState = MumakilSkirmishState.WITHDRAW;
-            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
-                    true;
-            this.failedRetreatPathSearches = 0;
-            this.hasRetreatDestination = false;
-            this.retreatReachabilityChecked = false;
-            this.nextRetreatPathTick =
-                    LOTREntityMumakil.this.ticksExisted;
-            this.retreatTargetX = target.posX;
-            this.retreatTargetZ = target.posZ;
+        private void beginTramplePass(
+                EntityLivingBase target,
+                boolean preparingStart,
+                String reason
+        ) {
+            this.enterWaypointState(
+                    MumakilAutonomousCombatState.TRAMPLE_PASS,
+                    target,
+                    reason
+            );
+            this.updateCombatWaypointNavigation(
+                    target,
+                    preparingStart
+            );
+        }
+
+        private void beginTurnaround(
+                EntityLivingBase target,
+                boolean preparingStart,
+                String reason
+        ) {
+            this.turnaroundDirectionSign =
+                    -this.turnaroundDirectionSign;
+            this.enterWaypointState(
+                    MumakilAutonomousCombatState.TURNAROUND,
+                    target,
+                    reason
+            );
+            this.updateCombatWaypointNavigation(
+                    target,
+                    preparingStart
+            );
+        }
+
+        private void enterWaypointState(
+                MumakilAutonomousCombatState state,
+                EntityLivingBase target,
+                String reason
+        ) {
+            MumakilAutonomousCombatState previous =
+                    this.autonomousCombatState;
+            this.autonomousCombatState = state;
+            LOTREntityMumakil.this
+                    .mumakilAutonomousCombatPassActive = true;
+            this.failedCombatWaypointSearches = 0;
+            this.hasCombatWaypoint = false;
+            this.combatWaypointTargetX = target.posX;
+            this.combatWaypointTargetZ = target.posZ;
+            this.nextCombatWaypointPathTick =
+                    LOTREntityMumakil.this.ticksExisted
+                            + this.getWaypointInitialStagger();
             this.entityPathEntity = null;
-            LOTREntityMumakil.this.getNavigator().clearPathEntity();
-            this.debugSkirmish(
-                    "transition=WITHDRAW"
-                            + " sequence="
-                            + this.observedSuccessfulTuskSequence
-                            + " cooldown="
-                            + LOTREntityMumakil.this
-                            .tuskAttackCooldownTicks
+            if (!LOTREntityMumakil.this.getNavigator().noPath()) {
+                LOTREntityMumakil.this.getNavigator()
+                        .clearPathEntity();
+            }
+            if (previous != state
+                    && state
+                    == MumakilAutonomousCombatState.TRAMPLE_PASS) {
+                MumakilServerPerformanceDiagnostics
+                        .recordTramplePassTransition(
+                                LOTREntityMumakil.this.worldObj
+                        );
+            }
+            this.debugAutonomousCombat(
+                    "transition=" + state
+                            + " reason=" + reason
                             + " navigatorOwner=attack-on-collide"
             );
-            this.updateRetreatPath(target);
         }
 
-        private void beginReengagement(String reason) {
-            this.skirmishState = MumakilSkirmishState.REENGAGE;
-            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
-                    false;
-            this.hasRetreatDestination = false;
-            this.retreatReachabilityChecked = false;
+        private void enterApproach(String reason) {
+            MumakilAutonomousCombatState previous =
+                    this.autonomousCombatState;
+            this.autonomousCombatState =
+                    MumakilAutonomousCombatState.APPROACH;
+            LOTREntityMumakil.this
+                    .mumakilAutonomousCombatPassActive = false;
+            this.failedCombatWaypointSearches = 0;
+            this.hasCombatWaypoint = false;
             this.newTargetPathPending = true;
             this.noProgressPathPending = false;
             this.nextControlledPathTick =
                     LOTREntityMumakil.this.ticksExisted;
             this.failureBackoffTicks =
                     COMBAT_PATH_FAILURE_BACKOFF_MIN;
-            LOTREntityMumakil.this.getNavigator().clearPathEntity();
-            this.debugSkirmish(
-                    "transition=REENGAGE"
-                            + " reason="
-                            + reason
-                            + " cooldown="
-                            + LOTREntityMumakil.this
-                            .tuskAttackCooldownTicks
-                            + " navigatorOwner=attack-on-collide"
-            );
-        }
-
-        private void clearSkirmishState() {
-            MumakilSkirmishState previousState =
-                    this.skirmishState;
-            this.skirmishState = MumakilSkirmishState.APPROACH;
-            LOTREntityMumakil.this.mumakilSkirmishWithdrawing =
-                    false;
-            this.failedRetreatPathSearches = 0;
-            this.hasRetreatDestination = false;
-            this.retreatReachabilityChecked = false;
-            if (previousState
-                    != MumakilSkirmishState.APPROACH) {
-                this.debugSkirmish(
-                        "transition=APPROACH reason=state-cleared"
+            this.entityPathEntity = null;
+            if (!LOTREntityMumakil.this.getNavigator().noPath()) {
+                LOTREntityMumakil.this.getNavigator()
+                        .clearPathEntity();
+            }
+            if (previous
+                    != MumakilAutonomousCombatState.APPROACH) {
+                this.debugAutonomousCombat(
+                        "transition=APPROACH reason=" + reason
                 );
             }
         }
 
-        private void updateRetreatPath(EntityLivingBase target) {
-            if (this.skirmishState
-                    != MumakilSkirmishState.WITHDRAW) {
+        private void clearAutonomousCombatState(String reason) {
+            MumakilAutonomousCombatState previous =
+                    this.autonomousCombatState;
+            this.autonomousCombatState =
+                    MumakilAutonomousCombatState.APPROACH;
+            LOTREntityMumakil.this
+                    .mumakilAutonomousCombatPassActive = false;
+            this.failedCombatWaypointSearches = 0;
+            this.hasCombatWaypoint = false;
+            if (previous
+                    != MumakilAutonomousCombatState.APPROACH) {
+                this.debugAutonomousCombat(
+                        "transition=APPROACH reason=" + reason
+                );
+            }
+        }
+
+        private void updateCombatWaypointNavigation(
+                EntityLivingBase target,
+                boolean preparingStart
+        ) {
+            if (this.autonomousCombatState
+                    == MumakilAutonomousCombatState.APPROACH) {
                 return;
             }
 
-            /*
-             * Do not let path travel pull the body sideways while the
-             * authored tusk strike still owns its facing. The cooldown is
-             * much longer than the 36-tick strike, so withdrawal still has
-             * ample time to complete.
-             */
-            int strikeFacingLockThreshold =
-                    MUMAKIL_STRIKE_ANIMATION_TICKS
-                            - SKIRMISH_STRIKE_INITIAL_FACING_LOCK_TICKS;
-            if (LOTREntityMumakil.this
-                    .mumakilStrikeAnimationTicks
-                    > strikeFacingLockThreshold) {
-                if (!LOTREntityMumakil.this.getNavigator()
-                        .noPath()) {
-                    LOTREntityMumakil.this.getNavigator()
-                            .clearPathEntity();
-                }
+            if (this.hasCompletedCombatWaypoint()) {
+                this.handleCombatWaypointComplete(
+                        target,
+                        preparingStart
+                );
                 return;
             }
 
-            double targetDistanceSq =
-                    LOTREntityMumakil.this.getDistanceSqToEntity(
-                            target
-                    );
-            boolean inRetreatBand =
-                    targetDistanceSq
-                            >= SKIRMISH_RETREAT_MIN_DISTANCE
-                            * SKIRMISH_RETREAT_MIN_DISTANCE
-                    && targetDistanceSq
-                            <= SKIRMISH_RETREAT_MAX_DISTANCE
-                            * SKIRMISH_RETREAT_MAX_DISTANCE;
-
-            if (inRetreatBand
-                    && LOTREntityMumakil.this.getNavigator()
-                    .noPath()) {
-                this.checkTargetReachableFromRetreat(target);
-                return;
-            }
-
-            double targetMoveX = target.posX - this.retreatTargetX;
-            double targetMoveZ = target.posZ - this.retreatTargetZ;
+            double targetMoveX =
+                    target.posX - this.combatWaypointTargetX;
+            double targetMoveZ =
+                    target.posZ - this.combatWaypointTargetZ;
             boolean targetMoved =
                     targetMoveX * targetMoveX
                             + targetMoveZ * targetMoveZ
-                    >= SKIRMISH_TARGET_REPATH_DISTANCE_SQ;
+                    >= AUTONOMOUS_TARGET_WAYPOINT_REPATH_DISTANCE_SQ;
             boolean needsPath =
-                    !this.hasRetreatDestination
+                    !this.hasCombatWaypoint
                     || targetMoved
                     || LOTREntityMumakil.this.getNavigator().noPath();
 
             int currentTick = LOTREntityMumakil.this.ticksExisted;
             if (!needsPath
-                    || currentTick < this.nextRetreatPathTick) {
+                    || currentTick
+                    < this.nextCombatWaypointPathTick) {
                 return;
             }
 
-            PathEntity retreatPath =
-                    this.findValidatedRetreatPath(target);
-            this.nextRetreatPathTick =
-                    currentTick
-                            + SKIRMISH_RETREAT_REPATH_COOLDOWN;
-            this.retreatTargetX = target.posX;
-            this.retreatTargetZ = target.posZ;
+            long destinationSearchStart =
+                    MumakilServerPerformanceDiagnostics
+                            .startTimer(
+                                    LOTREntityMumakil.this.worldObj
+                            );
+            boolean turnaround =
+                    this.autonomousCombatState
+                            == MumakilAutonomousCombatState.TURNAROUND;
+            PathEntity combatPath = turnaround
+                    ? this.findValidatedTurnaroundPath(target)
+                    : this.findValidatedPassThroughPath(target);
+            long destinationSearchNanos =
+                    System.nanoTime() - destinationSearchStart;
+            if (turnaround) {
+                MumakilServerPerformanceDiagnostics
+                        .recordTurnaroundSearch(
+                                LOTREntityMumakil.this.worldObj,
+                                destinationSearchNanos
+                        );
+            } else {
+                MumakilServerPerformanceDiagnostics
+                        .recordPassThroughSearch(
+                                LOTREntityMumakil.this.worldObj,
+                                destinationSearchNanos
+                        );
+            }
 
-            if (retreatPath != null
-                    && LOTREntityMumakil.this.getNavigator()
-                    .setPath(retreatPath, this.moveSpeed)) {
-                this.failedRetreatPathSearches = 0;
-                this.hasRetreatDestination = true;
-                this.retreatReachabilityChecked = false;
-                this.debugSkirmish(
-                        "retreat-path=accepted"
+            this.nextCombatWaypointPathTick =
+                    currentTick
+                            + (turnaround
+                            ? AUTONOMOUS_TURN_REPATH_INTERVAL
+                            : AUTONOMOUS_PASS_REPATH_INTERVAL);
+            this.combatWaypointTargetX = target.posX;
+            this.combatWaypointTargetZ = target.posZ;
+
+            long combatPathStart =
+                    MumakilServerPerformanceDiagnostics
+                            .startTimer(
+                                    LOTREntityMumakil.this.worldObj
+                            );
+            boolean combatPathAccepted = combatPath != null;
+            if (combatPathAccepted) {
+                if (preparingStart) {
+                    this.entityPathEntity = combatPath;
+                } else {
+                    combatPathAccepted =
+                            LOTREntityMumakil.this
+                            .getNavigator()
+                            .setPath(
+                                    combatPath,
+                                    this.moveSpeed
+                            );
+                }
+            }
+            long combatPathNanos =
+                    System.nanoTime() - combatPathStart;
+            if (turnaround) {
+                MumakilServerPerformanceDiagnostics
+                        .recordTurnaroundPath(
+                                LOTREntityMumakil.this.worldObj,
+                                combatPathNanos,
+                                combatPathAccepted
+                        );
+            } else {
+                MumakilServerPerformanceDiagnostics
+                        .recordPassThroughPath(
+                                LOTREntityMumakil.this.worldObj,
+                                combatPathNanos,
+                                combatPathAccepted
+                        );
+            }
+
+            if (combatPathAccepted) {
+                this.failedCombatWaypointSearches = 0;
+                this.hasCombatWaypoint = true;
+                this.debugAutonomousCombat(
+                        "waypoint-path=accepted"
                                 + " destination="
-                                + this.retreatX
+                                + this.combatWaypointX
                                 + ","
-                                + this.retreatY
+                                + this.combatWaypointY
                                 + ","
-                                + this.retreatZ
+                                + this.combatWaypointZ
                                 + " navigatorOwner=attack-on-collide"
                 );
                 return;
             }
 
-            ++this.failedRetreatPathSearches;
-            this.hasRetreatDestination = false;
-            this.debugSkirmish(
-                    "retreat-path=rejected"
+            ++this.failedCombatWaypointSearches;
+            this.hasCombatWaypoint = false;
+            MumakilServerPerformanceDiagnostics
+                    .recordPassWaypointFailure(
+                            LOTREntityMumakil.this.worldObj
+                    );
+            this.debugAutonomousCombat(
+                    "waypoint-path=rejected"
                             + " failures="
-                            + this.failedRetreatPathSearches
+                            + this.failedCombatWaypointSearches
             );
-            if (this.failedRetreatPathSearches
-                    >= SKIRMISH_RETREAT_MAX_FAILED_SEARCHES) {
-                this.beginReengagement("retreat-path-failures");
+            if (this.failedCombatWaypointSearches
+                    >= AUTONOMOUS_WAYPOINT_MAX_FAILED_SEARCHES) {
+                if (turnaround) {
+                    MumakilDriverControlEventHandler
+                            .rejectAutonomousTargetAfterCombatPathFailure(
+                                    LOTREntityMumakil.this,
+                                    target
+                            );
+                    this.enterApproach(
+                            "turnaround-waypoint-failures"
+                    );
+                } else {
+                    this.beginTurnaround(
+                            target,
+                            preparingStart,
+                            "pass-waypoint-failures"
+                    );
+                }
             }
         }
 
-        private void checkTargetReachableFromRetreat(
-                EntityLivingBase target
+        private boolean hasCompletedCombatWaypoint() {
+            if (!this.hasCombatWaypoint) {
+                return false;
+            }
+
+            double waypointDeltaX =
+                    this.combatWaypointX
+                            - LOTREntityMumakil.this.posX;
+            double waypointDeltaZ =
+                    this.combatWaypointZ
+                            - LOTREntityMumakil.this.posZ;
+            if (waypointDeltaX * waypointDeltaX
+                    + waypointDeltaZ * waypointDeltaZ
+                    <= AUTONOMOUS_WAYPOINT_REACHED_DISTANCE
+                    * AUTONOMOUS_WAYPOINT_REACHED_DISTANCE) {
+                return true;
+            }
+
+            if (this.autonomousCombatState
+                    == MumakilAutonomousCombatState.ATTACK_PASS
+                    || this.autonomousCombatState
+                    == MumakilAutonomousCombatState.TRAMPLE_PASS) {
+                double passedX =
+                        LOTREntityMumakil.this.posX
+                                - this.passReferenceX;
+                double passedZ =
+                        LOTREntityMumakil.this.posZ
+                                - this.passReferenceZ;
+                double passProgress =
+                        passedX * this.passDirectionX
+                                + passedZ * this.passDirectionZ;
+                return passProgress
+                        >= AUTONOMOUS_PASS_THROUGH_DISTANCE - 2.0D;
+            }
+
+            return false;
+        }
+
+        private void handleCombatWaypointComplete(
+                EntityLivingBase target,
+                boolean preparingStart
         ) {
-            if (this.retreatReachabilityChecked) {
+            MumakilAutonomousCombatState completedState =
+                    this.autonomousCombatState;
+            if (completedState
+                    == MumakilAutonomousCombatState.TURNAROUND) {
+                if (LOTREntityMumakil.this
+                        .tuskAttackCooldownTicks <= 0) {
+                    this.beginAttackPass(
+                            target,
+                            preparingStart,
+                            "turn-complete-attack-ready"
+                    );
+                } else {
+                    this.beginTramplePass(
+                            target,
+                            preparingStart,
+                            "turn-complete-cooldown-active"
+                    );
+                }
                 return;
             }
 
-            this.retreatReachabilityChecked = true;
-            PathEntity returnPath =
-                    LOTREntityMumakil.this.getNavigator()
-                            .getPathToEntityLiving(target);
-            if (returnPath == null) {
-                this.beginReengagement(
-                        "target-unreachable-from-retreat"
-                );
-            }
+            this.beginTurnaround(
+                    target,
+                    preparingStart,
+                    completedState
+                            == MumakilAutonomousCombatState.ATTACK_PASS
+                            ? "attack-pass-complete"
+                            : "trample-pass-complete"
+            );
         }
 
-        private PathEntity findValidatedRetreatPath(
+        private PathEntity findValidatedPassThroughPath(
                 EntityLivingBase target
         ) {
-            double awayX =
-                    LOTREntityMumakil.this.posX - target.posX;
-            double awayZ =
-                    LOTREntityMumakil.this.posZ - target.posZ;
-            double awayLength =
-                    Math.sqrt(awayX * awayX + awayZ * awayZ);
-
-            if (awayLength < 0.001D) {
+            double directionX =
+                    target.posX - LOTREntityMumakil.this.posX;
+            double directionZ =
+                    target.posZ - LOTREntityMumakil.this.posZ;
+            double directionLength = Math.sqrt(
+                    directionX * directionX
+                            + directionZ * directionZ
+            );
+            if (directionLength < 0.001D) {
                 double yawRadians = Math.toRadians(
                         LOTREntityMumakil.this.renderYawOffset
                 );
-                awayX = Math.sin(yawRadians);
-                awayZ = -Math.cos(yawRadians);
+                directionX = -Math.sin(yawRadians);
+                directionZ = Math.cos(yawRadians);
             } else {
-                awayX /= awayLength;
-                awayZ /= awayLength;
+                directionX /= directionLength;
+                directionZ /= directionLength;
             }
 
+            List nearbyEnemies =
+                    this.collectBoundedPassEnemies(target);
+            double[] candidateScores =
+                    new double[AUTONOMOUS_PASS_ANGLES.length];
+            boolean[] attempted =
+                    new boolean[AUTONOMOUS_PASS_ANGLES.length];
             for (int i = 0;
-                    i < SKIRMISH_RETREAT_ANGLES.length;
+                    i < AUTONOMOUS_PASS_ANGLES.length;
                     ++i) {
                 double angle = Math.toRadians(
-                        SKIRMISH_RETREAT_ANGLES[i]
+                        AUTONOMOUS_PASS_ANGLES[i]
                 );
                 double cos = Math.cos(angle);
                 double sin = Math.sin(angle);
-                double directionX = awayX * cos - awayZ * sin;
-                double directionZ = awayX * sin + awayZ * cos;
+                double candidateDirectionX =
+                        directionX * cos - directionZ * sin;
+                double candidateDirectionZ =
+                        directionX * sin + directionZ * cos;
                 double destinationX =
                         target.posX
-                                + directionX
-                                * SKIRMISH_RETREAT_DISTANCE;
+                                + candidateDirectionX
+                                * AUTONOMOUS_PASS_THROUGH_DISTANCE;
                 double destinationZ =
                         target.posZ
-                                + directionZ
-                                * SKIRMISH_RETREAT_DISTANCE;
-                double destinationY =
-                        this.findRetreatGroundY(
+                                + candidateDirectionZ
+                                * AUTONOMOUS_PASS_THROUGH_DISTANCE;
+                candidateScores[i] =
+                        this.scorePassCorridor(
+                                nearbyEnemies,
                                 destinationX,
                                 destinationZ
-                        );
+                        )
+                                - Math.abs(
+                                AUTONOMOUS_PASS_ANGLES[i]
+                        ) * 0.0025D;
+            }
 
-                if (Double.isNaN(destinationY)) {
-                    continue;
+            for (int attempt = 0;
+                    attempt < AUTONOMOUS_PASS_ANGLES.length;
+                    ++attempt) {
+                int bestIndex = -1;
+                double bestScore = -Double.MAX_VALUE;
+                for (int i = 0;
+                        i < candidateScores.length;
+                        ++i) {
+                    if (!attempted[i]
+                            && candidateScores[i] > bestScore) {
+                        bestIndex = i;
+                        bestScore = candidateScores[i];
+                    }
                 }
+                if (bestIndex < 0) {
+                    break;
+                }
+                attempted[bestIndex] = true;
 
-                PathEntity path =
-                        LOTREntityMumakil.this.getNavigator()
-                                .getPathToXYZ(
-                                        destinationX,
-                                        destinationY,
-                                        destinationZ
-                                );
-                PathPoint finalPoint =
-                        path == null
-                                ? null
-                                : path.getFinalPathPoint();
-                if (finalPoint == null) {
-                    continue;
+                double angle = Math.toRadians(
+                        AUTONOMOUS_PASS_ANGLES[bestIndex]
+                );
+                double cos = Math.cos(angle);
+                double sin = Math.sin(angle);
+                double candidateDirectionX =
+                        directionX * cos - directionZ * sin;
+                double candidateDirectionZ =
+                        directionX * sin + directionZ * cos;
+                double destinationX =
+                        target.posX
+                                + candidateDirectionX
+                                * AUTONOMOUS_PASS_THROUGH_DISTANCE;
+                double destinationZ =
+                        target.posZ
+                                + candidateDirectionZ
+                                * AUTONOMOUS_PASS_THROUGH_DISTANCE;
+                PathEntity path = this.tryCreateCombatWaypointPath(
+                        target,
+                        destinationX,
+                        destinationZ,
+                        AUTONOMOUS_PASS_MIN_TARGET_DISTANCE,
+                        AUTONOMOUS_PASS_MAX_TARGET_DISTANCE
+                );
+                if (path != null) {
+                    double finalPassProjection =
+                            (this.combatWaypointX - target.posX)
+                                    * candidateDirectionX
+                                    + (this.combatWaypointZ
+                                    - target.posZ)
+                                    * candidateDirectionZ;
+                    if (finalPassProjection
+                            >= AUTONOMOUS_PASS_MIN_TARGET_DISTANCE
+                            && finalPassProjection
+                            <= AUTONOMOUS_PASS_MAX_TARGET_DISTANCE) {
+                        this.passReferenceX = target.posX;
+                        this.passReferenceZ = target.posZ;
+                        this.passDirectionX = candidateDirectionX;
+                        this.passDirectionZ = candidateDirectionZ;
+                        return path;
+                    }
                 }
-                double finalX = finalPoint.xCoord + 0.5D;
-                double finalZ = finalPoint.zCoord + 0.5D;
-                double finalTargetX = finalX - target.posX;
-                double finalTargetZ = finalZ - target.posZ;
-                double finalTargetDistanceSq =
-                        finalTargetX * finalTargetX
-                                + finalTargetZ * finalTargetZ;
-                if (finalTargetDistanceSq
-                        < SKIRMISH_RETREAT_MIN_DISTANCE
-                        * SKIRMISH_RETREAT_MIN_DISTANCE
-                        || finalTargetDistanceSq
-                        > SKIRMISH_RETREAT_MAX_DISTANCE
-                        * SKIRMISH_RETREAT_MAX_DISTANCE) {
-                    continue;
-                }
-
-                this.retreatX = finalX;
-                this.retreatY = finalPoint.yCoord;
-                this.retreatZ = finalZ;
-                return path;
             }
 
             return null;
         }
 
-        private void debugSkirmish(String message) {
-            if (!DEBUG_SKIRMISH_AI
+        private PathEntity findValidatedTurnaroundPath(
+                EntityLivingBase target
+        ) {
+            double outwardX =
+                    LOTREntityMumakil.this.posX - target.posX;
+            double outwardZ =
+                    LOTREntityMumakil.this.posZ - target.posZ;
+            double outwardLength = Math.sqrt(
+                    outwardX * outwardX
+                            + outwardZ * outwardZ
+            );
+            if (outwardLength < 0.001D) {
+                outwardX = -this.passDirectionX;
+                outwardZ = -this.passDirectionZ;
+                outwardLength = Math.sqrt(
+                        outwardX * outwardX
+                                + outwardZ * outwardZ
+                );
+            }
+            if (outwardLength < 0.001D) {
+                double yawRadians = Math.toRadians(
+                        LOTREntityMumakil.this.renderYawOffset
+                );
+                outwardX = -Math.sin(yawRadians);
+                outwardZ = Math.cos(yawRadians);
+            } else {
+                outwardX /= outwardLength;
+                outwardZ /= outwardLength;
+            }
+
+            for (int i = 0;
+                    i < AUTONOMOUS_TURNAROUND_ANGLES.length;
+                    ++i) {
+                double angle = Math.toRadians(
+                        AUTONOMOUS_TURNAROUND_ANGLES[i]
+                                * this.turnaroundDirectionSign
+                );
+                double cos = Math.cos(angle);
+                double sin = Math.sin(angle);
+                double directionX =
+                        outwardX * cos - outwardZ * sin;
+                double directionZ =
+                        outwardX * sin + outwardZ * cos;
+                double destinationX =
+                        target.posX
+                                + directionX
+                                * AUTONOMOUS_TURNAROUND_DISTANCE;
+                double destinationZ =
+                        target.posZ
+                                + directionZ
+                                * AUTONOMOUS_TURNAROUND_DISTANCE;
+                PathEntity path = this.tryCreateCombatWaypointPath(
+                        target,
+                        destinationX,
+                        destinationZ,
+                        AUTONOMOUS_TURNAROUND_MIN_TARGET_DISTANCE,
+                        AUTONOMOUS_TURNAROUND_MAX_TARGET_DISTANCE
+                );
+                if (path != null) {
+                    return path;
+                }
+            }
+
+            return null;
+        }
+
+        private PathEntity tryCreateCombatWaypointPath(
+                EntityLivingBase target,
+                double destinationX,
+                double destinationZ,
+                double minimumTargetDistance,
+                double maximumTargetDistance
+        ) {
+            double destinationY = this.findCombatGroundY(
+                    destinationX,
+                    destinationZ
+            );
+            if (Double.isNaN(destinationY)) {
+                return null;
+            }
+
+            PathEntity path =
+                    LOTREntityMumakil.this.getNavigator()
+                            .getPathToXYZ(
+                                    destinationX,
+                                    destinationY,
+                                    destinationZ
+                            );
+            PathPoint finalPoint =
+                    path == null
+                            ? null
+                            : path.getFinalPathPoint();
+            if (finalPoint == null) {
+                return null;
+            }
+
+            double finalX = finalPoint.xCoord + 0.5D;
+            double finalZ = finalPoint.zCoord + 0.5D;
+            double destinationDeltaX = finalX - destinationX;
+            double destinationDeltaZ = finalZ - destinationZ;
+            if (destinationDeltaX * destinationDeltaX
+                    + destinationDeltaZ * destinationDeltaZ
+                    > 36.0D) {
+                return null;
+            }
+
+            double finalTargetX = finalX - target.posX;
+            double finalTargetZ = finalZ - target.posZ;
+            double finalTargetDistanceSq =
+                    finalTargetX * finalTargetX
+                            + finalTargetZ * finalTargetZ;
+            if (finalTargetDistanceSq
+                    < minimumTargetDistance
+                    * minimumTargetDistance
+                    || finalTargetDistanceSq
+                    > maximumTargetDistance
+                    * maximumTargetDistance) {
+                return null;
+            }
+
+            this.combatWaypointX = finalX;
+            this.combatWaypointY = finalPoint.yCoord;
+            this.combatWaypointZ = finalZ;
+            return path;
+        }
+
+        private List collectBoundedPassEnemies(
+                EntityLivingBase primaryTarget
+        ) {
+            ArrayList enemies = new ArrayList();
+            enemies.add(primaryTarget);
+
+            AxisAlignedBB scanBox = primaryTarget.boundingBox.expand(
+                    AUTONOMOUS_CLUSTER_SCAN_RANGE,
+                    AUTONOMOUS_CLUSTER_SCAN_VERTICAL_RANGE,
+                    AUTONOMOUS_CLUSTER_SCAN_RANGE
+            );
+            List nearby = LOTREntityMumakil.this.worldObj
+                    .getEntitiesWithinAABB(
+                            EntityLivingBase.class,
+                            scanBox
+                    );
+            for (int i = 0;
+                    i < nearby.size()
+                            && enemies.size()
+                            < AUTONOMOUS_CLUSTER_CANDIDATE_LIMIT;
+                    ++i) {
+                EntityLivingBase candidate =
+                        (EntityLivingBase)nearby.get(i);
+                if (candidate != primaryTarget
+                        && LOTREntityMumakil.this
+                        .canTuskAttackTarget(candidate)) {
+                    enemies.add(candidate);
+                }
+            }
+            return enemies;
+        }
+
+        private double scorePassCorridor(
+                List enemies,
+                double destinationX,
+                double destinationZ
+        ) {
+            double startX = LOTREntityMumakil.this.posX;
+            double startZ = LOTREntityMumakil.this.posZ;
+            double lineX = destinationX - startX;
+            double lineZ = destinationZ - startZ;
+            double lineLengthSq = lineX * lineX + lineZ * lineZ;
+            if (lineLengthSq < 0.001D) {
+                return 0.0D;
+            }
+
+            double corridorRadiusSq =
+                    AUTONOMOUS_TRAMPLE_CORRIDOR_RADIUS
+                            * AUTONOMOUS_TRAMPLE_CORRIDOR_RADIUS;
+            double score = 0.0D;
+            for (int i = 0; i < enemies.size(); ++i) {
+                EntityLivingBase enemy =
+                        (EntityLivingBase)enemies.get(i);
+                double enemyX = enemy.posX - startX;
+                double enemyZ = enemy.posZ - startZ;
+                double projection =
+                        (enemyX * lineX + enemyZ * lineZ)
+                                / lineLengthSq;
+                if (projection < 0.0D || projection > 1.0D) {
+                    continue;
+                }
+
+                double nearestX = startX + lineX * projection;
+                double nearestZ = startZ + lineZ * projection;
+                double deltaX = enemy.posX - nearestX;
+                double deltaZ = enemy.posZ - nearestZ;
+                double corridorDistanceSq =
+                        deltaX * deltaX + deltaZ * deltaZ;
+                if (corridorDistanceSq <= corridorRadiusSq) {
+                    score += 1.0D
+                            + (corridorRadiusSq
+                            - corridorDistanceSq)
+                            / corridorRadiusSq;
+                }
+            }
+            return score;
+        }
+
+        private int getWaypointInitialStagger() {
+            int entityId = LOTREntityMumakil.this.getEntityId();
+            return (entityId & Integer.MAX_VALUE)
+                    % AUTONOMOUS_WAYPOINT_STAGGER_TICKS;
+        }
+
+        private void debugAutonomousCombat(String message) {
+            if (!DEBUG_AUTONOMOUS_COMBAT_AI
                     || LOTREntityMumakil.this.worldObj == null
                     || LOTREntityMumakil.this.worldObj.isRemote) {
                 return;
             }
             System.out.println(
-                    "[LOTRMoreMobs][MumakSkirmish]"
+                    "[LOTRMoreMobs][MumakAutonomousCombat]"
                             + " mumak="
                             + LOTREntityMumakil.this.getEntityId()
                             + " tick="
                             + LOTREntityMumakil.this.ticksExisted
                             + " state="
-                            + this.skirmishState
+                            + this.autonomousCombatState
+                            + " origin="
+                            + LOTREntityMumakil.this
+                            .getFormationOrigin()
+                            + " cooldown="
+                            + LOTREntityMumakil.this
+                            .tuskAttackCooldownTicks
+                            + " target="
+                            + (this.attackTarget == null
+                            ? -1
+                            : this.attackTarget.getEntityId())
+                            + " targetDistance="
+                            + (this.attackTarget == null
+                            ? -1.0D
+                            : Math.sqrt(
+                                    LOTREntityMumakil.this
+                                            .getDistanceSqToEntity(
+                                                    this.attackTarget
+                                            )
+                            ))
+                            + " driverTarget="
+                            + this.getDebugDriverTargetId()
+                            + " hasPath="
+                            + !LOTREntityMumakil.this
+                            .getNavigator().noPath()
+                            + " aiSpeed="
+                            + LOTREntityMumakil.this
+                            .getAIMoveSpeed()
+                            + " moveForward="
+                            + LOTREntityMumakil.this.moveForward
+                            + " horizontalMotion="
+                            + Math.sqrt(
+                                    LOTREntityMumakil.this.motionX
+                                            * LOTREntityMumakil.this
+                                            .motionX
+                                            + LOTREntityMumakil.this
+                                            .motionZ
+                                            * LOTREntityMumakil.this
+                                            .motionZ
+                            )
                             + " "
                             + message
             );
         }
 
-        private double findRetreatGroundY(
+        private int getDebugDriverTargetId() {
+            if (!(LOTREntityMumakil.this.riddenByEntity
+                    instanceof LOTREntityNPC)) {
+                return -1;
+            }
+            EntityLivingBase target =
+                    ((LOTREntityNPC)LOTREntityMumakil.this
+                            .riddenByEntity).getAttackTarget();
+            return target == null ? -1 : target.getEntityId();
+        }
+
+        private double findCombatGroundY(
                 double destinationX,
                 double destinationZ
         ) {
@@ -4217,7 +5040,7 @@ public boolean isBabyPanicAnimationActive() {
                             LOTREntityMumakil.this.width * 0.5F
                     );
 
-            if (!this.isRetreatChunkAreaLoaded(
+            if (!this.isCombatChunkAreaLoaded(
                     blockX,
                     blockZ,
                     halfWidth
@@ -4228,7 +5051,7 @@ public boolean isBabyPanicAnimationActive() {
             int baseY = MathHelper.floor_double(
                     LOTREntityMumakil.this.posY
             );
-            for (int offset = 4; offset >= -6; --offset) {
+            for (int offset = 3; offset >= -3; --offset) {
                 int groundY = baseY + offset;
                 if (groundY <= 0
                         || groundY
@@ -4240,7 +5063,10 @@ public boolean isBabyPanicAnimationActive() {
                         .blockExists(blockX, groundY, blockZ)
                         || !LOTREntityMumakil.this.worldObj
                         .getBlock(blockX, groundY - 1, blockZ)
-                        .getMaterial().blocksMovement()) {
+                        .getMaterial().blocksMovement()
+                        || LOTREntityMumakil.this.worldObj
+                        .getBlock(blockX, groundY, blockZ)
+                        .getMaterial().isLiquid()) {
                     continue;
                 }
 
@@ -4262,19 +5088,22 @@ public boolean isBabyPanicAnimationActive() {
                                         + LOTREntityMumakil.this.width
                                         * 0.5D
                         );
-                if (LOTREntityMumakil.this.worldObj
+                if (!LOTREntityMumakil.this.worldObj
                         .getCollidingBoundingBoxes(
                                 LOTREntityMumakil.this,
                                 destinationBox
-                        ).isEmpty()) {
-                    return groundY;
+                        ).isEmpty()
+                        || LOTREntityMumakil.this.worldObj
+                        .isAnyLiquid(destinationBox)) {
+                    continue;
                 }
+                return groundY;
             }
 
             return Double.NaN;
         }
 
-        private boolean isRetreatChunkAreaLoaded(
+        private boolean isCombatChunkAreaLoaded(
                 int blockX,
                 int blockZ,
                 int radius
@@ -4325,6 +5154,14 @@ public boolean isBabyPanicAnimationActive() {
 
             boolean trackPerformance =
                     MumakilPerformanceTracker.isEnabled();
+            long autonomousPursuitStart =
+                    LOTREntityMumakil.this
+                            .isAutonomousWarFormation()
+                            ? MumakilServerPerformanceDiagnostics
+                            .startTimer(
+                                    LOTREntityMumakil.this.worldObj
+                            )
+                            : 0L;
             long pathSearchStart = trackPerformance
                     ? MumakilPerformanceTracker.startTimer()
                     : 0L;
@@ -4358,6 +5195,17 @@ public boolean isBabyPanicAnimationActive() {
                                 System.nanoTime() - pathInstallStart;
                     }
                 }
+            }
+
+            if (LOTREntityMumakil.this
+                    .isAutonomousWarFormation()) {
+                MumakilServerPerformanceDiagnostics
+                        .recordAutonomousPursuitPath(
+                                LOTREntityMumakil.this.worldObj,
+                                System.nanoTime()
+                                        - autonomousPursuitStart,
+                                accepted
+                        );
             }
 
             if (trackPerformance) {
@@ -4639,6 +5487,10 @@ public boolean isBabyPanicAnimationActive() {
                 NBT_FORMATION_ORIGIN,
                 this.getFormationOrigin().getId()
         );
+        nbt.setBoolean(
+                NBT_HAS_MUMAKIL_HOWDAH,
+                this.hasMumakilHowdahEquipped()
+        );
         nbt.setFloat(NBT_SPEED_TRAIT, this.getMumakilSpeedTrait());
         if (this.hiredFormationOwnerUuid != null
                 && this.getFormationOrigin()
@@ -4664,6 +5516,11 @@ public boolean isBabyPanicAnimationActive() {
     public void readEntityFromNBT(NBTTagCompound nbt) {
         super.readEntityFromNBT(nbt);
 
+        ItemStack savedHowdah = this.getSavedMumakilHowdah(nbt);
+        boolean savedHowdahEquipped =
+                nbt.hasKey(NBT_HAS_MUMAKIL_HOWDAH)
+                        ? nbt.getBoolean(NBT_HAS_MUMAKIL_HOWDAH)
+                        : savedHowdah != null;
         this.formationOrigin = nbt.hasKey(NBT_FORMATION_ORIGIN)
                 ? MumakilFormationOrigin.fromId(
                 nbt.getInteger(NBT_FORMATION_ORIGIN)
@@ -4724,9 +5581,42 @@ public boolean isBabyPanicAnimationActive() {
         this.babyLifecycleInitialized = true;
         this.wasBabyMumakil = baby;
 
+        this.authoritativeMumakilHowdahEquipped = false;
+        if (savedHowdahEquipped && !baby) {
+            if (savedHowdah == null) {
+                savedHowdah = new ItemStack(Main.mumakilHowdah);
+            }
+            this.setMumakilInventoryStack(1, savedHowdah);
+            this.setMumakilHowdahEquipped(true);
+        } else if (!this.worldObj.isRemote) {
+            this.updateMumakilHowdahSyncState();
+        }
+
+        this.howdahRosterLoadGraceTicks =
+                this.hasMumakilHowdahEquipped()
+                        && MumakilHowdahArcherEventHandler
+                        .isMarkedHowdahArcherCarrier(this)
+                        ? HOWDAH_ROSTER_LOAD_GRACE_TICKS
+                        : 0;
+        MumakilHowdahArcherEventHandler
+                .logLoadedMumakilHowdahState(this);
+
         if (this.angerWaveCooldownTicks <= 0 && this.angerWaveActiveTicks <= 0) {
             this.resetAngerWaveCooldown();
         }
+    }
+
+    private ItemStack getSavedMumakilHowdah(NBTTagCompound nbt) {
+        if (nbt == null || !nbt.hasKey("ArmorItem", 10)) {
+            return null;
+        }
+
+        ItemStack stack = ItemStack.loadItemStackFromNBT(
+                nbt.getCompoundTag("ArmorItem")
+        );
+        return stack != null && stack.getItem() == Main.mumakilHowdah
+                ? stack
+                : null;
     }
 
     protected double clampChildHealth(double health) {
@@ -5092,7 +5982,7 @@ public boolean isBabyPanicAnimationActive() {
                         .removeNaturalFormationMembers(
                                 this,
                                 capturedDriver
-                        );
+                );
                 this.setDead();
                 return;
             }
@@ -5166,6 +6056,9 @@ public boolean isBabyPanicAnimationActive() {
             this.tryAcquireWildMobTarget();
             this.tryTuskReachAttack();
             if (!MumakilPerformanceTracker.DEBUG_DISABLE_MUMAKIL_TREE_CLEARING) {
+                long serverTreeTimingStart =
+                        MumakilServerPerformanceDiagnostics
+                        .startTimer(this.worldObj);
                 boolean trackTreePerformance =
                         MumakilPerformanceTracker.isEnabled();
                 long treePerfStart = trackTreePerformance
@@ -5174,6 +6067,12 @@ public boolean isBabyPanicAnimationActive() {
                 try {
                     this.clearAggroObstaclesForMovement();
                 } finally {
+                    MumakilServerPerformanceDiagnostics
+                            .recordLeafBreakingScan(
+                                    this.worldObj,
+                                    System.nanoTime()
+                                            - serverTreeTimingStart
+                            );
                     if (trackTreePerformance) {
                         MumakilPerformanceTracker.recordTreeScan(
                                 this,
@@ -5296,7 +6195,6 @@ public boolean isBabyPanicAnimationActive() {
     public boolean attackEntityAsMob(Entity target) {
         if (this.isBabyMumakil()
                 || this.riddenByEntity instanceof EntityPlayer
-                || this.mumakilSkirmishWithdrawing
                 || this.tuskAttackCooldownTicks > 0) {
             return false;
         }
@@ -5331,6 +6229,10 @@ public boolean isBabyPanicAnimationActive() {
             this.alertNearbyWildAdultsToBabyAttack(source);
         }
 
+        if (damaged && !this.worldObj.isRemote && amount > 0.0F) {
+            this.retaliateAsTamedAdult(source);
+        }
+
         if (damaged && !this.worldObj.isRemote && arrowDamage) {
             this.hurtResistantTime = Math.min(this.hurtResistantTime, PROJECTILE_HURT_RESISTANT_TICKS);
         }
@@ -5344,6 +6246,114 @@ public boolean isBabyPanicAnimationActive() {
         }
 
         return damaged;
+    }
+
+    private void retaliateAsTamedAdult(DamageSource source) {
+        if (this.isDead
+                || !this.isEntityAlive()
+                || !this.isTame()
+                || this.isChild()) {
+            return;
+        }
+
+        EntityLivingBase attacker = this.resolveTamedRetaliationAttacker(
+                source
+        );
+        if (!this.isValidTamedRetaliationAttacker(attacker)) {
+            this.clearExcludedTamedRetaliationTarget(attacker);
+            return;
+        }
+
+        /*
+         * EntityLivingBase records the revenge entity, but a tame LOTR horse
+         * does not reliably promote that entity to its active attack target.
+         * Keep navigation and combat in the established AI by setting both
+         * pieces of target state after accepted damage.
+         */
+        this.setRevengeTarget(attacker);
+        this.setAttackTarget(attacker);
+    }
+
+    private void clearExcludedTamedRetaliationTarget(
+            EntityLivingBase attacker
+    ) {
+        if (attacker == null) {
+            return;
+        }
+
+        /*
+         * super.attackEntityFrom() has already recorded source.getEntity() as
+         * the revenge entity. Remove only this excluded attacker; preserve an
+         * unrelated, already active combat target.
+         */
+        if (this.getAITarget() == attacker) {
+            this.setRevengeTarget(null);
+        }
+        if (this.getAttackTarget() == attacker) {
+            this.setAttackTarget(null);
+        }
+    }
+
+    private EntityLivingBase resolveTamedRetaliationAttacker(
+            DamageSource source
+    ) {
+        if (source == null) {
+            return null;
+        }
+
+        Entity responsibleEntity = source.getEntity();
+        if (responsibleEntity instanceof EntityLivingBase) {
+            return (EntityLivingBase)responsibleEntity;
+        }
+
+        Entity directDamageEntity = source.getSourceOfDamage();
+        if (directDamageEntity instanceof EntityArrow) {
+            responsibleEntity =
+                    ((EntityArrow)directDamageEntity).shootingEntity;
+        } else if (directDamageEntity instanceof IThrowableEntity) {
+            responsibleEntity =
+                    ((IThrowableEntity)directDamageEntity).getThrower();
+        } else if (directDamageEntity instanceof EntityThrowable) {
+            responsibleEntity =
+                    ((EntityThrowable)directDamageEntity).getThrower();
+        } else if (directDamageEntity instanceof EntityFireball) {
+            responsibleEntity =
+                    ((EntityFireball)directDamageEntity).shootingEntity;
+        } else if (directDamageEntity instanceof EntityLivingBase) {
+            responsibleEntity = directDamageEntity;
+        }
+
+        return responsibleEntity instanceof EntityLivingBase
+                ? (EntityLivingBase)responsibleEntity
+                : null;
+    }
+
+    private boolean isValidTamedRetaliationAttacker(
+            EntityLivingBase attacker
+    ) {
+        if (attacker == null
+                || attacker == this
+                || attacker.isDead
+                || !attacker.isEntityAlive()
+                || attacker.worldObj != this.worldObj) {
+            return false;
+        }
+
+        if (attacker instanceof EntityPlayer
+                && this.isOwner((EntityPlayer)attacker)) {
+            return false;
+        }
+
+        return !this.isOwnValidatedFormationMember(attacker);
+    }
+
+    private boolean isOwnValidatedFormationMember(
+            EntityLivingBase attacker
+    ) {
+        boolean ownDriver = attacker == this.riddenByEntity
+                && MumakilDriverControlEventHandler
+                .isFullyAttachedMumakilDriver(attacker);
+        return ownDriver || this.isOwnAttachedHowdahArcher(attacker);
     }
 
     private boolean isMumakilArrowDamage(DamageSource source) {
@@ -5378,20 +6388,11 @@ public boolean isBabyPanicAnimationActive() {
             return false;
         }
 
-        LOTREntityMumakilHowdahArcher archer = (LOTREntityMumakilHowdahArcher)shooter;
-        if (!archer.isRuntimeHowdahPassenger()) {
-            return false;
-        }
-
-        int mountEntityId = archer.getHowdahMountEntityId();
-        if (mountEntityId != 0 && mountEntityId == this.getEntityId()) {
-            return true;
-        }
-
-        String mountUuid = archer.getHowdahMountUuid();
-        return mountUuid != null
-                && mountUuid.length() > 0
-                && mountUuid.equals(this.getPersistentID().toString());
+        LOTREntityMumakilHowdahArcher archer =
+                (LOTREntityMumakilHowdahArcher)shooter;
+        return MumakilHowdahArcherEventHandler
+                .getFullyValidatedAttachedArcherParent(archer)
+                == this;
     }
 
     private boolean shouldConsumeBlockedMumakilArrow(DamageSource source, float amount) {
@@ -5550,7 +6551,6 @@ public boolean isBabyPanicAnimationActive() {
     private void tryTuskReachAttack() {
         if (this.isBabyMumakil()
                 || this.riddenByEntity instanceof EntityPlayer
-                || this.mumakilSkirmishWithdrawing
                 || this.tuskAttackCooldownTicks > 0) {
             return;
         }
@@ -5827,6 +6827,10 @@ public boolean isBabyPanicAnimationActive() {
         long perfStart = trackPerformance
                 ? MumakilPerformanceTracker.startTimer()
                 : 0L;
+        long serverCollisionStart =
+                MumakilServerPerformanceDiagnostics.startTimer(
+                        this.worldObj
+                );
 
         List nearby = this.worldObj.getEntitiesWithinAABB(
 
@@ -5834,6 +6838,10 @@ public boolean isBabyPanicAnimationActive() {
 
                 trampleBox
 
+        );
+        MumakilServerPerformanceDiagnostics.recordCollisionScan(
+                this.worldObj,
+                System.nanoTime() - serverCollisionStart
         );
 
 
@@ -5995,9 +7003,15 @@ public boolean isBabyPanicAnimationActive() {
         }
 
         String ownerId = this.func_152119_ch();
-        return ownerId != null
+        if (ownerId != null
                 && ownerId.length() > 0
-                && ownerId.equals(player.getUniqueID().toString());
+                && ownerId.equals(player.getUniqueID().toString())) {
+            return true;
+        }
+
+        UUID hiredOwner = this.getPlayerHiredFormationOwnerUuid();
+        return hiredOwner != null
+                && hiredOwner.equals(player.getUniqueID());
     }
 
 
@@ -6475,7 +7489,11 @@ public boolean isBabyPanicAnimationActive() {
     }
 
     private boolean shouldPreserveAuthoredCombatFacing() {
-        if (this.mumakilStrikeAnimationTicks > 0
+        if ((this.mumakilStrikeAnimationTicks > 0
+                && (!this.isAutonomousCombatPassActive()
+                || this.mumakilStrikeAnimationTicks
+                > MUMAKIL_STRIKE_ANIMATION_TICKS
+                - AUTONOMOUS_STRIKE_FACING_LOCK_TICKS))
                 || this.isMumakilTrumpetAnimationActive()
                 || this.isTerritorialWarningActive()) {
             return true;
@@ -6483,7 +7501,7 @@ public boolean isBabyPanicAnimationActive() {
 
         EntityLivingBase target = this.getAttackTarget();
         return target != null
-                && !this.mumakilSkirmishWithdrawing
+                && !this.isAutonomousCombatPassActive()
                 && target.isEntityAlive()
                 && this.getDistanceSqToEntity(target)
                 <= AI_CLOSE_COMBAT_FACING_RANGE_SQ

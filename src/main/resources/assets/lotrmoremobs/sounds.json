@@ -41,8 +41,8 @@
       "lotrmoremobs:mumakil/angry"
     ]
   },
-  "haradrim_war_horn": {
-    "category": "neutral",
+  "harad_warhorn": {
+    "category": "hostile",
     "sounds": [
       "lotrmoremobs:harad_warhorn/haradrim_war_horn"
     ]

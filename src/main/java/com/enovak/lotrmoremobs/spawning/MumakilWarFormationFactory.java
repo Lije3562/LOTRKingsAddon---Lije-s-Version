@@ -5,27 +5,23 @@ import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.animal.MumakilFormationOrigin;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
+import com.enovak.lotrmoremobs.handler.MumakilConquestUnitRollEventHandler;
+import com.enovak.lotrmoremobs.handler.MumakilDriverControlEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
+import com.enovak.lotrmoremobs.util.MumakilServerPerformanceDiagnostics;
 import java.util.ArrayList;
-import java.util.HashSet;
 import java.util.List;
-import java.util.Set;
 import java.util.UUID;
-import lotr.common.LOTRSpawnDamping;
 import lotr.common.entity.LOTREntityInvasionSpawner;
 import lotr.common.entity.npc.LOTREntityNPC;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
-import lotr.common.world.biome.LOTRBiome;
-import lotr.common.world.spawning.LOTRSpawnerNPCs;
 import net.minecraft.entity.Entity;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MathHelper;
-import net.minecraft.world.ChunkCoordIntPair;
 import net.minecraft.world.World;
-import net.minecraft.world.biome.BiomeGenBase;
 
 /**
  * One server-side construction path for player-hired and autonomous Mumak war
@@ -33,16 +29,123 @@ import net.minecraft.world.biome.BiomeGenBase;
  * spawn removes every member already created by that attempt.
  */
 public final class MumakilWarFormationFactory {
+    public static final String FORMATION_REPLACEMENT_MEMBER_KEY =
+            "lotrmoremobs_mumakHomeFormationMember";
+    /**
+     * Save-key compatibility alias. The stored key predates conquest and
+     * invasion replacement but now identifies members from all three origins.
+     */
+    @Deprecated
+    public static final String HOME_FORMATION_MEMBER_KEY =
+            FORMATION_REPLACEMENT_MEMBER_KEY;
     public static final int FORMATION_ARCHER_COUNT =
             LOTREntityMumakilHowdahArcher.getHowdahArcherSlotCount();
-    public static final int FORMATION_NPC_SPAWN_COUNT =
-            1 + FORMATION_ARCHER_COUNT;
 
     private static final int SADDLE_SLOT = 0;
     private static final int HOWDAH_SLOT = 1;
     private static final int CLEARANCE_RADIUS = 4;
     private static final int CLEARANCE_HEIGHT = 16;
     private static final int GROUND_SAMPLE_RADIUS = 3;
+    private static final int[][] REPLACEMENT_POSITION_SEARCH_OFFSETS =
+            new int[][] {
+                    {5, 0},
+                    {-5, 0},
+                    {0, 5},
+                    {0, -5},
+                    {5, 5},
+                    {-5, 5},
+                    {5, -5},
+                    {-5, -5},
+                    {9, 0},
+                    {0, 9}
+            };
+
+    public enum FormationPlacementResult {
+        VALID,
+        UNLOADED_AREA,
+        UNSAFE_GROUND_OR_LIQUID,
+        SOLID_BLOCK_CLEARANCE,
+        NEARBY_ENTITY_CLEARANCE
+    }
+
+    public static final class FormationPlacementSearchResult {
+        private double x;
+        private double y;
+        private double z;
+        private boolean found;
+        private int positionsTested;
+        private int unloadedRejected;
+        private int unsafeGroundRejected;
+        private int solidBlockRejected;
+        private int nearbyEntityRejected;
+
+        public boolean isFound() {
+            return this.found;
+        }
+
+        public double getX() {
+            return this.x;
+        }
+
+        public double getY() {
+            return this.y;
+        }
+
+        public double getZ() {
+            return this.z;
+        }
+
+        public int getPositionsTested() {
+            return this.positionsTested;
+        }
+
+        public int getUnloadedRejected() {
+            return this.unloadedRejected;
+        }
+
+        public int getUnsafeGroundRejected() {
+            return this.unsafeGroundRejected;
+        }
+
+        public int getSolidBlockRejected() {
+            return this.solidBlockRejected;
+        }
+
+        public int getNearbyEntityRejected() {
+            return this.nearbyEntityRejected;
+        }
+
+        private void record(
+                FormationPlacementResult result,
+                double candidateX,
+                double candidateY,
+                double candidateZ
+        ) {
+            ++this.positionsTested;
+            if (result == FormationPlacementResult.VALID) {
+                this.found = true;
+                this.x = candidateX;
+                this.y = candidateY;
+                this.z = candidateZ;
+            } else if (result
+                    == FormationPlacementResult.UNLOADED_AREA) {
+                ++this.unloadedRejected;
+            } else if (result
+                    == FormationPlacementResult
+                    .UNSAFE_GROUND_OR_LIQUID) {
+                ++this.unsafeGroundRejected;
+            } else if (result
+                    == FormationPlacementResult
+                    .SOLID_BLOCK_CLEARANCE) {
+                ++this.solidBlockRejected;
+            } else if (result
+                    == FormationPlacementResult
+                    .NEARBY_ENTITY_CLEARANCE) {
+                ++this.nearbyEntityRejected;
+            }
+        }
+    }
+
     private MumakilWarFormationFactory() {
     }
 
@@ -87,15 +190,57 @@ public final class MumakilWarFormationFactory {
             double y,
             double z
     ) {
+        return validateNaturalFormationSpawnAt(
+                world,
+                excludedEntity,
+                x,
+                y,
+                z
+        ) == FormationPlacementResult.VALID;
+    }
+
+    public static FormationPlacementResult
+    validateNaturalFormationSpawnAt(
+            World world,
+            Entity excludedEntity,
+            double x,
+            double y,
+            double z
+    ) {
+        return validateFormationSpawnAt(
+                world,
+                excludedEntity,
+                x,
+                y,
+                z,
+                false
+        );
+    }
+
+    private static FormationPlacementResult validateFormationSpawnAt(
+            World world,
+            Entity excludedEntity,
+            double x,
+            double y,
+            double z,
+            boolean ignoreEntityClearance
+    ) {
         if (world == null || world.isRemote) {
-            return false;
+            return FormationPlacementResult.UNLOADED_AREA;
         }
 
+        long blockStart =
+                MumakilServerPerformanceDiagnostics.startTimer(world);
         int baseX = MathHelper.floor_double(x);
         int baseY = MathHelper.floor_double(y);
         int baseZ = MathHelper.floor_double(z);
         if (baseY < 1 || baseY + CLEARANCE_HEIGHT >= world.getActualHeight()) {
-            return false;
+            MumakilServerPerformanceDiagnostics.recordBlockClearance(
+                    world,
+                    System.nanoTime() - blockStart
+            );
+            return FormationPlacementResult
+                    .UNSAFE_GROUND_OR_LIQUID;
         }
 
         int[][] groundOffsets = new int[][] {
@@ -108,14 +253,27 @@ public final class MumakilWarFormationFactory {
         for (int i = 0; i < groundOffsets.length; ++i) {
             int groundX = baseX + groundOffsets[i][0];
             int groundZ = baseZ + groundOffsets[i][1];
-            if (!world.blockExists(groundX, baseY, groundZ)
-                    || !World.doesBlockHaveSolidTopSurface(
+            if (!world.blockExists(groundX, baseY, groundZ)) {
+                MumakilServerPerformanceDiagnostics
+                        .recordBlockClearance(
+                                world,
+                                System.nanoTime() - blockStart
+                        );
+                return FormationPlacementResult.UNLOADED_AREA;
+            }
+            if (!World.doesBlockHaveSolidTopSurface(
                     world,
                     groundX,
                     baseY - 1,
                     groundZ
             )) {
-                return false;
+                MumakilServerPerformanceDiagnostics
+                        .recordBlockClearance(
+                                world,
+                                System.nanoTime() - blockStart
+                        );
+                return FormationPlacementResult
+                        .UNSAFE_GROUND_OR_LIQUID;
             }
         }
 
@@ -133,7 +291,11 @@ public final class MumakilWarFormationFactory {
                 baseY + CLEARANCE_HEIGHT,
                 baseZ + CLEARANCE_RADIUS
         )) {
-            return false;
+            MumakilServerPerformanceDiagnostics.recordBlockClearance(
+                    world,
+                    System.nanoTime() - blockStart
+            );
+            return FormationPlacementResult.UNLOADED_AREA;
         }
 
         AxisAlignedBB mumakSpace = AxisAlignedBB.getBoundingBox(
@@ -144,142 +306,308 @@ public final class MumakilWarFormationFactory {
                 y + 15.5D,
                 z + 3.5D
         );
-        return world.getCollidingBoundingBoxes(
-                excludedEntity,
-                mumakSpace
-        ).isEmpty()
-                && !world.isAnyLiquid(mumakSpace)
-                && world.getEntitiesWithinAABBExcludingEntity(
+        if (world.isAnyLiquid(mumakSpace)) {
+            MumakilServerPerformanceDiagnostics.recordBlockClearance(
+                    world,
+                    System.nanoTime() - blockStart
+            );
+            return FormationPlacementResult
+                    .UNSAFE_GROUND_OR_LIQUID;
+        }
+        if (!world.func_147461_a(mumakSpace).isEmpty()) {
+            MumakilServerPerformanceDiagnostics.recordBlockClearance(
+                    world,
+                    System.nanoTime() - blockStart
+            );
+            return FormationPlacementResult
+                    .SOLID_BLOCK_CLEARANCE;
+        }
+        MumakilServerPerformanceDiagnostics.recordBlockClearance(
+                world,
+                System.nanoTime() - blockStart
+        );
+
+        /*
+         * A creative formation egg is an explicit player placement action.
+         * Existing entities may be pushed normally after the transaction, but
+         * every terrain, liquid, world-height, chunk, and solid-block check
+         * above remains mandatory. Natural/replacement callers never request
+         * this policy and retain the strict entity-clearance scan below.
+         */
+        if (ignoreEntityClearance) {
+            return FormationPlacementResult.VALID;
+        }
+
+        long entityStart =
+                MumakilServerPerformanceDiagnostics.startTimer(world);
+        boolean entitiesClear =
+                world.getEntitiesWithinAABBExcludingEntity(
                 excludedEntity,
                 mumakSpace
         ).isEmpty();
-    }
-
-    public static boolean hasNaturalFormationSpawnCapacity(
-            World world,
-            Entity bootstrapArcher
-    ) {
-        if (world == null || world.isRemote) {
-            return false;
-        }
-
-        Set<ChunkCoordIntPair> eligibleChunks =
-                new HashSet<ChunkCoordIntPair>();
-        LOTRSpawnerNPCs.getSpawnableChunks(world, eligibleChunks);
-        int npcCap = LOTRSpawnDamping.getNPCSpawnCap(world)
-                * eligibleChunks.size()
-                / 196;
-        int currentNpcCount = 0;
-
-        List loadedEntities = world.loadedEntityList;
-        for (int i = 0; i < loadedEntities.size(); ++i) {
-            Object loaded = loadedEntities.get(i);
-            if (loaded instanceof LOTREntityNPC) {
-                currentNpcCount +=
-                        ((LOTREntityNPC)loaded).getSpawnCountValue();
-            }
-        }
-
-        boolean bootstrapAlreadyCounted =
-                bootstrapArcher != null
-                        && world.loadedEntityList.contains(bootstrapArcher);
-        int formationSpawnCost = getAggregateNpcSpawnCount(
+        MumakilServerPerformanceDiagnostics.recordEntityClearance(
                 world,
-                bootstrapArcher == null ? 0.0D : bootstrapArcher.posX,
-                bootstrapArcher == null ? 0.0D : bootstrapArcher.posZ
+                System.nanoTime() - entityStart
         );
-        int bootstrapSpawnCost = bootstrapAlreadyCounted
-                && bootstrapArcher instanceof LOTREntityNPC
-                ? ((LOTREntityNPC)bootstrapArcher).getSpawnCountValue()
-                : 0;
-        int additionalNpcCost =
-                formationSpawnCost - bootstrapSpawnCost;
-        return currentNpcCount + additionalNpcCost <= npcCap;
+        return entitiesClear
+                ? FormationPlacementResult.VALID
+                : FormationPlacementResult
+                .NEARBY_ENTITY_CLEARANCE;
     }
 
-    public static int getAggregateNpcSpawnCount(
+    public static FormationPlacementSearchResult
+    findReplacementFormationPlacement(
             World world,
-            double x,
-            double z
+            LOTREntityNPC triggeringNpc
     ) {
-        int multiplier = 1;
-        if (world != null) {
-            BiomeGenBase biome = world.getBiomeGenForCoords(
-                    MathHelper.floor_double(x),
-                    MathHelper.floor_double(z)
+        FormationPlacementSearchResult search =
+                new FormationPlacementSearchResult();
+        if (world == null
+                || world.isRemote
+                || triggeringNpc == null
+                || triggeringNpc.worldObj != world) {
+            search.record(
+                    FormationPlacementResult.UNLOADED_AREA,
+                    0.0D,
+                    0.0D,
+                    0.0D
             );
-            if (biome instanceof LOTRBiome) {
-                multiplier = ((LOTRBiome)biome).spawnCountMultiplier();
-            }
+            return search;
         }
-        return FORMATION_NPC_SPAWN_COUNT * Math.max(1, multiplier);
-    }
 
-    public static boolean createNaturalFormation(
-            LOTREntityMumakilHowdahArcher bootstrapArcher,
-            boolean conquestSpawn
-    ) {
-        return createAutonomousFormation(
-                bootstrapArcher == null
-                        ? null
-                        : bootstrapArcher.worldObj,
-                bootstrapArcher,
-                MumakilFormationOrigin.NATURAL_NEAR_HARAD,
-                conquestSpawn,
-                null,
-                null,
-                bootstrapArcher == null
-                        ? 0.0D
-                        : bootstrapArcher.posX,
-                bootstrapArcher == null
-                        ? 0.0D
-                        : bootstrapArcher.posY,
-                bootstrapArcher == null
-                        ? 0.0D
-                        : bootstrapArcher.posZ,
-                bootstrapArcher == null
-                        ? 0.0F
-                        : bootstrapArcher.rotationYaw,
-                bootstrapArcher,
-                true,
-                false,
-                null
-        );
-    }
+        long searchStart =
+                MumakilServerPerformanceDiagnostics.startTimer(world);
+        try {
+            FormationPlacementResult exact =
+                    validateNaturalFormationSpawnAt(
+                            world,
+                            triggeringNpc,
+                            triggeringNpc.posX,
+                            triggeringNpc.posY,
+                            triggeringNpc.posZ
+                    );
+            search.record(
+                    exact,
+                    triggeringNpc.posX,
+                    triggeringNpc.posY,
+                    triggeringNpc.posZ
+            );
+            if (search.isFound()) {
+                return search;
+            }
 
-    public static boolean createInvasionFormation(
-            LOTREntityMumakilHowdahArcher bootstrapArcher
-    ) {
-        LOTREntityInvasionSpawner spawner =
-                MumakilInvasionFormationRegistry.getEligibleSpawner(
-                        bootstrapArcher
+            int baseX = MathHelper.floor_double(triggeringNpc.posX);
+            int baseZ = MathHelper.floor_double(triggeringNpc.posZ);
+            int seed = triggeringNpc.getPersistentID().hashCode()
+                    & Integer.MAX_VALUE;
+            for (int attempt = 0;
+                 attempt < REPLACEMENT_POSITION_SEARCH_OFFSETS.length;
+                 ++attempt) {
+                int index = (attempt + seed)
+                        % REPLACEMENT_POSITION_SEARCH_OFFSETS.length;
+                int candidateBlockX = baseX
+                        + REPLACEMENT_POSITION_SEARCH_OFFSETS[index][0];
+                int candidateBlockZ = baseZ
+                        + REPLACEMENT_POSITION_SEARCH_OFFSETS[index][1];
+                if (!world.blockExists(
+                        candidateBlockX,
+                        MathHelper.floor_double(triggeringNpc.posY),
+                        candidateBlockZ
+                )) {
+                    search.record(
+                            FormationPlacementResult.UNLOADED_AREA,
+                            candidateBlockX + 0.5D,
+                            triggeringNpc.posY,
+                            candidateBlockZ + 0.5D
+                    );
+                    continue;
+                }
+
+                double candidateX = candidateBlockX + 0.5D;
+                double candidateZ = candidateBlockZ + 0.5D;
+                double candidateY = world.getTopSolidOrLiquidBlock(
+                        candidateBlockX,
+                        candidateBlockZ
                 );
-        if (spawner == null) {
+                FormationPlacementResult result =
+                        validateNaturalFormationSpawnAt(
+                                world,
+                                triggeringNpc,
+                                candidateX,
+                                candidateY,
+                                candidateZ
+                        );
+                search.record(
+                        result,
+                        candidateX,
+                        candidateY,
+                        candidateZ
+                );
+                if (search.isFound()) {
+                    return search;
+                }
+            }
+            return search;
+        } finally {
+            MumakilServerPerformanceDiagnostics
+                    .recordNearbyPositionSearch(
+                            world,
+                            System.nanoTime() - searchStart
+                    );
+        }
+    }
+
+    /**
+     * All replacement origins consume one ordinary NPC already admitted by
+     * LOTR. The driver replaces that NPC for normal cap purposes; the fixed
+     * attached archers are cap-exempt only while their attachment validates.
+     *
+     * LOTR invasion spawners may deliberately flag members persistent. That
+     * flag is invasion lifecycle state, so invasion admission validates the
+     * active matching spawner rather than rejecting persistence.
+     */
+    public static boolean hasReplacementFormationSpawnCapacity(
+            World world,
+            LOTREntityNPC replacedUnit,
+            MumakilFormationOrigin origin
+    ) {
+        if (world == null
+                || world.isRemote
+                || replacedUnit == null
+                || replacedUnit.worldObj != world
+                || replacedUnit.isDead
+                || !replacedUnit.isEntityAlive()
+                || !world.loadedEntityList.contains(replacedUnit)) {
+            return false;
+        }
+        if (origin == MumakilFormationOrigin.INVASION_NEAR_HARAD) {
+            return replacedUnit.isInvasionSpawned()
+                    && replacedUnit.getInvasionID() != null;
+        }
+        return (origin == MumakilFormationOrigin.NATURAL_NEAR_HARAD
+                || origin
+                == MumakilFormationOrigin.CONQUEST_NEAR_HARAD)
+                && !replacedUnit.isNPCPersistent
+                && replacedUnit.getSpawnCountValue() > 0;
+    }
+
+    /**
+     * The sole ordinary-NPC replacement transaction used by home, conquest,
+     * and invasion candidates.
+     */
+    public static boolean createReplacementFormationFromUnit(
+            LOTREntityNPC replacedUnit,
+            FormationPlacementSearchResult placement,
+            MumakilFormationOrigin origin,
+            UUID invasionId
+    ) {
+        if (replacedUnit == null
+                || replacedUnit.worldObj == null
+                || replacedUnit.worldObj.isRemote
+                || replacedUnit.isDead
+                || !replacedUnit.isEntityAlive()
+                || origin == null
+                || replacedUnit
+                instanceof LOTREntityMumakilHowdahArcher
+                || replacedUnit.getEntityData().getBoolean(
+                FORMATION_REPLACEMENT_MEMBER_KEY
+        )
+                || !hasReplacementFormationSpawnCapacity(
+                replacedUnit.worldObj,
+                replacedUnit,
+                origin
+        )
+                || placement == null
+                || !placement.isFound()
+                || !canNaturalFormationSpawnAt(
+                replacedUnit.worldObj,
+                replacedUnit,
+                placement.getX(),
+                placement.getY(),
+                placement.getZ()
+        )) {
             return false;
         }
 
-        boolean created = createAutonomousFormation(
-                bootstrapArcher.worldObj,
-                bootstrapArcher,
-                MumakilFormationOrigin.INVASION_NEAR_HARAD,
-                false,
-                bootstrapArcher.getInvasionID(),
-                bootstrapArcher.killBonusFactions,
-                bootstrapArcher.posX,
-                bootstrapArcher.posY,
-                bootstrapArcher.posZ,
-                bootstrapArcher.rotationYaw,
-                bootstrapArcher,
+        UUID resolvedInvasionId = null;
+        List invasionBonusFactions = null;
+        if (origin == MumakilFormationOrigin.NATURAL_NEAR_HARAD) {
+            if (replacedUnit.isInvasionSpawned()
+                    || replacedUnit.getInvasionID() != null
+                    || !MumakilWarFormationSpawnRegistry
+                    .isNativeNearHaradHomeMilitaryCandidate(
+                            replacedUnit
+                    )) {
+                return false;
+            }
+        } else if (origin
+                == MumakilFormationOrigin.CONQUEST_NEAR_HARAD) {
+            if (replacedUnit.isInvasionSpawned()
+                    || replacedUnit.getInvasionID() != null
+                    || !MumakilConquestUnitRollEventHandler
+                    .isCapturedConquestCandidate(replacedUnit)
+                    || MumakilWarFormationSpawnRegistry
+                    .isNativeNearHaradHomeTerritory(replacedUnit)
+                    || !MumakilWarFormationSpawnRegistry
+                    .isNearHaradConquestMilitaryCandidate(
+                            replacedUnit
+                    )
+                    || MumakilWarFormationSpawnRegistry
+                    .getDirectNearHaradConquest(
+                            replacedUnit.worldObj,
+                            MathHelper.floor_double(replacedUnit.posX),
+                            MathHelper.floor_double(replacedUnit.posZ)
+                    )
+                    < MumakilConfig
+                    .conquestFormationMinimumConquest) {
+                return false;
+            }
+        } else if (origin
+                == MumakilFormationOrigin.INVASION_NEAR_HARAD) {
+            if (invasionId == null
+                    || !replacedUnit.isInvasionSpawned()
+                    || !invasionId.equals(
+                    replacedUnit.getInvasionID()
+            )
+                    || replacedUnit.getEntityData().getInteger(
+                    MumakilInvasionFormationRegistry
+                            .INVASION_MEMBER_WEIGHT_KEY
+            ) > 0) {
+                return false;
+            }
+            LOTREntityInvasionSpawner spawner =
+                    LOTREntityInvasionSpawner.locateInvasionNearby(
+                            replacedUnit,
+                            invasionId
+                    );
+            if (spawner == null
+                    || spawner.isDead
+                    || spawner.worldObj != replacedUnit.worldObj
+                    || !invasionId.equals(spawner.getInvasionID())
+                    || !MumakilInvasionFormationRegistry
+                    .isEligibleInvasion(spawner.getInvasionType())) {
+                return false;
+            }
+            resolvedInvasionId = invasionId;
+            invasionBonusFactions = replacedUnit.killBonusFactions;
+        } else {
+            return false;
+        }
+
+        return createAutonomousFormation(
+                replacedUnit.worldObj,
+                origin,
+                resolvedInvasionId,
+                invasionBonusFactions,
+                placement.getX(),
+                placement.getY(),
+                placement.getZ(),
+                replacedUnit.rotationYaw,
+                replacedUnit,
                 true,
                 false,
                 null
         );
-        if (created) {
-            MumakilInvasionFormationRegistry.markFormationCreated(
-                    spawner
-            );
-        }
-        return created;
     }
 
     /**
@@ -298,9 +626,7 @@ public final class MumakilWarFormationFactory {
     ) {
         return createAutonomousFormation(
                 world,
-                null,
                 MumakilFormationOrigin.CREATIVE_SPAWN_EGG,
-                false,
                 null,
                 null,
                 x,
@@ -316,9 +642,7 @@ public final class MumakilWarFormationFactory {
 
     private static boolean createAutonomousFormation(
             World world,
-            LOTREntityMumakilHowdahArcher bootstrapArcher,
             MumakilFormationOrigin origin,
-            boolean conquestSpawn,
             UUID invasionId,
             List invasionBonusFactions,
             double x,
@@ -326,33 +650,41 @@ public final class MumakilWarFormationFactory {
             double z,
             float yaw,
             Entity validationExclusion,
-            boolean enforceNaturalSpawnCapacity,
+            boolean placementPrevalidated,
             boolean persistentFormation,
             String customName
     ) {
         if (world == null
                 || world.isRemote
                 || origin == null
-                || origin == MumakilFormationOrigin.NONE
-                || bootstrapArcher != null
-                && (bootstrapArcher.worldObj != world
-                || bootstrapArcher.isDead)) {
+                || origin == MumakilFormationOrigin.NONE) {
             return false;
         }
 
-        if (enforceNaturalSpawnCapacity
-                && !hasNaturalFormationSpawnCapacity(
-                world,
-                bootstrapArcher
-        )
-                || !canNaturalFormationSpawnAt(
-                world,
-                validationExclusion,
-                x,
-                y,
-                z
-        )) {
-            return false;
+        boolean ordinaryUnitReplacement =
+                (origin == MumakilFormationOrigin.NATURAL_NEAR_HARAD
+                        || origin
+                        == MumakilFormationOrigin.CONQUEST_NEAR_HARAD
+                        || origin
+                        == MumakilFormationOrigin.INVASION_NEAR_HARAD)
+                        && validationExclusion
+                        instanceof LOTREntityNPC;
+
+        if (!placementPrevalidated) {
+            FormationPlacementResult placementResult =
+                    validateFormationSpawnAt(
+                            world,
+                            validationExclusion,
+                            x,
+                            y,
+                            z,
+                            origin
+                                    == MumakilFormationOrigin
+                                    .CREATIVE_SPAWN_EGG
+                    );
+            if (placementResult != FormationPlacementResult.VALID) {
+                return false;
+            }
         }
 
         List<Entity> createdMembers = new ArrayList<Entity>();
@@ -386,6 +718,12 @@ public final class MumakilWarFormationFactory {
                     MumakilConfig.INVASION_MUMAK_BUDGET_VALUE
             );
         }
+        if (ordinaryUnitReplacement) {
+            mumakil.getEntityData().setBoolean(
+                    FORMATION_REPLACEMENT_MEMBER_KEY,
+                    true
+            );
+        }
         if (!world.spawnEntityInWorld(mumakil)) {
             removeCreatedMembers(createdMembers);
             return false;
@@ -394,8 +732,15 @@ public final class MumakilWarFormationFactory {
 
         LOTREntitySouthronChampion driver =
                 new LOTREntitySouthronChampion(world);
-        driver.setConquestSpawning(conquestSpawn);
         driver.onSpawnWithEgg(null);
+        if (ordinaryUnitReplacement) {
+            driver.getEntityData().setBoolean(
+                    FORMATION_REPLACEMENT_MEMBER_KEY,
+                    true
+            );
+            MumakilFormationReplacementService
+                    .markReplacementEvaluated(driver);
+        }
         if (invasionId != null) {
             driver.setInvasionID(invasionId);
             driver.getEntityData().setInteger(
@@ -417,7 +762,6 @@ public final class MumakilWarFormationFactory {
          * egg formations retain the explicit persistence requested above.
          */
         driver.func_110163_bv();
-        driver.setCurrentItemOrArmor(0, null);
         mumakil.positionRiderAtMumakilAnchor(driver);
         driver.rotationYaw = mumakil.renderYawOffset;
         driver.prevRotationYaw = driver.rotationYaw;
@@ -429,32 +773,15 @@ public final class MumakilWarFormationFactory {
             return false;
         }
         createdMembers.add(driver);
-        driver.setConquestSpawning(false);
         driver.mountEntity(mumakil);
         mumakil.updateRiderPosition();
-
-        int firstSpawnedArcherSlot = 0;
-        if (bootstrapArcher != null) {
-            MumakilHowdahArcherEventHandler
-                    .attachExistingHowdahArcher(
-                            mumakil,
-                            bootstrapArcher,
-                            0,
-                            persistentFormation
-                    );
-            if (invasionId != null) {
-                bootstrapArcher.getEntityData().setInteger(
-                        MumakilInvasionFormationRegistry
-                                .INVASION_MEMBER_WEIGHT_KEY,
-                        MumakilConfig
-                                .INVASION_ARCHER_BUDGET_VALUE
-                );
-            }
-            createdMembers.add(bootstrapArcher);
-            firstSpawnedArcherSlot = 1;
+        if (!MumakilDriverControlEventHandler
+                .activateValidatedDriver(mumakil, driver)) {
+            removeCreatedMembers(createdMembers);
+            return false;
         }
 
-        for (int slot = firstSpawnedArcherSlot;
+        for (int slot = 0;
              slot < FORMATION_ARCHER_COUNT;
              ++slot) {
             LOTREntityMumakilHowdahArcher archer =
@@ -469,6 +796,14 @@ public final class MumakilWarFormationFactory {
             if (archer == null) {
                 removeCreatedMembers(createdMembers);
                 return false;
+            }
+            if (ordinaryUnitReplacement) {
+                archer.getEntityData().setBoolean(
+                        FORMATION_REPLACEMENT_MEMBER_KEY,
+                        true
+                );
+                MumakilFormationReplacementService
+                        .markReplacementEvaluated(archer);
             }
             if (invasionId != null) {
                 archer.getEntityData().setInteger(

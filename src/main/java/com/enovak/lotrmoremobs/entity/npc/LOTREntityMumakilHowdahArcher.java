@@ -1,11 +1,12 @@
 package com.enovak.lotrmoremobs.entity.npc;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.entity.animal.MumakilFormationOrigin;
+import com.enovak.lotrmoremobs.handler.MumakilHomeUnitRollEventHandler;
 import com.enovak.lotrmoremobs.handler.MumakilHowdahArcherEventHandler;
-import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
-import com.enovak.lotrmoremobs.spawning.MumakilWarFormationSpawnRegistry;
 import com.enovak.lotrmoremobs.spawning.MumakilInvasionFormationRegistry;
 import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
+import com.enovak.lotrmoremobs.util.MumakilServerPerformanceDiagnostics;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.registry.IEntityAdditionalSpawnData;
 import io.netty.buffer.ByteBuf;
@@ -36,9 +37,22 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     private static final String NBT_MOUNT_ID = "LOTRMoreMobsHowdahMountId";
     private static final String NBT_MOUNT_UUID = "LOTRMoreMobsHowdahMountUuid";
     private static final String NBT_SLOT = "LOTRMoreMobsHowdahArcherSlot";
+    private static final String NBT_RUNTIME_PASSENGER =
+            "LOTRMoreMobsRuntimeHowdahPassenger";
+    private static final String NBT_FORMATION_ORIGIN =
+            "LOTRMoreMobsHowdahFormationOrigin";
+    private static final String NBT_MOUNT_POS_X =
+            "LOTRMoreMobsHowdahMountPosX";
+    private static final String NBT_MOUNT_POS_Y =
+            "LOTRMoreMobsHowdahMountPosY";
+    private static final String NBT_MOUNT_POS_Z =
+            "LOTRMoreMobsHowdahMountPosZ";
     private static final String LEGACY_NBT_SLOT = "LOTRMoreMobsHowdahSlot";
-    private static final int MOUNT_LOOKUP_GRACE_TICKS = 100;
+    private static final int MOUNT_LOOKUP_GRACE_TICKS = 160;
     private static final int UUID_LOOKUP_INTERVAL = 20;
+    private static final int UUID_LOOKUP_SLOT_PHASE_MULTIPLIER = 7;
+    private static final double UUID_LOCAL_LOOKUP_RANGE = 32.0D;
+    private static final int INVALID_RUNTIME_WARNING_INTERVAL = 200;
     private static final int DETACHED_DESPAWN_TICKS = 600;
     private static final double PREVIOUS_PLACEMENT_SNAP_DISTANCE_SQ = 256.0D;
     private static final String MUMAKIL_SHARED_TARGET_ID_KEY = "LOTRMoreMobsHowdahArcherTargetId";
@@ -56,6 +70,11 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     private int howdahMountEntityId;
     private int howdahSlot;
     private String howdahMountUuid = "";
+    private MumakilFormationOrigin formationOrigin =
+            MumakilFormationOrigin.NONE;
+    private double savedMountPosX;
+    private double savedMountPosY;
+    private double savedMountPosZ;
     private int missingMountTicks;
     private int detachedTicks;
     private int howdahShootCooldown;
@@ -65,20 +84,27 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     private float howdahLookYaw;
     private float howdahLookPitch;
     private boolean runtimeHowdahPassenger;
+    private boolean howdahAttachmentValidated;
+    private boolean howdahRecoveryPending;
+    private boolean howdahPositionLockActive;
+    private boolean hasSavedMountPosition;
+    private boolean uuidLookupAttemptedThisTick;
+    private boolean recoveryPendingLogged;
     private boolean passengerAICleared;
     private boolean detachedFromDeadMumakil;
     private boolean hasHowdahLookRotation;
     private boolean howdahAttachmentDataLoaded;
-    private boolean naturalFormationBootstrapPending = true;
-    private boolean naturalFormationConquestSpawn;
-    private boolean naturalFormationChanceEvaluated;
-    private boolean naturalFormationChancePassed;
+    private static long nextInvalidRuntimeWarningWorldTick;
 
     public LOTREntityMumakilHowdahArcher(World world) {
         super(world);
-        this.clearPassengerAI();
-        this.noClip = true;
-        this.isImmuneToFire = true;
+        /*
+         * Attachment properties are deliberately not enabled by construction.
+         * A newly loaded entity starts as an ordinary, damageable NPC until the
+         * authoritative parent/slot validation completes.
+         */
+        this.noClip = false;
+        this.isImmuneToFire = false;
     }
 
     @Override
@@ -91,138 +117,34 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     public IEntityLivingData onSpawnWithEgg(IEntityLivingData data) {
         data = super.onSpawnWithEgg(data);
         this.ensureNearHaradBowEquipped();
-        /*
-         * LOTR invokes this after the native bootstrap entity has joined the
-         * world. Complete the one-member spawn entry synchronously so the full
-         * formation is visible to later spawn-cap checks in the same pass.
-         * Manually created attached archers call this before joining the world,
-         * so they cannot accidentally bootstrap another formation.
-         */
-        if (this.isNaturalFormationBootstrapPending()
-                && this.worldObj != null
-                && !this.worldObj.isRemote
-                && this.worldObj.loadedEntityList.contains(this)) {
-            this.consumeNaturalFormationBootstrap();
-            boolean formed = this.isInvasionSpawned()
-                    ? MumakilWarFormationFactory
-                    .createInvasionFormation(this)
-                    : MumakilWarFormationFactory
-                    .createNaturalFormation(
-                            this,
-                            this.wasNaturalFormationConquestSpawn()
-                    );
-            if (!formed) {
-                this.setDead();
-            }
-        }
         return data;
     }
 
-    @Override
-    public void setConquestSpawning(boolean conquestSpawn) {
-        super.setConquestSpawning(conquestSpawn);
-        if (conquestSpawn && this.naturalFormationBootstrapPending) {
-            this.naturalFormationConquestSpawn = true;
-        }
-    }
-
-    @Override
-    public boolean getCanSpawnHere() {
-        if (this.isNaturalFormationBootstrapPending()
-                && (this.isInvasionSpawned()
-                || this.liftSpawnRestrictions)
-                && MumakilInvasionFormationRegistry
-                .getEligibleSpawner(this) == null) {
-            return false;
-        }
-        if (this.isNaturalFormationBootstrapPending()
-                && !this.isInvasionSpawned()
-                && !this.liftSpawnRestrictions
-                && this.wasNaturalFormationConquestSpawn()
-                && !this.evaluateConquestFormationChanceOnce()) {
-            return false;
-        }
-        if (this.isNaturalFormationBootstrapPending()
-                && !this.isInvasionSpawned()
-                && !this.liftSpawnRestrictions
-                && !this.wasNaturalFormationConquestSpawn()
-                && !this.evaluateHomeFormationChanceOnce()) {
-            return false;
-        }
-        if (this.naturalFormationBootstrapPending
-                && (this.worldObj == null
-                || this.worldObj.isRemote
-                || !MumakilWarFormationFactory
-                .hasNaturalFormationSpawnCapacity(
-                        this.worldObj,
-                        this
-                )
-                || !MumakilWarFormationFactory.canNaturalFormationSpawnAt(
-                        this.worldObj,
-                        this,
-                        this.posX,
-                        this.posY,
-                        this.posZ
-                ))) {
-            return false;
-        }
-        return super.getCanSpawnHere();
-    }
-
-    private boolean evaluateConquestFormationChanceOnce() {
-        if (!this.naturalFormationChanceEvaluated) {
-            this.naturalFormationChancePassed =
-                    MumakilWarFormationSpawnRegistry
-                            .passesConquestBootstrapChance(this);
-            this.naturalFormationChanceEvaluated = true;
-        }
-        return this.naturalFormationChancePassed;
-    }
-
-    private boolean evaluateHomeFormationChanceOnce() {
-        if (!this.naturalFormationChanceEvaluated) {
-            this.naturalFormationChancePassed =
-                    MumakilWarFormationSpawnRegistry
-                            .passesHomeBootstrapChance(this);
-            this.naturalFormationChanceEvaluated = true;
-        }
-        return this.naturalFormationChancePassed;
-    }
-
-    public boolean isNaturalFormationBootstrapPending() {
-        return this.naturalFormationBootstrapPending
-                && !this.isRuntimeHowdahPassenger()
-                && this.getHowdahMountEntityId() == 0;
-    }
-
-    public boolean wasNaturalFormationConquestSpawn() {
-        return this.naturalFormationConquestSpawn;
-    }
-
-    public void consumeNaturalFormationBootstrap() {
-        this.naturalFormationBootstrapPending = false;
-    }
-
-    public void setHowdahAttachment(LOTREntityMumakil mumakil, int slot) {
+    private void setHowdahAttachmentIdentity(LOTREntityMumakil mumakil, int slot) {
         if (mumakil != null) {
-            this.naturalFormationBootstrapPending = false;
+            this.formationOrigin = mumakil.getFormationOrigin();
+            this.rememberSavedMountPosition(mumakil);
         }
         this.howdahMountEntityId = mumakil == null ? 0 : mumakil.getEntityId();
-        this.howdahMountUuid = mumakil == null ? "" : getEntityPersistentIdString(mumakil);
+        /*
+         * Client entities do not receive the server entity's persistent UUID
+         * through the vanilla spawn packet. Preserve the server UUID supplied
+         * by our additional spawn data there; the numeric tracker ID is the
+         * current-session client reference.
+         */
+        if (mumakil == null) {
+            this.howdahMountUuid = "";
+        } else if (!this.worldObj.isRemote
+                || this.howdahMountUuid == null
+                || this.howdahMountUuid.length() == 0) {
+            this.howdahMountUuid = getEntityPersistentIdString(mumakil);
+        }
         this.howdahSlot = slot;
         this.howdahAttachmentDataLoaded = true;
         this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
         this.getEntityData().setString(NBT_MOUNT_UUID, this.howdahMountUuid);
         this.getEntityData().setInteger(NBT_SLOT, this.howdahSlot);
 
-        /*
-         * Important: position before world.spawnEntityInWorld(). If the entity is
-         * still at the default 0,0,0 position, Minecraft may reject the spawn
-         * because that chunk is not loaded.
-         */
-        if (mumakil != null) {
-            this.placeOnHowdah(mumakil, slot);
-        }
     }
 
     public int getHowdahMountEntityId() {
@@ -238,6 +160,40 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     public String getHowdahMountUuid() {
         this.ensureHowdahAttachmentDataLoaded();
         return this.howdahMountUuid == null ? "" : this.howdahMountUuid;
+    }
+
+    public MumakilFormationOrigin getHowdahFormationOrigin() {
+        return this.formationOrigin == null
+                ? MumakilFormationOrigin.NONE
+                : this.formationOrigin;
+    }
+
+    public boolean isHowdahAttachmentValidated() {
+        return this.howdahAttachmentValidated;
+    }
+
+    public boolean isHowdahRecoveryPending() {
+        return this.howdahRecoveryPending;
+    }
+
+    public boolean isHowdahPositionLockActive() {
+        return this.howdahPositionLockActive;
+    }
+
+    public boolean hasActiveHowdahAttachment() {
+        return this.runtimeHowdahPassenger
+                && this.howdahAttachmentValidated
+                && this.howdahPositionLockActive
+                && !this.howdahRecoveryPending
+                && !this.detachedFromDeadMumakil;
+    }
+
+    public boolean hasRecoverableHowdahIdentity() {
+        int slot = this.getHowdahSlot();
+        return !this.detachedFromDeadMumakil
+                && this.getHowdahMountUuid().length() > 0
+                && slot >= 0
+                && slot < HOWDAH_ARCHER_OFFSETS.length;
     }
 
     private void ensureHowdahAttachmentDataLoaded() {
@@ -261,8 +217,10 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     public void setRuntimeHowdahPassenger(boolean runtimeHowdahPassenger) {
         this.runtimeHowdahPassenger = runtimeHowdahPassenger;
+        this.howdahAttachmentValidated = false;
+        this.howdahRecoveryPending = false;
+        this.howdahPositionLockActive = false;
         if (runtimeHowdahPassenger) {
-            this.naturalFormationBootstrapPending = false;
             this.detachedFromDeadMumakil = false;
             this.detachedTicks = 0;
             this.primeHowdahShootCooldown();
@@ -271,7 +229,79 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             this.clearPassengerAI();
             this.ensureNearHaradBowEquipped();
             this.noClip = true;
+            this.isImmuneToFire = true;
+        } else {
+            this.noClip = false;
+            this.isImmuneToFire = false;
         }
+    }
+
+    /**
+     * The single transition into a live howdah passenger. Callers must first
+     * validate the authoritative Mumak UUID, roster slot, dead-slot mask, and
+     * duplicate ownership. This method restores every transient property as
+     * one atomic state change and immediately establishes the real server/client
+     * position lock.
+     */
+    public boolean completeValidatedHowdahAttachment(
+            LOTREntityMumakil mumakil,
+            int slot
+    ) {
+        if (mumakil == null
+                || this.worldObj == null
+                || mumakil.worldObj != this.worldObj
+                || !mumakil.isEntityAlive()
+                || !mumakil.hasMumakilHowdahEquipped()
+                || slot < 0
+                || slot >= HOWDAH_ARCHER_OFFSETS.length) {
+            return false;
+        }
+
+        this.setHowdahAttachmentIdentity(mumakil, slot);
+        this.runtimeHowdahPassenger = true;
+        this.howdahAttachmentValidated = true;
+        this.howdahRecoveryPending = false;
+        this.howdahPositionLockActive = false;
+        this.missingMountTicks = 0;
+        this.recoveryPendingLogged = false;
+        this.detachedFromDeadMumakil = false;
+        this.detachedTicks = 0;
+        this.getEntityAttribute(SharedMonsterAttributes.maxHealth)
+                .setBaseValue(HOWDAH_ARCHER_MAX_HEALTH);
+        if (this.getHealth() > this.getMaxHealth()) {
+            this.setHealth(this.getMaxHealth());
+        }
+        this.clearPassengerAI();
+        this.ensureNearHaradBowEquipped();
+        this.noClip = true;
+        this.isImmuneToFire = true;
+        this.isNPCPersistent = true;
+        this.setShouldTraderRespawn(false);
+        this.primeHowdahShootCooldown();
+        /*
+         * Initial formations call this before world.spawnEntityInWorld(), so
+         * canonical activation also guarantees the entity starts in a loaded
+         * howdah-slot chunk instead of its default 0,0,0.
+         */
+        this.placeOnHowdah(mumakil, slot);
+        this.howdahPositionLockActive = true;
+        this.velocityChanged = true;
+        return true;
+    }
+
+    public void beginHowdahAttachmentRecovery() {
+        this.runtimeHowdahPassenger = false;
+        this.howdahAttachmentValidated = false;
+        this.howdahRecoveryPending = this.hasRecoverableHowdahIdentity();
+        this.howdahPositionLockActive = false;
+        this.missingMountTicks = 0;
+        this.recoveryPendingLogged = false;
+        this.isNPCPersistent = false;
+        this.noClip = false;
+        this.isImmuneToFire = false;
+        this.detachedFromDeadMumakil = false;
+        this.detachedTicks = 0;
+        this.stopPassengerMotion();
     }
 
     public boolean isRuntimeHowdahPassenger() {
@@ -286,6 +316,8 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         if (this.detachedFromDeadMumakil) {
             return;
         }
+
+        this.isNPCPersistent = false;
 
         if (this.riddenByEntity != null) {
             this.riddenByEntity.mountEntity(null);
@@ -315,9 +347,13 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
         this.clearPassengerAI();
         this.runtimeHowdahPassenger = false;
+        this.howdahAttachmentValidated = false;
+        this.howdahRecoveryPending = false;
+        this.howdahPositionLockActive = false;
         this.detachedFromDeadMumakil = true;
         this.detachedTicks = 0;
         this.noClip = false;
+        this.isImmuneToFire = false;
         this.onGround = false;
         this.isAirBorne = true;
         this.fallDistance = 0.0F;
@@ -328,6 +364,44 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         this.clearHowdahAttachment();
     }
 
+    private void convertRecoveryOrphanToDetachedSouthron() {
+        this.isNPCPersistent = false;
+        this.runtimeHowdahPassenger = false;
+        this.howdahAttachmentValidated = false;
+        this.howdahRecoveryPending = false;
+        this.howdahPositionLockActive = false;
+        this.noClip = false;
+        this.isImmuneToFire = false;
+        this.stopPassengerMotion();
+
+        if (this.replaceWithNormalNearHaradrimArcherForDeath(
+                0.0D,
+                0.0D,
+                0.0D
+        )) {
+            MumakilHowdahArcherEventHandler.logReloadRecovery(
+                    "Converted to detached Southron"
+                            + " archer=" + this.getEntityId()
+                            + " parentUuid=" + this.getHowdahMountUuid()
+                            + " slot=" + this.getHowdahSlot()
+            );
+            return;
+        }
+
+        /*
+         * The dedicated passenger has permanently cleared AI tasks, so it
+         * cannot safely masquerade as a normal ground NPC if replacement
+         * creation fails.
+         */
+        MumakilHowdahArcherEventHandler.logReloadRecovery(
+                "Removed as orphan after detached conversion failed"
+                        + " archer=" + this.getEntityId()
+                        + " parentUuid=" + this.getHowdahMountUuid()
+                        + " slot=" + this.getHowdahSlot()
+        );
+        this.setDead();
+    }
+
     private boolean replaceWithNormalNearHaradrimArcherForDeath(double motionX, double motionY, double motionZ) {
         if (this.worldObj == null || this.worldObj.isRemote) {
             return false;
@@ -335,8 +409,10 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
         LOTREntityNearHaradrimArcher replacement = new LOTREntityNearHaradrimArcher(this.worldObj);
         replacement.onSpawnWithEgg(null);
-        replacement.isNPCPersistent = this.isNPCPersistent;
+        replacement.isNPCPersistent = false;
         replacement.setShouldTraderRespawn(false);
+        MumakilHomeUnitRollEventHandler
+                .markHomeUnitRollEvaluated(replacement);
         replacement.setLocationAndAngles(this.posX, this.posY, this.posZ, this.rotationYaw, this.rotationPitch);
         replacement.prevPosX = replacement.posX;
         replacement.prevPosY = replacement.posY;
@@ -397,20 +473,30 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public void onUpdate() {
+        boolean runtimePassenger =
+                this.isRuntimeHowdahPassenger();
+        boolean recoveryPending = this.isHowdahRecoveryPending();
+        long serverPassengerStart =
+                !this.worldObj.isRemote && runtimePassenger
+                        ? MumakilServerPerformanceDiagnostics
+                        .startTimer(this.worldObj)
+                        : 0L;
         boolean trackPerformance = !this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled();
         long perfStart = trackPerformance ? MumakilPerformanceTracker.startTimer() : 0L;
         LOTREntityMumakil perfMumakil = trackPerformance ? this.getAttachedMumakilForPerformance() : null;
 
         try {
-            if (this.isRuntimeHowdahPassenger()) {
+            if (runtimePassenger || recoveryPending) {
                 /*
-                 * Runtime passengers only need the base Entity tick for age, previous
-                 * position, fire/portal bookkeeping, and tracker stability. Calling the
-                 * full LOTR NPC/Living update here runs combat, inventory, senses,
-                 * navigation, and AI work that these visual helpers never use.
+                 * Active passengers and bounded recovery candidates only need
+                 * the base Entity tick for age, fire/portal bookkeeping, and
+                 * tracker stability. Recovery remains damageable/collidable,
+                 * but does not get a chance to walk away before its parent
+                 * chunk finishes joining.
                  */
                 this.onEntityUpdate();
                 this.updateHowdahPassengerAttachment();
+                this.warnIfRuntimeAttachmentIsIncomplete();
                 return;
             }
 
@@ -420,6 +506,14 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
                 this.setDead();
             }
         } finally {
+            if (!this.worldObj.isRemote && runtimePassenger) {
+                MumakilServerPerformanceDiagnostics
+                        .recordPassengerMaintenance(
+                                this.worldObj,
+                                System.nanoTime()
+                                        - serverPassengerStart
+                        );
+            }
             if (trackPerformance) {
                 if (perfMumakil == null) {
                     perfMumakil = this.getAttachedMumakilForPerformance();
@@ -436,7 +530,8 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public void onLivingUpdate() {
-        if (this.isRuntimeHowdahPassenger()) {
+        if (this.isRuntimeHowdahPassenger()
+                || this.isHowdahRecoveryPending()) {
             this.updateHowdahPassengerAttachment();
             return;
         }
@@ -479,22 +574,75 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             return;
         }
 
+        if (this.runtimeHowdahPassenger) {
+            /*
+             * A lock is healthy only if this tick establishes it again. This
+             * prevents a stale previous-tick flag from making roster scans,
+             * damage rules, or targeting accept a half-attached passenger.
+             */
+            this.howdahPositionLockActive = false;
+        }
+        this.uuidLookupAttemptedThisTick = false;
         LOTREntityMumakil mumakil = this.getAttachedMumakil();
 
         if (mumakil == null) {
+            if (this.runtimeHowdahPassenger) {
+                this.warnIfRuntimeAttachmentIsIncomplete();
+                this.beginHowdahAttachmentRecovery();
+            }
             this.handleMissingMount();
             return;
         }
-
-        this.missingMountTicks = 0;
 
         if (!mumakil.isEntityAlive()) {
             this.detachFromHowdahForMumakilDeath(mumakil);
             return;
         }
 
-        if (!mumakil.hasMumakilHowdahEquipped()) {
+        if ((!this.runtimeHowdahPassenger
+                || !this.howdahAttachmentValidated
+                || this.howdahRecoveryPending)
+                && !MumakilHowdahArcherEventHandler
+                .restoreLoadedHowdahArcherAttachment(
+                        mumakil,
+                        this
+                )) {
             this.stopPassengerMotion();
+            this.isNPCPersistent = false;
+            this.runtimeHowdahPassenger = false;
+            this.howdahAttachmentValidated = false;
+            this.howdahPositionLockActive = false;
+            this.howdahRecoveryPending =
+                    this.hasRecoverableHowdahIdentity();
+            this.noClip = false;
+            this.isImmuneToFire = false;
+            ++this.missingMountTicks;
+            if (this.missingMountTicks
+                    == MOUNT_LOOKUP_GRACE_TICKS) {
+                MumakilHowdahArcherEventHandler
+                        .logReloadRecovery(
+                                "Recovery timeout while resolved parent "
+                                        + "validation remains pending"
+                                        + " archer="
+                                        + this.getEntityId()
+                                        + " mumak="
+                                        + mumakil.getEntityId()
+                                        + " slot="
+                                        + this.getHowdahSlot()
+                        );
+            }
+            return;
+        }
+
+        if (!mumakil.hasMumakilHowdahEquipped()) {
+            this.warnIfRuntimeAttachmentIsIncomplete();
+            this.stopPassengerMotion();
+            this.runtimeHowdahPassenger = false;
+            this.howdahAttachmentValidated = false;
+            this.howdahRecoveryPending = false;
+            this.howdahPositionLockActive = false;
+            this.noClip = false;
+            this.isImmuneToFire = false;
 
             if (!this.worldObj.isRemote) {
                 this.setDead();
@@ -503,6 +651,8 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             return;
         }
 
+        this.missingMountTicks = 0;
+        this.rememberSavedMountPosition(mumakil);
         this.clearPassengerAI();
         this.placeOnHowdah(mumakil, this.getHowdahSlot());
         this.updateHowdahCombatBehavior(mumakil);
@@ -511,8 +661,13 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     private LOTREntityMumakil getAttachedMumakil() {
         int mountId = this.getHowdahMountEntityId();
         Entity entity = mountId == 0 || this.worldObj == null ? null : this.worldObj.getEntityByID(mountId);
-        if (entity instanceof LOTREntityMumakil) {
-            return (LOTREntityMumakil)entity;
+        if (entity instanceof LOTREntityMumakil
+                && ((this.worldObj.isRemote
+                && this.isPlausibleClientParent(
+                (LOTREntityMumakil)entity
+        ))
+                || this.isSavedMumakilUuid((Entity)entity))) {
+            return (LOTREntityMumakil) entity;
         }
 
         return this.findAttachedMumakilByUuid();
@@ -528,35 +683,253 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
             return null;
         }
 
-        if (this.missingMountTicks > 0 && this.ticksExisted % UUID_LOOKUP_INTERVAL != 0) {
+        if (!this.isUuidLookupDue(this.missingMountTicks)) {
+            return null;
+        }
+        this.uuidLookupAttemptedThisTick = true;
+
+        /*
+         * Entity IDs normally resolve in O(1). After a chunk reload the saved
+         * ID can be stale, but the assigned Mumak must still be in the
+         * passenger's immediate attachment neighborhood. Keep this UUID
+         * recovery local so seventeen passengers do not each scan the entire
+         * loaded world on the same reload tick.
+         */
+        List nearbyMumaks = this.worldObj.getEntitiesWithinAABB(
+                LOTREntityMumakil.class,
+                this.boundingBox.expand(
+                        UUID_LOCAL_LOOKUP_RANGE,
+                        UUID_LOCAL_LOOKUP_RANGE,
+                        UUID_LOCAL_LOOKUP_RANGE
+                )
+        );
+        LOTREntityMumakil bestClientCandidate = null;
+        double bestClientDistanceSq = Double.MAX_VALUE;
+        for (int i = 0; i < nearbyMumaks.size(); ++i) {
+            LOTREntityMumakil mumakil =
+                    (LOTREntityMumakil)nearbyMumaks.get(i);
+            if (this.worldObj.isRemote) {
+                double distanceSq =
+                        this.getSavedParentDistanceSq(mumakil);
+                if (this.isPlausibleClientParent(mumakil)
+                        && distanceSq < bestClientDistanceSq) {
+                    bestClientCandidate = mumakil;
+                    bestClientDistanceSq = distanceSq;
+                }
+                continue;
+            }
+            if (mountUuid.equals(getEntityPersistentIdString(mumakil))) {
+                this.howdahMountEntityId = mumakil.getEntityId();
+                this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
+                MumakilHowdahArcherEventHandler.logReloadRecovery(
+                        "Parent resolved by UUID; runtime entity ID refreshed"
+                                + " archer=" + this.getEntityId()
+                                + " mumak=" + mumakil.getEntityId()
+                                + " slot=" + this.getHowdahSlot()
+                );
+                return mumakil;
+            }
+        }
+
+        if (bestClientCandidate != null) {
+            this.howdahMountEntityId =
+                    bestClientCandidate.getEntityId();
+            this.getEntityData().setInteger(
+                    NBT_MOUNT_ID,
+                    this.howdahMountEntityId
+            );
+            MumakilHowdahArcherEventHandler.logReloadRecovery(
+                    "Client parent resolved from saved anchor; runtime entity "
+                            + "ID refreshed"
+                            + " archer=" + this.getEntityId()
+                            + " mumak="
+                            + bestClientCandidate.getEntityId()
+                            + " slot=" + this.getHowdahSlot()
+            );
+            return bestClientCandidate;
+        }
+
+        return null;
+    }
+
+    private boolean isPlausibleClientParent(
+            LOTREntityMumakil mumakil
+    ) {
+        if (mumakil == null
+                || mumakil.worldObj != this.worldObj
+                || !mumakil.isEntityAlive()) {
+            return false;
+        }
+        if (!this.hasSavedMountPosition) {
+            return this.getDistanceSqToEntity(mumakil)
+                    <= UUID_LOCAL_LOOKUP_RANGE
+                    * UUID_LOCAL_LOOKUP_RANGE;
+        }
+        double maximumAnchorDistance =
+                UUID_LOCAL_LOOKUP_RANGE * 2.0D;
+        return this.getSavedParentDistanceSq(mumakil)
+                <= maximumAnchorDistance * maximumAnchorDistance;
+    }
+
+    private double getSavedParentDistanceSq(
+            LOTREntityMumakil mumakil
+    ) {
+        double anchorX = this.hasSavedMountPosition
+                ? this.savedMountPosX
+                : this.posX;
+        double anchorY = this.hasSavedMountPosition
+                ? this.savedMountPosY
+                : this.posY;
+        double anchorZ = this.hasSavedMountPosition
+                ? this.savedMountPosZ
+                : this.posZ;
+        double dx = mumakil.posX - anchorX;
+        double dy = mumakil.posY - anchorY;
+        double dz = mumakil.posZ - anchorZ;
+        return dx * dx + dy * dy + dz * dz;
+    }
+
+    private void handleMissingMount() {
+        this.stopPassengerMotion();
+        this.runtimeHowdahPassenger = false;
+        this.howdahAttachmentValidated = false;
+        this.howdahPositionLockActive = false;
+        this.howdahRecoveryPending =
+                this.hasRecoverableHowdahIdentity();
+        this.noClip = false;
+        this.isImmuneToFire = false;
+        if (!this.worldObj.isRemote) {
+            /*
+             * The cap exemption follows a currently validated attachment.
+             * A temporarily unresolved passenger remains protected from
+             * despawning by canDespawn(), but counts normally until its parent
+             * UUID is validated again.
+             */
+            this.isNPCPersistent = false;
+            this.howdahAttachmentValidated = false;
+        }
+        if (!this.recoveryPendingLogged) {
+            this.recoveryPendingLogged = true;
+            MumakilHowdahArcherEventHandler.logReloadRecovery(
+                    "Recovery pending archer=" + this.getEntityId()
+                            + " parentUuid=" + this.getHowdahMountUuid()
+                            + " slot=" + this.getHowdahSlot()
+            );
+        }
+        ++this.missingMountTicks;
+
+        if (this.worldObj.isRemote
+                || this.missingMountTicks < MOUNT_LOOKUP_GRACE_TICKS
+                || !this.uuidLookupAttemptedThisTick
+                || !this.isSavedMountChunkLoaded()) {
+            return;
+        }
+
+        LOTREntityMumakil globallyLoaded =
+                this.findLoadedMumakilByUuid();
+        if (globallyLoaded != null) {
+            this.howdahMountEntityId = globallyLoaded.getEntityId();
+            this.getEntityData().setInteger(
+                    NBT_MOUNT_ID,
+                    this.howdahMountEntityId
+            );
+            this.missingMountTicks = 0;
+            MumakilHowdahArcherEventHandler.logReloadRecovery(
+                    "Parent resolved by bounded-time fallback; runtime entity ID refreshed"
+                            + " archer=" + this.getEntityId()
+                            + " mumak=" + globallyLoaded.getEntityId()
+                            + " slot=" + this.getHowdahSlot()
+            );
+            return;
+        }
+
+        MumakilHowdahArcherEventHandler.logReloadRecovery(
+                "Recovery timed out; archer detached after confirmed missing parent"
+                        + " archer=" + this.getEntityId()
+                        + " parentUuid=" + this.getHowdahMountUuid()
+                        + " slot=" + this.getHowdahSlot()
+        );
+        this.convertRecoveryOrphanToDetachedSouthron();
+    }
+
+    private void warnIfRuntimeAttachmentIsIncomplete() {
+        if (!this.runtimeHowdahPassenger
+                || this.hasActiveHowdahAttachment()
+                || this.worldObj == null) {
+            return;
+        }
+
+        long worldTime = this.worldObj.getTotalWorldTime();
+        if (worldTime < nextInvalidRuntimeWarningWorldTick) {
+            return;
+        }
+        nextInvalidRuntimeWarningWorldTick =
+                worldTime + INVALID_RUNTIME_WARNING_INTERVAL;
+        System.err.println(
+                "[LOTRMoreMobs][HowdahReload] Runtime-attached archer has no "
+                        + "validated live parent/position lock"
+                        + " archer=" + this.getEntityId()
+                        + " parentUuid=" + this.getHowdahMountUuid()
+                        + " slot=" + this.getHowdahSlot()
+        );
+    }
+
+    private boolean isUuidLookupDue(int recoveryTicks) {
+        int slot = this.getHowdahSlot();
+        int phase = slot >= 0
+                ? slot * UUID_LOOKUP_SLOT_PHASE_MULTIPLIER
+                % UUID_LOOKUP_INTERVAL
+                : 0;
+        return recoveryTicks % UUID_LOOKUP_INTERVAL == phase;
+    }
+
+    private boolean isSavedMumakilUuid(Entity entity) {
+        String mountUuid = this.getHowdahMountUuid();
+        return entity instanceof LOTREntityMumakil
+                && mountUuid.length() > 0
+                && mountUuid.equals(getEntityPersistentIdString(entity));
+    }
+
+    private LOTREntityMumakil findLoadedMumakilByUuid() {
+        if (this.worldObj == null) {
             return null;
         }
 
         List loaded = this.worldObj.loadedEntityList;
         for (int i = 0; i < loaded.size(); ++i) {
             Object object = loaded.get(i);
-            if (!(object instanceof LOTREntityMumakil)) {
-                continue;
-            }
-
-            LOTREntityMumakil mumakil = (LOTREntityMumakil)object;
-            if (mountUuid.equals(getEntityPersistentIdString(mumakil))) {
-                this.howdahMountEntityId = mumakil.getEntityId();
-                this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
-                return mumakil;
+            if (object instanceof LOTREntityMumakil
+                    && this.isSavedMumakilUuid((Entity)object)) {
+                return (LOTREntityMumakil)object;
             }
         }
-
         return null;
     }
 
-    private void handleMissingMount() {
-        this.stopPassengerMotion();
-        ++this.missingMountTicks;
-
-        if (!this.worldObj.isRemote && this.missingMountTicks >= MOUNT_LOOKUP_GRACE_TICKS) {
-            this.setDead();
+    private boolean isSavedMountChunkLoaded() {
+        if (this.worldObj == null || !this.hasSavedMountPosition) {
+            return false;
         }
+
+        int chunkX = MathHelper.floor_double(this.savedMountPosX) >> 4;
+        int chunkZ = MathHelper.floor_double(this.savedMountPosZ) >> 4;
+        return this.worldObj.getChunkProvider().chunkExists(
+                chunkX,
+                chunkZ
+        );
+    }
+
+    private void rememberSavedMountPosition(
+            LOTREntityMumakil mumakil
+    ) {
+        if (mumakil == null) {
+            return;
+        }
+
+        this.savedMountPosX = mumakil.posX;
+        this.savedMountPosY = mumakil.posY;
+        this.savedMountPosZ = mumakil.posZ;
+        this.hasSavedMountPosition = true;
     }
 
     private void stopPassengerMotion() {
@@ -656,6 +1029,11 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         this.rotationYawHead = archerYaw;
         this.prevRotationYawHead = previousArcherYaw;
         this.resetHowdahLocomotionFields();
+        if (this.runtimeHowdahPassenger
+                && this.howdahAttachmentValidated
+                && !this.howdahRecoveryPending) {
+            this.howdahPositionLockActive = true;
+        }
     }
 
     /**
@@ -692,15 +1070,21 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     }
 
     private boolean isFixedHowdahPassenger() {
-        return this.isRuntimeHowdahPassenger()
-                && !this.detachedFromDeadMumakil
-                && this.getHowdahMountEntityId() != 0;
+        return this.hasActiveHowdahAttachment()
+                && this.getHowdahSlot() >= 0
+                && (this.getHowdahMountEntityId() != 0
+                || this.getHowdahMountUuid().length() > 0);
     }
 
     private void clearHowdahAttachment() {
         this.howdahMountEntityId = 0;
         this.howdahMountUuid = "";
+        this.formationOrigin = MumakilFormationOrigin.NONE;
         this.howdahAttachmentDataLoaded = true;
+        this.howdahAttachmentValidated = false;
+        this.howdahRecoveryPending = false;
+        this.howdahPositionLockActive = false;
+        this.hasSavedMountPosition = false;
         this.hasHowdahLookRotation = false;
         this.getEntityData().setInteger(NBT_MOUNT_ID, 0);
         this.getEntityData().setString(NBT_MOUNT_UUID, "");
@@ -894,6 +1278,12 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
     }
 
     private void shootHowdahArrowAt(LOTREntityMumakil mumakil, EntityLivingBase target) {
+        if (MumakilHowdahArcherEventHandler
+                .getFullyValidatedAttachedArcherParent(this)
+                != mumakil) {
+            return;
+        }
+
         if (!this.worldObj.isRemote && MumakilPerformanceTracker.isEnabled()) {
             MumakilPerformanceTracker.recordArrowFired(mumakil, this.getHowdahSlot());
         }
@@ -1076,12 +1466,14 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
 
     @Override
     public boolean canDespawn() {
-        return !this.isFixedHowdahPassenger() && super.canDespawn();
+        return !this.isRuntimeHowdahPassenger()
+                && !this.isHowdahRecoveryPending()
+                && super.canDespawn();
     }
 
     @Override
     public boolean writeToNBTOptional(NBTTagCompound nbt) {
-        return false;
+        return super.writeToNBTOptional(nbt);
     }
 
     @Override
@@ -1095,21 +1487,90 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         nbt.setInteger(NBT_MOUNT_ID, this.getHowdahMountEntityId());
         nbt.setString(NBT_MOUNT_UUID, this.getHowdahMountUuid());
         nbt.setInteger(NBT_SLOT, this.getHowdahSlot());
+        /*
+         * Persist relationship identity, never proof of a current live
+         * attachment. NBT_RUNTIME_PASSENGER remains read-only below so saves
+         * written by the first persistence repair migrate safely.
+         */
+        nbt.removeTag(NBT_RUNTIME_PASSENGER);
+        nbt.setInteger(
+                NBT_FORMATION_ORIGIN,
+                this.getHowdahFormationOrigin().getId()
+        );
+        if (this.hasSavedMountPosition) {
+            nbt.setDouble(NBT_MOUNT_POS_X, this.savedMountPosX);
+            nbt.setDouble(NBT_MOUNT_POS_Y, this.savedMountPosY);
+            nbt.setDouble(NBT_MOUNT_POS_Z, this.savedMountPosZ);
+        }
     }
 
     @Override
     public void readEntityFromNBT(NBTTagCompound nbt) {
         super.readEntityFromNBT(nbt);
-        this.naturalFormationBootstrapPending = false;
         this.howdahMountEntityId = nbt.getInteger(NBT_MOUNT_ID);
         this.howdahMountUuid = nbt.getString(NBT_MOUNT_UUID);
         this.howdahSlot = nbt.hasKey(NBT_SLOT) ? nbt.getInteger(NBT_SLOT) : nbt.getInteger(LEGACY_NBT_SLOT);
         this.howdahAttachmentDataLoaded = true;
-        this.detachedFromDeadMumakil = false;
-        this.detachedTicks = 0;
+        this.formationOrigin = nbt.hasKey(NBT_FORMATION_ORIGIN)
+                ? MumakilFormationOrigin.fromId(
+                nbt.getInteger(NBT_FORMATION_ORIGIN)
+        )
+                : MumakilFormationOrigin.NONE;
+        this.hasSavedMountPosition =
+                nbt.hasKey(NBT_MOUNT_POS_X)
+                        && nbt.hasKey(NBT_MOUNT_POS_Y)
+                        && nbt.hasKey(NBT_MOUNT_POS_Z);
+        if (this.hasSavedMountPosition) {
+            this.savedMountPosX = nbt.getDouble(NBT_MOUNT_POS_X);
+            this.savedMountPosY = nbt.getDouble(NBT_MOUNT_POS_Y);
+            this.savedMountPosZ = nbt.getDouble(NBT_MOUNT_POS_Z);
+        }
+        boolean legacySavedRuntimePassenger =
+                nbt.hasKey(NBT_RUNTIME_PASSENGER)
+                        && nbt.getBoolean(NBT_RUNTIME_PASSENGER);
+        boolean hasRecoveryIdentity =
+                this.howdahMountUuid.length() > 0
+                        && this.howdahSlot >= 0
+                        && this.howdahSlot < HOWDAH_ARCHER_OFFSETS.length;
+        if ((legacySavedRuntimePassenger || hasRecoveryIdentity)
+                && !this.hasSavedMountPosition) {
+            /*
+             * Legacy direct saves did not record the parent position. A fixed
+             * passenger's own saved position is in the same local chunk
+             * neighborhood and is a conservative timeout-confirmation anchor.
+             */
+            this.savedMountPosX = this.posX;
+            this.savedMountPosY = this.posY;
+            this.savedMountPosZ = this.posZ;
+            this.hasSavedMountPosition = true;
+        }
         this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
         this.getEntityData().setString(NBT_MOUNT_UUID, this.howdahMountUuid);
         this.getEntityData().setInteger(NBT_SLOT, this.howdahSlot);
+        if (hasRecoveryIdentity) {
+            this.beginHowdahAttachmentRecovery();
+        } else {
+            this.runtimeHowdahPassenger = false;
+            this.howdahAttachmentValidated = false;
+            this.howdahRecoveryPending = false;
+            this.howdahPositionLockActive = false;
+            this.isNPCPersistent = false;
+            this.noClip = false;
+            this.isImmuneToFire = false;
+        }
+        MumakilHowdahArcherEventHandler.logReloadRecovery(
+                "Archer NBT loaded; recovery pending started"
+                        + " archer=" + this.getEntityId()
+                        + " parentUuid=" + this.howdahMountUuid
+                        + " slot=" + this.howdahSlot
+                        + " legacyRuntimeMarker="
+                        + legacySavedRuntimePassenger
+                        + " runtimePassengerDeliberatelyInactive="
+                        + !this.runtimeHowdahPassenger
+                        + " recoveryPending="
+                        + this.howdahRecoveryPending
+                        + " origin=" + this.getHowdahFormationOrigin()
+        );
     }
 
     @Override
@@ -1117,7 +1578,17 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         buffer.writeInt(this.getHowdahMountEntityId());
         buffer.writeInt(this.getHowdahSlot());
         ByteBufUtils.writeUTF8String(buffer, this.getHowdahMountUuid());
-        buffer.writeBoolean(this.isRuntimeHowdahPassenger());
+        buffer.writeBoolean(
+                this.isRuntimeHowdahPassenger()
+                        || this.isHowdahRecoveryPending()
+                        || this.hasRecoverableHowdahIdentity()
+        );
+        buffer.writeBoolean(this.hasSavedMountPosition);
+        if (this.hasSavedMountPosition) {
+            buffer.writeDouble(this.savedMountPosX);
+            buffer.writeDouble(this.savedMountPosY);
+            buffer.writeDouble(this.savedMountPosZ);
+        }
     }
 
     @Override
@@ -1126,10 +1597,22 @@ public class LOTREntityMumakilHowdahArcher extends LOTREntityNearHaradrimArcher 
         this.howdahSlot = additionalData.readInt();
         this.howdahMountUuid = ByteBufUtils.readUTF8String(additionalData);
         this.howdahAttachmentDataLoaded = true;
-        this.setRuntimeHowdahPassenger(additionalData.readBoolean());
+        boolean serverAttachmentRequested =
+                additionalData.readBoolean();
         this.getEntityData().setInteger(NBT_MOUNT_ID, this.howdahMountEntityId);
         this.getEntityData().setString(NBT_MOUNT_UUID, this.howdahMountUuid);
         this.getEntityData().setInteger(NBT_SLOT, this.howdahSlot);
+        this.hasSavedMountPosition =
+                additionalData.readBoolean();
+        if (this.hasSavedMountPosition) {
+            this.savedMountPosX = additionalData.readDouble();
+            this.savedMountPosY = additionalData.readDouble();
+            this.savedMountPosZ = additionalData.readDouble();
+        }
+        if (serverAttachmentRequested
+                && this.hasRecoverableHowdahIdentity()) {
+            this.beginHowdahAttachmentRecovery();
+        }
     }
 
     private static String getEntityPersistentIdString(Entity entity) {

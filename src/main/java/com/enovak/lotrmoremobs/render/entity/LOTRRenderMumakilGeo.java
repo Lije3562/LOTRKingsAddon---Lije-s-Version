@@ -397,7 +397,13 @@ public class LOTRRenderMumakilGeo extends GeoEntityRenderer<LOTREntityMumakil>
                         : entity.limbSwing
                         - entity.limbSwingAmount * (1.0F - partialTicks);
 
-                if (entity.isChild()) {
+                /*
+                 * Unridden calves retain the established fast child phase.
+                 * A player-ridden Mumak already uses the shared adult ridden
+                 * half-rate phase above, so multiplying that phase again made
+                 * a ridden calf animate three times faster than the adult.
+                 */
+                if (entity.isChild() && !playerRidden) {
                     limbSwing *= 3.0F;
                 }
 

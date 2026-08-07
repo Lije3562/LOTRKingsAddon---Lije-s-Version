@@ -3,7 +3,9 @@ package com.enovak.lotrmoremobs.proxy;
 import com.enovak.lotrmoremobs.client.MumakilShankFovHandler; // MUMAKIL_SHANK_SYSTEM_V1_1
 import com.enovak.lotrmoremobs.client.MumakilHiredDriverGuiHandler;
 import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
+import com.enovak.lotrmoremobs.client.MumakilPlayerArrowCameraDiagnosticHandler;
 import com.enovak.lotrmoremobs.client.UnitTradePledgeNavigationHandler;
+import com.enovak.lotrmoremobs.client.config.MumakilConfigChangeHandler;
 import com.enovak.lotrmoremobs.client.gui.MumakilHiredDriverGuiContext;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHirePreviewDriver;
@@ -71,7 +73,13 @@ public class ClientProxy extends CommonProxy {
     public void registerEventHandlers() {
         super.registerEventHandlers();
 
+        FMLCommonHandler.instance().bus().register(
+                new MumakilConfigChangeHandler()
+        );
         MinecraftForge.EVENT_BUS.register(new MumakilShankFovHandler());
+        MinecraftForge.EVENT_BUS.register(
+                new MumakilPlayerArrowCameraDiagnosticHandler()
+        );
         MinecraftForge.EVENT_BUS.register(
                 new UnitTradePledgeNavigationHandler()
         );

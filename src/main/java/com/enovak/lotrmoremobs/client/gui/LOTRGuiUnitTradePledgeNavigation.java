@@ -20,6 +20,8 @@ import lotr.common.inventory.LOTRContainerUnitTrade;
 import lotr.common.inventory.LOTRSlotAlignmentReward;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.renderer.OpenGlHelper;
+import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.inventory.Slot;
@@ -28,6 +30,7 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraft.util.StatCollector;
 import net.minecraft.world.World;
 import org.lwjgl.opengl.GL11;
+import org.lwjgl.opengl.GL13;
 
 /**
  * Native LOTR unit-trade GUI with one real, fixed-label pledge button. The
@@ -46,6 +49,20 @@ public final class LOTRGuiUnitTradePledgeNavigation
     private static final int EXTRA_INFO_Y = 106;
     private static final int EXTRA_INFO_WIDTH = 9;
     private static final int EXTRA_INFO_HEIGHT = 7;
+    /*
+     * Vanilla's hovering-text background uses z=300. Adding 400 keeps the
+     * whole tooltip above NEI's z=200 overlay while remaining safely inside
+     * Minecraft's GUI projection near plane.
+     */
+    private static final float LATE_TOOLTIP_Z_OFFSET = 400.0F;
+    private static final int TOOLTIP_GL_ATTRIB_MASK =
+            GL11.GL_ENABLE_BIT
+                    | GL11.GL_COLOR_BUFFER_BIT
+                    | GL11.GL_DEPTH_BUFFER_BIT
+                    | GL11.GL_LIGHTING_BIT
+                    | GL11.GL_TEXTURE_BIT
+                    | GL11.GL_TRANSFORM_BIT
+                    | GL11.GL_CURRENT_BIT;
 
     private final LOTRUnitTradeable unitTrader;
     private final LOTRUnitTradeEntries trades;
@@ -84,27 +101,6 @@ public final class LOTRGuiUnitTradePledgeNavigation
     ) {
         this.updatePledgeButton();
         super.drawScreen(mouseX, mouseY, partialTicks);
-
-        /*
-         * This is the GUI's normal final-tooltip stage, after the button and
-         * foreground. The fixed label is never redrawn or mutated on hover.
-         */
-        if (this.pledgeButton != null
-                && this.pledgeButton.visible
-                && this.pledgeButton.isMouseOver(
-                mouseX,
-                mouseY
-        )) {
-            String requirement = this.currentTrade()
-                    .getPledgeType()
-                    .getCommandReqText(this.traderFaction);
-            List lines = this.fontRendererObj
-                    .listFormattedStringToWidth(
-                            requirement,
-                            200
-                    );
-            this.func_146283_a(lines, mouseX, mouseY);
-        }
     }
 
     @Override
@@ -360,16 +356,10 @@ public final class LOTRGuiUnitTradePledgeNavigation
             int mouseX,
             int mouseY
     ) {
-        boolean hovered =
-                mouseX >= this.guiLeft + EXTRA_INFO_X
-                        && mouseX < this.guiLeft
-                        + EXTRA_INFO_X
-                        + EXTRA_INFO_WIDTH
-                        && mouseY >= this.guiTop
-                        + EXTRA_INFO_Y
-                        && mouseY < this.guiTop
-                        + EXTRA_INFO_Y
-                        + EXTRA_INFO_HEIGHT;
+        boolean hovered = this.isExtraInfoHovered(
+                mouseX,
+                mouseY
+        );
         GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
         this.mc.getTextureManager().bindTexture(
                 UNIT_TRADE_TEXTURE
@@ -383,24 +373,88 @@ public final class LOTRGuiUnitTradePledgeNavigation
                 EXTRA_INFO_WIDTH,
                 EXTRA_INFO_HEIGHT
         );
-        if (!hovered) {
+    }
+
+    /**
+     * Draws only the unit entry's large requirement tooltip. The registered
+     * LOWEST-priority Post handler calls this after NEI's container overlay.
+     */
+    public void drawLateRequirementTooltip(
+            int mouseX,
+            int mouseY
+    ) {
+        LOTRUnitTradeEntry trade = this.currentTrade();
+        if (!trade.hasExtraInfo()
+                || !this.isExtraInfoHovered(mouseX, mouseY)) {
             return;
         }
 
-        float previousZ = this.zLevel;
         List description = this.fontRendererObj
                 .listFormattedStringToWidth(
                         trade.getFormattedExtraInfo(),
                         200
                 );
-        this.func_146283_a(
-                description,
-                mouseX - this.guiLeft,
-                mouseY - this.guiTop
-        );
-        GL11.glDisable(GL11.GL_LIGHTING);
-        GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
-        this.zLevel = previousZ;
+        RenderItem renderItem = RenderItem.getInstance();
+        float previousGuiZ = this.zLevel;
+        float previousItemZ = renderItem.zLevel;
+        int previousMatrixMode =
+                GL11.glGetInteger(GL11.GL_MATRIX_MODE);
+        int previousActiveTexture =
+                GL11.glGetInteger(GL13.GL_ACTIVE_TEXTURE);
+        boolean attributesPushed = false;
+        boolean matrixPushed = false;
+
+        try {
+            GL11.glPushAttrib(TOOLTIP_GL_ATTRIB_MASK);
+            attributesPushed = true;
+            GL11.glMatrixMode(GL11.GL_MODELVIEW);
+            GL11.glPushMatrix();
+            matrixPushed = true;
+
+            GL11.glTranslatef(
+                    0.0F,
+                    0.0F,
+                    LATE_TOOLTIP_Z_OFFSET
+            );
+            GL11.glDisable(GL11.GL_DEPTH_TEST);
+            RenderHelper.disableStandardItemLighting();
+            this.zLevel = LATE_TOOLTIP_Z_OFFSET;
+            renderItem.zLevel = LATE_TOOLTIP_Z_OFFSET;
+            this.func_146283_a(
+                    description,
+                    mouseX,
+                    mouseY
+            );
+        } finally {
+            this.zLevel = previousGuiZ;
+            renderItem.zLevel = previousItemZ;
+            if (matrixPushed) {
+                GL11.glMatrixMode(GL11.GL_MODELVIEW);
+                GL11.glPopMatrix();
+            }
+            if (attributesPushed) {
+                GL11.glPopAttrib();
+            }
+            OpenGlHelper.setActiveTexture(
+                    previousActiveTexture
+            );
+            GL11.glMatrixMode(previousMatrixMode);
+        }
+    }
+
+    private boolean isExtraInfoHovered(
+            int mouseX,
+            int mouseY
+    ) {
+        return mouseX >= this.guiLeft + EXTRA_INFO_X
+                && mouseX < this.guiLeft
+                + EXTRA_INFO_X
+                + EXTRA_INFO_WIDTH
+                && mouseY >= this.guiTop
+                + EXTRA_INFO_Y
+                && mouseY < this.guiTop
+                + EXTRA_INFO_Y
+                + EXTRA_INFO_HEIGHT;
     }
 
     private void updatePledgeButton() {

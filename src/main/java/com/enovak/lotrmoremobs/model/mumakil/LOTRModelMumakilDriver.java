@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.model.mumakil;
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.handler.MumakilDriverControlEventHandler;
 import lotr.client.model.LOTRModelHuman;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
 import net.minecraft.entity.Entity;
@@ -28,9 +29,10 @@ public class LOTRModelMumakilDriver extends LOTRModelHuman {
             float scaleFactor,
             Entity entity
     ) {
+        boolean mountedDriver = this.isMountedMumakDriver(entity);
         super.setRotationAngles(
-                limbSwing,
-                limbSwingAmount,
+                mountedDriver ? 0.0F : limbSwing,
+                mountedDriver ? 0.0F : limbSwingAmount,
                 ageInTicks,
                 netHeadYaw,
                 headPitch,
@@ -38,7 +40,7 @@ public class LOTRModelMumakilDriver extends LOTRModelHuman {
                 entity
         );
 
-        if (!this.isMountedMumakDriver(entity)) {
+        if (!mountedDriver) {
             return;
         }
 
@@ -77,14 +79,8 @@ public class LOTRModelMumakilDriver extends LOTRModelHuman {
     }
 
     private boolean isMountedMumakDriver(Entity entity) {
-        if (!(entity instanceof LOTREntitySouthronChampion)
-                || !(entity.ridingEntity instanceof LOTREntityMumakil)) {
-            return false;
-        }
-
-        LOTREntityMumakil mumakil =
-                (LOTREntityMumakil)entity.ridingEntity;
-        return mumakil.riddenByEntity == entity
-                && mumakil.isHiredWarMumakil();
+        return entity instanceof LOTREntitySouthronChampion
+                && MumakilDriverControlEventHandler
+                .isFullyAttachedMumakilDriver(entity);
     }
 }

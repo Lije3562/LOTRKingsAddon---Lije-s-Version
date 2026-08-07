@@ -35,12 +35,20 @@ import cpw.mods.fml.common.network.NetworkRegistry;
 import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 
-@Mod(modid = Main.MODID, name = Main.NAME, version = Main.VERSION)
+@Mod(
+        modid = Main.MODID,
+        name = Main.NAME,
+        version = Main.VERSION,
+        guiFactory =
+                "com.enovak.lotrmoremobs.client.config."
+                        + "MumakilConfigGuiFactory"
+)
 public class Main {
 
     public static final String MODID = "lotrmoremobs";
     public static final String VERSION = "1.0.0";
-    public static final String NAME = "LOTR More Mobs File";
+    public static final String NAME =
+            "LOTR Kings of Middle Earth Addon";
     public static SimpleNetworkWrapper network;
 
     @SidedProxy(
@@ -73,7 +81,11 @@ public class Main {
     @EventHandler
     public void init(FMLInitializationEvent event) {
         LOTREntities.registerCreature(LOTREntityMumakil.class, "Mumakil", 811, 6118481, 12171165);
-        LOTREntities.registerCreature(LOTREntityMumakilHowdahArcher.class, "MumakilHowdahArcher", 812, 12171165, 6118481);
+        LOTREntities.registerCreature(
+                LOTREntityMumakilHowdahArcher.class,
+                "MumakilHowdahArcher",
+                812
+        );
         proxy.registerRenderers();
         proxy.registerEventHandlers();
 
