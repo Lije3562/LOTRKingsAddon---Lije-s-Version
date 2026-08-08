@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.item;
 
 import com.enovak.lotrmoremobs.Main;
 import lotr.common.LOTRCreativeTabs;
+import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.item.ItemFood;
 
 /**
@@ -10,8 +11,10 @@ import net.minecraft.item.ItemFood;
  * Held movement effects are managed by MumakilShankHeldEffectHandler.
  */
 public class LOTRItemMumakilShank extends ItemFood {
+
     private static final String RAW_TEXTURE =
             Main.MODID + ":mumak_shank";
+
     private static final String COOKED_TEXTURE =
             Main.MODID + ":mumak_shank_cooked";
 
@@ -27,9 +30,21 @@ public class LOTRItemMumakilShank extends ItemFood {
                         ? "cooked_mumakil_shank"
                         : "mumakil_shank"
         );
-        this.setCreativeTab(LOTRCreativeTabs.tabFood);
+
+        this.setCreativeTab(getLOTRFoodTab());
+
         this.setTextureName(
                 cooked ? COOKED_TEXTURE : RAW_TEXTURE
         );
+    }
+
+    private static CreativeTabs getLOTRFoodTab() {
+        try {
+            return (CreativeTabs) LOTRCreativeTabs.class
+                    .getField("tabFood")
+                    .get(null);
+        } catch (Exception e) {
+            return CreativeTabs.tabFood;
+        }
     }
 }
