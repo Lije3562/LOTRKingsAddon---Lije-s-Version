@@ -84,6 +84,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final boolean DEBUG_AUTONOMOUS_COMBAT_AI = false;
     private static final boolean DEBUG_MUMAKIL_MODE = false;
     private static final boolean DEBUG_BABY_FAMILY_AI = false; // BABY_FAMILY_AI_DIAGNOSTICS_V1
+    private static final String MIDDLE_EARTH_TWEAKS_RIDER_TARGET_AI_CLASS =
+            "metweaks.guards.customranged.HorseMoveToRiderTargetAiFix";
 
     // LOTRMoreMobs Mumakil entity patch: STRIKE_TIMER_SOUND_MAPPING_V12_4_NORMAL_HIT_SOUND_2026_06_28
 
@@ -356,6 +358,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final String[] MUMAKIL_INVENTORY_FIELD_NAMES =
             new String[] {
                     "horseChest",
+                    "field_110296_bG",
+                    "bG",
                     "mountInventory",
                     "horseInventory",
                     "inventory"
@@ -630,6 +634,57 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
     }
 
+    /**
+     * MiddleEarth Tweaks replaces the rider-target task after construction in
+     * its server-side EntityJoinWorldEvent handler. Restore only this Mumak's
+     * task after that handler has run, without linking against Tweaks.
+     */
+    public void restoreMumakilRiderTargetAICompatibility() {
+        List<EntityAITasks.EntityAITaskEntry> riderTargetEntries =
+                new ArrayList<EntityAITasks.EntityAITaskEntry>();
+        int priority = Integer.MAX_VALUE;
+
+        for (Object value : this.tasks.taskEntries) {
+            EntityAITasks.EntityAITaskEntry entry =
+                    (EntityAITasks.EntityAITaskEntry)value;
+            EntityAIBase action = entry.action;
+            if (action instanceof EntityAIMumakilMoveToRiderTarget
+                    || isMiddleEarthTweaksRiderTargetAI(action)) {
+                riderTargetEntries.add(entry);
+                priority = Math.min(priority, entry.priority);
+            }
+        }
+
+        if (!riderTargetEntries.isEmpty()) {
+            for (EntityAITasks.EntityAITaskEntry entry : riderTargetEntries) {
+                this.tasks.removeTask(entry.action);
+            }
+            this.tasks.addTask(
+                    priority,
+                    new EntityAIMumakilMoveToRiderTarget()
+            );
+        }
+    }
+
+    private static boolean isMiddleEarthTweaksRiderTargetAI(
+            EntityAIBase action
+    ) {
+        if (action == null) {
+            return false;
+        }
+
+        Class<?> type = action.getClass();
+        while (type != null) {
+            if (MIDDLE_EARTH_TWEAKS_RIDER_TARGET_AI_CLASS.equals(
+                    type.getName()
+            )) {
+                return true;
+            }
+            type = type.getSuperclass();
+        }
+        return false;
+    }
+
     private void removeInheritedPanicAI() {
         while (LOTREntityUtils.removeAITask(
                 this,
@@ -749,8 +804,19 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         boolean firstHerdMember = herdData.memberIndex == 0;
+        /*
+         * Vanilla spawn eggs invoke onSpawnWithEgg before inserting the
+         * entity into the world. Natural runtime and world-generation
+         * spawning insert it first. Use that transient lifecycle distinction
+         * so a manually spawned adult is never mistaken for a natural herd
+         * seed, while the 128-block rule remains unchanged for both natural
+         * spawning paths.
+         */
+        boolean naturalSpawnLifecycle =
+                this.worldObj.loadedEntityList.contains(this);
         if (firstHerdMember
                 && !this.worldObj.isRemote
+                && naturalSpawnLifecycle
                 && !this.naturalSpawnSpacingBypassed
                 && this.hasNearbyWildMumakil(
                 NATURAL_HERD_SPACING_RADIUS
