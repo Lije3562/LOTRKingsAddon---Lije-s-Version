@@ -119,6 +119,21 @@ public class MumakilDriverControlEventHandler {
             FAST_TRAVEL_MUMAK_SNAPSHOTS =
             new WeakHashMap<EntityPlayer, FastTravelMumakSnapshot>();
 
+    @SubscribeEvent(priority = EventPriority.LOWEST)
+    public void onMumakilJoinWorldRiderTargetCompatibility(
+            EntityJoinWorldEvent event
+    ) {
+        if (event == null
+                || event.world == null
+                || event.world.isRemote
+                || !(event.entity instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        ((LOTREntityMumakil)event.entity)
+                .restoreMumakilRiderTargetAICompatibility();
+    }
+
     @SubscribeEvent
     public void onEntityJoinWorld(EntityJoinWorldEvent event) {
         if (event == null
