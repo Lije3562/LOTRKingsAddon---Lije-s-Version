@@ -38,7 +38,7 @@ public final class MumakilNaturalSpawnRegistry {
 
      */
 
-    private static final int SPAWN_WEIGHT = 1;
+    private static final int SPAWN_WEIGHT = 8;
 
     private static final int MIN_GROUP_SIZE = 3;
 

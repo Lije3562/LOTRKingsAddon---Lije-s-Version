@@ -9,9 +9,11 @@ import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
 import java.lang.reflect.Method;
 import lotr.common.entity.npc.LOTREntityNPC;
 import lotr.common.entity.npc.LOTREntitySouthronChampion;
+import lotr.common.item.LOTRItemCoin;
 import lotr.common.entity.npc.LOTRUnitTradeEntry;
 import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityLiving;
+import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
 
 public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
@@ -45,6 +47,127 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         driver.refreshCurrentAttackMode();
         driver.setCurrentItemOrArmor(0, null);
         return driver;
+    }
+
+    @Override
+    public void hireUnit(
+            net.minecraft.entity.player.EntityPlayer player,
+            lotr.common.entity.npc.LOTRHireableBase hireable,
+            String squadron
+    ) {
+        if (player == null || player.worldObj == null || player.worldObj.isRemote) {
+            super.hireUnit(player, hireable, squadron);
+            return;
+        }
+
+        if (!(hireable instanceof LOTREntityNPC)) {
+            super.hireUnit(player, hireable, squadron);
+            return;
+        }
+
+        /*
+         * If native hiring requirements are not met, let native LOTR handle
+         * the failed transaction and do not run Mumak placement/relocation.
+         */
+        if (!this.hasRequiredCostAndAlignment(player, hireable)) {
+            super.hireUnit(player, hireable, squadron);
+            return;
+        }
+
+        LOTREntityNPC hiringNpc = (LOTREntityNPC)hireable;
+
+        /* Native LOTR invokes the trade callback before charging the player. */
+        hireable.onUnitTrade(player);
+
+        /*
+         * Build the exact entities before payment, while they are still
+         * unspawned. This lets the placement search validate the real rider
+         * envelope and avoids native LOTR's temporary player-position spawn.
+         */
+        LOTREntityNPC driver = this.getOrCreateHiredNPC(player.worldObj);
+        EntityLiving mount = this.createHiredMount(player.worldObj);
+        if (driver == null || !(mount instanceof LOTREntityMumakil)) {
+            this.discardUnspawnedHire(driver, mount);
+            return;
+        }
+        LOTREntityMumakil mumakil = (LOTREntityMumakil)mount;
+
+        MumakilWarFormationFactory.FormationPlacementSearchResult placement =
+                MumakilWarFormationFactory.findPlayerHiredFormationPlacement(
+                        player.worldObj,
+                        player,
+                        hiringNpc,
+                        driver,
+                        mumakil,
+                        player.rotationYaw
+                );
+
+        if (!placement.isFound()) {
+            /*
+             * Native LOTR charges inside its superclass method. Refuse the
+             * transaction before entering it when no clear Mumak-sized
+             * location exists.
+             */
+            player.addChatMessage(new ChatComponentText(
+                    "There is not enough open ground within 30 blocks of "
+                            +  "this warrior to hire this unit. "
+                            +  "Move to a larger clear area and try again."
+            ));
+            this.discardUnspawnedHire(driver, mumakil);
+            return;
+        }
+
+        /* Native LOTR transaction semantics, with the mount already built. */
+        LOTRItemCoin.takeCoins(
+                this.getCost(player, hireable),
+                player
+        );
+        hiringNpc.playTradeSound();
+
+        boolean alreadyLoaded = player.worldObj.loadedEntityList.contains(driver);
+        driver.hiredNPCInfo.hireUnit(
+                player,
+                !alreadyLoaded,
+                hireable.getFaction(),
+                this,
+                squadron,
+                mumakil
+        );
+        if (alreadyLoaded) {
+            return;
+        }
+
+        mumakil.setLocationAndAngles(
+                placement.getX(),
+                placement.getY(),
+                placement.getZ(),
+                player.rotationYaw,
+                0.0F
+        );
+        driver.mountEntity(mumakil);
+        mumakil.positionRiderAtMumakilAnchor(driver);
+        mumakil.updateRiderPosition();
+
+        if (!player.worldObj.spawnEntityInWorld(driver)) {
+            this.discardUnspawnedHire(driver, mumakil);
+            return;
+        }
+        if (!player.worldObj.spawnEntityInWorld(mumakil)) {
+            driver.setDead();
+            mumakil.setDead();
+        }
+    }
+
+    private void discardUnspawnedHire(
+            LOTREntityNPC driver,
+            EntityLiving mount
+    ) {
+        if (driver != null && !driver.worldObj.loadedEntityList.contains(driver)) {
+            driver.setDead();
+        }
+        if (mount != null && !mount.worldObj.loadedEntityList.contains(mount)) {
+            mount.setDead();
+        }
     }
 
     @Override

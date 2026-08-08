@@ -125,7 +125,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int BABY_MELON_FED_WINDOW_TICKS = 5 * 60 * 20; // BABY_MELON_FED_WINDOW_V1
     private static final float TAMED_BABY_MELON_HEAL_AMOUNT = 20.0F; // TAMED_BABY_MELON_HEALING_V1
     private static final int TAMED_BABY_MELON_HEAL_COOLDOWN_TICKS = 30 * 20;
-    private static final int BABY_GROWTH_TICKS = 30 * 20;
+    private static final int BABY_GROWTH_TICKS = 30 * 20 * 60;
     //30 * 60 * 20
     private static final int NATURAL_HERD_FAMILY_CHANCE = 4; // MUMAKIL_NATURAL_SPAWNING_V1
     private static final int NATURAL_HERD_ADULTS_BEFORE_BABIES = 2;
@@ -3126,8 +3126,92 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     @Override
     public void updateRiderPosition() {
         if (this.riddenByEntity != null) {
+            if (this.riddenByEntity instanceof EntityLivingBase
+                    && !this.isProjectedMountedRiderClear(
+                    this.posX,
+                    this.posY,
+                    this.posZ,
+                    this.renderYawOffset
+            )
+                    && this.isProjectedMountedRiderClear(
+                    this.posX,
+                    this.posY,
+                    this.posZ,
+                    this.prevRenderYawOffset
+            )) {
+                this.renderYawOffset = this.prevRenderYawOffset;
+                this.rotationYaw = this.prevRenderYawOffset;
+            }
             this.positionRiderAtMumakilAnchor(this.riddenByEntity);
         }
+    }
+
+    /**
+     * Keep a mounted living rider out of solid blocks when the Mumak moves.
+     * The navigation and direct-movement code only knows about the Mumak's
+     * body, so use the same seat transform as the real rider update for a
+     * side-effect-free projected collision check.
+     */
+    @Override
+    public void moveEntity(double dx, double dy, double dz) {
+        if ((dx != 0.0D || dz != 0.0D)
+                && this.riddenByEntity instanceof EntityLivingBase
+                && !this.isProjectedMountedRiderClear(
+                this.posX + dx,
+                this.posY + dy,
+                this.posZ + dz
+        )) {
+            this.motionX = 0.0D;
+            this.motionZ = 0.0D;
+            this.getNavigator().clearPathEntity();
+            super.moveEntity(0.0D, dy, 0.0D);
+            return;
+        }
+
+        super.moveEntity(dx, dy, dz);
+    }
+
+    private boolean isProjectedMountedRiderClear(
+            double mumakX,
+            double mumakY,
+            double mumakZ
+    ) {
+        return this.isProjectedMountedRiderClear(
+                mumakX,
+                mumakY,
+                mumakZ,
+                this.renderYawOffset
+        );
+    }
+
+    private boolean isProjectedMountedRiderClear(
+            double mumakX,
+            double mumakY,
+            double mumakZ,
+            float riderYaw
+    ) {
+        if (!(this.riddenByEntity instanceof EntityLivingBase)
+                || this.worldObj == null) {
+            return true;
+        }
+
+        EntityLivingBase rider = (EntityLivingBase)this.riddenByEntity;
+        Vec3 anchor = this.calculateRiderSeatPosition(
+                rider,
+                riderYaw,
+                mumakX,
+                mumakY,
+                mumakZ
+        );
+        AxisAlignedBB projectedRiderBox = AxisAlignedBB.getBoundingBox(
+                anchor.xCoord - rider.width * 0.5D,
+                anchor.yCoord,
+                anchor.zCoord - rider.width * 0.5D,
+                anchor.xCoord + rider.width * 0.5D,
+                anchor.yCoord + rider.height,
+                anchor.zCoord + rider.width * 0.5D
+        );
+        return this.worldObj.func_147461_a(projectedRiderBox).isEmpty();
     }
 
     /**
@@ -3201,6 +3285,22 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             Entity rider,
             float placementYaw
     ) {
+        return this.calculateRiderSeatPosition(
+                rider,
+                placementYaw,
+                this.posX,
+                this.posY,
+                this.posZ
+        );
+    }
+
+    private Vec3 calculateRiderSeatPosition(
+            Entity rider,
+            float placementYaw,
+            double mumakX,
+            double mumakY,
+            double mumakZ
+    ) {
 
         boolean hasHowdah = this.hasMumakilHowdahEquipped();
         double forwardOffset;
@@ -3231,9 +3331,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         double sideZ = MathHelper.sin(yawRadians) * sideOffset;
 
         return Vec3.createVectorHelper(
-                this.posX + forwardX + sideX,
-                this.posY + verticalOffset,
-                this.posZ + forwardZ + sideZ
+                mumakX + forwardX + sideX,
+                mumakY + verticalOffset,
+                mumakZ + forwardZ + sideZ
         );
     }
 
@@ -4094,6 +4194,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 MumakilAutonomousCombatState.APPROACH;
         private int observedSuccessfulTuskSequence;
         private int nextCombatWaypointPathTick;
+        private boolean combatWaypointPathAttempted;
         private int failedCombatWaypointSearches;
         private double combatWaypointX;
         private double combatWaypointY;
@@ -4190,6 +4291,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     ? MumakilPerformanceTracker.startTimer()
                     : 0L;
             boolean execute = super.continueExecuting();
+            if (!execute
+                    && this.isInitialCombatWaypointPending()) {
+                /* Keep a newly-entered pass alive through its existing
+                 * entity-ID stagger so the first waypoint search can run. */
+                execute = true;
+            }
             if (execute && LOTREntityMumakil.this.isHiredWarMumakil()) {
                 this.resetControlledPathForNewTarget(this.attackTarget);
             }
@@ -4200,6 +4307,24 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                 );
             }
             return execute;
+        }
+
+        private boolean isInitialCombatWaypointPending() {
+            if (this.autonomousCombatState
+                    != MumakilAutonomousCombatState.ATTACK_PASS
+                    && this.autonomousCombatState
+                    != MumakilAutonomousCombatState.TRAMPLE_PASS) {
+                return false;
+            }
+            if (this.combatWaypointPathAttempted
+                    || !LOTREntityMumakil.this.getNavigator().noPath()
+                    || this.attackTarget == null
+                    || !this.attackTarget.isEntityAlive()
+                    || !this.canUseAutonomousCombatPass(this.attackTarget)) {
+                return false;
+            }
+            return LOTREntityMumakil.this.ticksExisted
+                    <= this.nextCombatWaypointPathTick;
         }
 
         @Override
@@ -4524,6 +4649,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     .mumakilAutonomousCombatPassActive = true;
             this.failedCombatWaypointSearches = 0;
             this.hasCombatWaypoint = false;
+            this.combatWaypointPathAttempted = false;
             this.combatWaypointTargetX = target.posX;
             this.combatWaypointTargetZ = target.posZ;
             this.nextCombatWaypointPathTick =
@@ -4630,6 +4756,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     < this.nextCombatWaypointPathTick) {
                 return;
             }
+
+            this.combatWaypointPathAttempted = true;
 
             long destinationSearchStart =
                     MumakilServerPerformanceDiagnostics
@@ -5542,7 +5670,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         @Override
         public boolean shouldExecute() {
-            boolean execute = !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+            boolean execute = !MumakilDriverControlEventHandler
+                    .hasActiveAuthoritativeHiredWarCombatTarget(
+                            LOTREntityMumakil.this
+                    )
                     && super.shouldExecute();
             MumakilPerformanceTracker.recordMountFollowShould(
                     LOTREntityMumakil.this,
@@ -5554,7 +5685,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         @Override
         public boolean continueExecuting() {
-            return !LOTREntityMumakil.this.hasActiveHiredWarCombatTarget()
+            return !MumakilDriverControlEventHandler
+                    .hasActiveAuthoritativeHiredWarCombatTarget(
+                            LOTREntityMumakil.this
+                    )
                     && super.continueExecuting();
         }
 

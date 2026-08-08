@@ -12,7 +12,7 @@ import net.minecraft.world.World;
  * aggregated so profiling does not add per-entity console traffic.
  */
 public final class MumakilServerPerformanceDiagnostics {
-    public static final boolean ENABLED = true;
+    public static final boolean ENABLED = false;
     public static final long REPORT_INTERVAL_TICKS = 1200L;
 
     private static final Map<World, Metrics> METRICS_BY_WORLD =

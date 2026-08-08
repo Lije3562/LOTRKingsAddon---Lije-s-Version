@@ -3,7 +3,6 @@ package com.enovak.lotrmoremobs.proxy;
 import com.enovak.lotrmoremobs.client.MumakilShankFovHandler; // MUMAKIL_SHANK_SYSTEM_V1_1
 import com.enovak.lotrmoremobs.client.MumakilHiredDriverGuiHandler;
 import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
-import com.enovak.lotrmoremobs.client.MumakilPlayerArrowCameraDiagnosticHandler;
 import com.enovak.lotrmoremobs.client.UnitTradePledgeNavigationHandler;
 import com.enovak.lotrmoremobs.client.config.MumakilConfigChangeHandler;
 import com.enovak.lotrmoremobs.client.gui.MumakilHiredDriverGuiContext;
@@ -24,6 +23,10 @@ import lotr.common.entity.npc.LOTREntitySouthronChampion;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraftforge.common.MinecraftForge;
 import software.bernie.geckolib3.GeckoLib;
+import com.enovak.lotrmoremobs.client.command.CommandPickupFilterGui;
+import net.minecraftforge.client.ClientCommandHandler;
+import com.enovak.lotrmoremobs.client.pickupfilter.PickupFilterGuiOpenHandler;
+import com.enovak.lotrmoremobs.client.pickupfilter.PickupFilterInventoryButtonHandler;
 
 public class ClientProxy extends CommonProxy {
     @Override
@@ -78,15 +81,22 @@ public class ClientProxy extends CommonProxy {
         );
         MinecraftForge.EVENT_BUS.register(new MumakilShankFovHandler());
         MinecraftForge.EVENT_BUS.register(
-                new MumakilPlayerArrowCameraDiagnosticHandler()
-        );
-        MinecraftForge.EVENT_BUS.register(
                 new UnitTradePledgeNavigationHandler()
+        );
+        ClientCommandHandler.instance.registerCommand(
+                new CommandPickupFilterGui()
         );
 
         MumakilHiredDriverGuiHandler hiredDriverGuiHandler = new MumakilHiredDriverGuiHandler();
         MinecraftForge.EVENT_BUS.register(hiredDriverGuiHandler);
         FMLCommonHandler.instance().bus().register(hiredDriverGuiHandler);
+
+        FMLCommonHandler.instance().bus().register(
+                new PickupFilterGuiOpenHandler()
+        );
+        MinecraftForge.EVENT_BUS.register(
+                new PickupFilterInventoryButtonHandler()
+        );
     }
 
     private void registerHowdahArcherRenderer() {

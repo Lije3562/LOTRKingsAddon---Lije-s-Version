@@ -36,6 +36,9 @@ import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 import com.enovak.lotrmoremobs.command.CommandPickupFilter;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import com.enovak.lotrmoremobs.network.PickupFilterClearPacket;
+import com.enovak.lotrmoremobs.network.PickupFilterSyncPacket;
+import com.enovak.lotrmoremobs.network.PickupFilterTogglePacket;
 
 @Mod(
         modid = Main.MODID,
@@ -76,6 +79,25 @@ public class Main {
                 MumakilOpenGuiPacket.Handler.class,
                 MumakilOpenGuiPacket.class,
                 0,
+                Side.SERVER
+        );
+
+        network.registerMessage(
+                PickupFilterSyncPacket.Handler.class,
+                PickupFilterSyncPacket.class,
+                1,
+                Side.CLIENT
+        );
+        network.registerMessage(
+                PickupFilterTogglePacket.Handler.class,
+                PickupFilterTogglePacket.class,
+                2,
+                Side.SERVER
+        );
+        network.registerMessage(
+                PickupFilterClearPacket.Handler.class,
+                PickupFilterClearPacket.class,
+                3,
                 Side.SERVER
         );
     }

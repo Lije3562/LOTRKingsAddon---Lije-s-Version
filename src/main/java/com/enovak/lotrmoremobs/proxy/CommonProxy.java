@@ -20,6 +20,7 @@ import com.enovak.lotrmoremobs.spawning.MumakilFormationReplacementService;
 import cpw.mods.fml.common.FMLCommonHandler;
 import net.minecraftforge.common.MinecraftForge;
 import com.enovak.lotrmoremobs.handler.PickupFilterEventHandler;
+import com.enovak.lotrmoremobs.handler.PickupFilterConnectionHandler;
 
 public class CommonProxy {
     public void registerRenderers() {
@@ -113,6 +114,9 @@ public class CommonProxy {
         );
         MinecraftForge.EVENT_BUS.register(
                 new PickupFilterEventHandler()
+        );
+        FMLCommonHandler.instance().bus().register(
+                new PickupFilterConnectionHandler()
         );
     }
 }

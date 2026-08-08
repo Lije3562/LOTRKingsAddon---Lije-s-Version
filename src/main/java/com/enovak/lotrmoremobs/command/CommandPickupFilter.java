@@ -7,6 +7,7 @@ import net.minecraft.command.WrongUsageException;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.item.ItemStack;
 import net.minecraft.util.ChatComponentText;
+import com.enovak.lotrmoremobs.pickupfilter.PickupFilterNetwork;
 
 import java.util.List;
 
@@ -47,6 +48,7 @@ public class CommandPickupFilter extends CommandBase {
 
         if ("clear".equals(action)) {
             PlayerPickupFilterData.clearExcludedItems(player);
+            PickupFilterNetwork.syncToPlayer(player);
             sender.addChatMessage(new ChatComponentText("Pickup filter cleared."));
             return;
         }
@@ -63,24 +65,44 @@ public class CommandPickupFilter extends CommandBase {
 
         ItemStack held = player.inventory.getCurrentItem();
         if (held == null) {
-            sender.addChatMessage(new ChatComponentText("Hold an item in your hand first."));
+            sender.addChatMessage(
+                    new ChatComponentText("Hold an item in your hand first.")
+            );
             return;
         }
 
         if ("add".equals(action)) {
             if (PlayerPickupFilterData.addExcludedItem(player, held)) {
-                sender.addChatMessage(new ChatComponentText("Added to pickup filter: " + held.getDisplayName()));
+                PickupFilterNetwork.syncToPlayer(player);
+                sender.addChatMessage(
+                        new ChatComponentText(
+                                "Added to pickup filter: " + held.getDisplayName()
+                        )
+                );
             } else {
-                sender.addChatMessage(new ChatComponentText("Already filtered: " + held.getDisplayName()));
+                sender.addChatMessage(
+                        new ChatComponentText(
+                                "Already filtered: " + held.getDisplayName()
+                        )
+                );
             }
             return;
         }
 
         if ("remove".equals(action)) {
             if (PlayerPickupFilterData.removeExcludedItem(player, held)) {
-                sender.addChatMessage(new ChatComponentText("Removed from pickup filter: " + held.getDisplayName()));
+                PickupFilterNetwork.syncToPlayer(player);
+                sender.addChatMessage(
+                        new ChatComponentText(
+                                "Removed from pickup filter: " + held.getDisplayName()
+                        )
+                );
             } else {
-                sender.addChatMessage(new ChatComponentText("Not currently filtered: " + held.getDisplayName()));
+                sender.addChatMessage(
+                        new ChatComponentText(
+                                "Not currently filtered: " + held.getDisplayName()
+                        )
+                );
             }
             return;
         }

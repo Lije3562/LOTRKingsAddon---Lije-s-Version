@@ -20,6 +20,7 @@ import lotr.common.inventory.LOTRContainerUnitTrade;
 import lotr.common.inventory.LOTRSlotAlignmentReward;
 import net.minecraft.client.Minecraft;
 import net.minecraft.client.gui.GuiButton;
+import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.renderer.OpenGlHelper;
 import net.minecraft.client.renderer.RenderHelper;
 import net.minecraft.client.renderer.entity.RenderItem;
@@ -529,7 +530,41 @@ public final class LOTRGuiUnitTradePledgeNavigation
                 faction,
                 viewedRegions
         );
-        this.mc.displayGuiScreen(new LOTRGuiFactions());
+        this.mc.displayGuiScreen(
+                new HiringReturnFactionGui(this, this.unitTrader)
+        );
+    }
+
+    /** Faction screen variant used only by the pledge link in this trade GUI. */
+    private static final class HiringReturnFactionGui extends LOTRGuiFactions {
+        private final GuiScreen returnGui;
+        private final LOTRUnitTradeable trader;
+
+        private HiringReturnFactionGui(
+                GuiScreen returnGui,
+                LOTRUnitTradeable trader
+        ) {
+            this.returnGui = returnGui;
+            this.trader = trader;
+        }
+
+        @Override
+        protected void keyTyped(char typedChar, int keyCode) {
+            Minecraft minecraft = Minecraft.getMinecraft();
+            if (minecraft != null
+                    && minecraft.gameSettings != null
+                    && minecraft.gameSettings.keyBindInventory != null
+                    && keyCode == minecraft.gameSettings.keyBindInventory.getKeyCode()
+                    && this.returnGui != null
+                    && minecraft.thePlayer != null
+                    && minecraft.theWorld != null
+                    && this.trader != null
+                    && this.trader.canTradeWith(minecraft.thePlayer)) {
+                minecraft.displayGuiScreen(this.returnGui);
+                return;
+            }
+            super.keyTyped(typedChar, keyCode);
+        }
     }
 
     private void drawCenteredString(

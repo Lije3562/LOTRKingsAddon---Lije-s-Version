@@ -19,6 +19,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.init.Items;
 import net.minecraft.inventory.IInventory;
 import net.minecraft.item.ItemStack;
+import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.World;
@@ -59,6 +60,9 @@ public final class MumakilWarFormationFactory {
                     {9, 0},
                     {0, 9}
             };
+    private static final int PLAYER_HIRE_MAX_SEARCH_RADIUS = 30;
+    private static final int PLAYER_HIRE_VERTICAL_SEARCH = 30;
+    private static final int PLAYER_HIRE_SEARCH_RING_STEP = 5;
 
     public enum FormationPlacementResult {
         VALID,
@@ -455,6 +459,222 @@ public final class MumakilWarFormationFactory {
                             System.nanoTime() - searchStart
                     );
         }
+    }
+
+    /**
+     * Finds a clear location for a player-hired Mumak formation within
+     * 30 blocks horizontally and vertically of the hiring NPC.
+     *
+     * The hiring player remains excluded from the entity-collision test because
+     * native LOTR initially creates the hired mount/driver at the player's
+     * position before this validated placement is applied.
+     */
+    public static FormationPlacementSearchResult
+    findPlayerHiredFormationPlacement(
+            World world,
+            EntityPlayer player,
+            LOTREntityNPC hiringNpc,
+            LOTREntityNPC driver,
+            LOTREntityMumakil mumakil,
+            float placementYaw
+    ) {
+        FormationPlacementSearchResult search =
+                new FormationPlacementSearchResult();
+
+        if (world == null
+                || world.isRemote
+                || player == null
+                || player.worldObj != world
+                || hiringNpc == null
+                || hiringNpc.worldObj != world
+                || hiringNpc.isDead
+                || !hiringNpc.isEntityAlive()
+                || driver == null
+                || mumakil == null) {
+            search.record(
+                    FormationPlacementResult.UNLOADED_AREA,
+                    0.0D,
+                    0.0D,
+                    0.0D
+            );
+            return search;
+        }
+
+        /*
+         * The hiring NPC, rather than the player, is the center of the
+         * permitted Mumak placement area.
+         */
+        int baseX = MathHelper.floor_double(hiringNpc.posX);
+        int baseY = MathHelper.floor_double(hiringNpc.posY);
+        int baseZ = MathHelper.floor_double(hiringNpc.posZ);
+
+        double fallbackX = 0.0D;
+        double fallbackY = 0.0D;
+        double fallbackZ = 0.0D;
+        boolean hasNonExposedFallback = false;
+
+        /*
+         * Search nearest rings first.
+         *
+         * Seven rings:
+         * 0, 5, 10, 15, 20, 25, 30 blocks.
+         *
+         * This retains 49 horizontal candidates total:
+         * one center candidate plus eight candidates on each outer ring.
+         */
+        for (int radius = 0;
+             radius <= PLAYER_HIRE_MAX_SEARCH_RADIUS;
+             radius += PLAYER_HIRE_SEARCH_RING_STEP) {
+
+            int angularCandidates = radius == 0 ? 1 : 8;
+
+            for (int angle = 0; angle < angularCandidates; ++angle) {
+                double angleRadians = radius == 0
+                        ? 0.0D
+                        : angle * (Math.PI / 4.0D);
+
+                int candidateX = baseX + MathHelper.floor_double(
+                        radius * Math.cos(angleRadians) + 0.5D
+                );
+
+                int candidateZ = baseZ + MathHelper.floor_double(
+                        radius * Math.sin(angleRadians) + 0.5D
+                );
+
+                /*
+                 * Start at the highest useful location in this column, but do
+                 * not allow placement more than 30 blocks above the hiring NPC.
+                 *
+                 * We then search downward as far as 30 blocks below the NPC.
+                 * This allows hiring from hills, bridges, treehouses, cliffs,
+                 * valleys, etc. without making the search player-centered.
+                 */
+                int surfaceY = world.getTopSolidOrLiquidBlock(
+                        candidateX,
+                        candidateZ
+                );
+
+                int highestY = Math.min(
+                        surfaceY,
+                        baseY + PLAYER_HIRE_VERTICAL_SEARCH
+                );
+
+                int lowestY = Math.max(
+                        1,
+                        baseY - PLAYER_HIRE_VERTICAL_SEARCH
+                );
+
+                if (highestY < lowestY) {
+                    continue;
+                }
+
+                for (int candidateY = highestY;
+                     candidateY >= lowestY;
+                     --candidateY) {
+
+                    double x = candidateX + 0.5D;
+                    double y = candidateY;
+                    double z = candidateZ + 0.5D;
+
+                    /*
+                     * Keep the existing Mumak-sized validator unchanged.
+                     *
+                     * It already requires:
+                     * - solid supporting ground;
+                     * - full adult Mumak block clearance;
+                     * - sufficient headroom;
+                     * - no liquid;
+                     * - loaded terrain;
+                     * - entity clearance.
+                     */
+                    FormationPlacementResult result =
+                            validatePlayerHiredCandidate(
+                                    world,
+                                    player,
+                                    driver,
+                                    mumakil,
+                                    x,
+                                    y,
+                                    z,
+                                    placementYaw
+                            );
+
+                    search.record(result, x, y, z);
+
+                    if (result != FormationPlacementResult.VALID) {
+                        continue;
+                    }
+
+                    /*
+                     * Continue preferring ordinary exposed terrain.
+                     */
+                    if (world.canBlockSeeTheSky(
+                            candidateX,
+                            candidateY,
+                            candidateZ
+                    )) {
+                        return search;
+                    }
+
+                    /*
+                     * Preserve the existing validated non-exposed fallback.
+                     */
+                    if (!hasNonExposedFallback) {
+                        fallbackX = x;
+                        fallbackY = y;
+                        fallbackZ = z;
+                        hasNonExposedFallback = true;
+                    }
+                }
+            }
+        }
+
+        if (hasNonExposedFallback) {
+            search.record(
+                    FormationPlacementResult.VALID,
+                    fallbackX,
+                    fallbackY,
+                    fallbackZ
+            );
+        }
+
+        return search;
+    }
+
+    private static FormationPlacementResult validatePlayerHiredCandidate(
+            World world,
+            Entity excludedEntity,
+            LOTREntityNPC driver,
+            LOTREntityMumakil mumakil,
+            double x,
+            double y,
+            double z,
+            float placementYaw
+    ) {
+        FormationPlacementResult body = validateNaturalFormationSpawnAt(
+                world,
+                excludedEntity,
+                x,
+                y,
+                z
+        );
+        if (body != FormationPlacementResult.VALID) {
+            return body;
+        }
+
+        mumakil.setLocationAndAngles(x, y, z, placementYaw, 0.0F);
+        mumakil.rotationYawHead = placementYaw;
+        mumakil.renderYawOffset = placementYaw;
+        driver.mountEntity(mumakil);
+        mumakil.positionRiderAtMumakilAnchor(driver);
+
+        AxisAlignedBB riderSpace = driver.boundingBox;
+        if (riderSpace == null
+                || !world.func_147461_a(riderSpace).isEmpty()
+                || world.isAnyLiquid(riderSpace)) {
+            return FormationPlacementResult.SOLID_BLOCK_CLEARANCE;
+        }
+        return FormationPlacementResult.VALID;
     }
 
     /**

@@ -6,6 +6,9 @@ import com.enovak.lotrmoremobs.util.MumakilPerformanceTracker;
 import com.enovak.lotrmoremobs.util.MumakilServerPerformanceDiagnostics;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.eventhandler.EventPriority;
+import cpw.mods.fml.common.gameevent.TickEvent;
+import lotr.common.LOTRLevelData;
+import lotr.common.LOTRPlayerData;
 import lotr.common.LOTRMod;
 import lotr.common.entity.animal.LOTRAmbientCreature;
 import lotr.common.entity.npc.LOTREntityNPC;
@@ -112,6 +115,9 @@ public class MumakilDriverControlEventHandler {
             new WeakHashMap<LOTREntityMumakil, DriverTargetRuntimeState>();
     private static final Map<LOTREntityNPC, Long> DRIVER_ORPHAN_DEADLINES =
             new WeakHashMap<LOTREntityNPC, Long>();
+    private static final Map<EntityPlayer, FastTravelMumakSnapshot>
+            FAST_TRAVEL_MUMAK_SNAPSHOTS =
+            new WeakHashMap<EntityPlayer, FastTravelMumakSnapshot>();
 
     @SubscribeEvent
     public void onEntityJoinWorld(EntityJoinWorldEvent event) {
@@ -223,6 +229,97 @@ public class MumakilDriverControlEventHandler {
         }
     }
 
+    /**
+     * LOTR's fast-travel code normally recreates selected hired NPCs and an
+     * EntityLiving mount in one pass. Keep a mounted player-hired Mumak
+     * available as a narrowly scoped fallback when that native selection pass
+     * leaves the original rider alive (for example, when the rider was not in
+     * the native 256-block query). Howdah attachments are intentionally not
+     * handled here.
+     */
+    @SubscribeEvent
+    public void onPlayerTick(TickEvent.PlayerTickEvent event) {
+        if (event == null
+                || event.player == null
+                || event.player.worldObj == null
+                || event.player.worldObj.isRemote
+                || event.phase != TickEvent.Phase.START) {
+            return;
+        }
+
+        EntityPlayer player = event.player;
+        LOTRPlayerData playerData = LOTRLevelData.getData(player);
+        if (playerData.getTargetFTWaypoint() != null) {
+            if (!FAST_TRAVEL_MUMAK_SNAPSHOTS.containsKey(player)) {
+                LOTREntityNPC driver = findPlayerHiredMumakDriver(player);
+                if (driver != null && driver.ridingEntity instanceof LOTREntityMumakil) {
+                    FAST_TRAVEL_MUMAK_SNAPSHOTS.put(
+                            player,
+                            new FastTravelMumakSnapshot(
+                                    player,
+                                    driver,
+                                    (LOTREntityMumakil)driver.ridingEntity
+                            )
+                    );
+                }
+            }
+            return;
+        }
+
+        FastTravelMumakSnapshot snapshot =
+                FAST_TRAVEL_MUMAK_SNAPSHOTS.remove(player);
+        if (snapshot == null
+                || snapshot.playerWorld != player.worldObj
+                || snapshot.driver.isDead
+                || snapshot.mumakil.isDead
+                || snapshot.driver.ridingEntity != snapshot.mumakil
+                || snapshot.distanceFromOriginSq(player) < 4096.0D) {
+            return;
+        }
+
+        double yawRadians = Math.toRadians(player.rotationYaw);
+        double spawnX = player.posX - Math.sin(yawRadians) * 8.0D;
+        double spawnZ = player.posZ + Math.cos(yawRadians) * 8.0D;
+        snapshot.mumakil.setLocationAndAngles(
+                spawnX,
+                player.posY,
+                spawnZ,
+                player.rotationYaw,
+                snapshot.mumakil.rotationPitch
+        );
+        snapshot.driver.mountEntity(snapshot.mumakil);
+        snapshot.driver.setLocationAndAngles(
+                spawnX,
+                player.posY + snapshot.mumakil.height,
+                spawnZ,
+                player.rotationYaw,
+                snapshot.driver.rotationPitch
+        );
+    }
+
+    private static LOTREntityNPC findPlayerHiredMumakDriver(EntityPlayer player) {
+        List loaded = player.worldObj.loadedEntityList;
+        for (int i = 0; i < loaded.size(); ++i) {
+            if (!(loaded.get(i) instanceof LOTREntityNPC)) {
+                continue;
+            }
+            LOTREntityNPC driver = (LOTREntityNPC)loaded.get(i);
+            if (driver.hiredNPCInfo != null
+                    && driver.hiredNPCInfo.isActive
+                    && driver.hiredNPCInfo.getHiringPlayer() == player
+                    && driver.hiredNPCInfo.shouldFollowPlayer()
+                    && driver.ridingEntity instanceof LOTREntityMumakil) {
+                LOTREntityMumakil mumakil = (LOTREntityMumakil)driver.ridingEntity;
+                if (mumakil.isHiredWarMumakil()
+                        && mumakil.getFormationOrigin()
+                        == com.enovak.lotrmoremobs.entity.animal.MumakilFormationOrigin.PLAYER_HIRED) {
+                    return driver;
+                }
+            }
+        }
+        return null;
+    }
+
     private static void updateMountedDriverHorn(
             LOTREntityMumakil mumakil,
             LOTREntityNPC driver
@@ -258,6 +355,32 @@ public class MumakilDriverControlEventHandler {
 
     private static final class MountedDriverHornWorldState {
         private long quietUntilTick;
+    }
+
+    private static final class FastTravelMumakSnapshot {
+        private final World playerWorld;
+        private final LOTREntityNPC driver;
+        private final LOTREntityMumakil mumakil;
+        private final double originX;
+        private final double originZ;
+
+        private FastTravelMumakSnapshot(
+                EntityPlayer player,
+                LOTREntityNPC driver,
+                LOTREntityMumakil mumakil
+        ) {
+            this.playerWorld = player.worldObj;
+            this.driver = driver;
+            this.mumakil = mumakil;
+            this.originX = player.posX;
+            this.originZ = player.posZ;
+        }
+
+        private double distanceFromOriginSq(EntityPlayer player) {
+            double dx = player.posX - this.originX;
+            double dz = player.posZ - this.originZ;
+            return dx * dx + dz * dz;
+        }
     }
 
     private static final class DriverTargetRuntimeState {
@@ -903,6 +1026,45 @@ public class MumakilDriverControlEventHandler {
 
         Entity entity = mumakil.worldObj.getEntityByID(targetId);
         return entity instanceof EntityLivingBase ? (EntityLivingBase) entity : null;
+    }
+
+    /**
+     * Returns true only for the target currently owned by the handler after
+     * its normal validation, rejection, retention, and driver/mount sync
+     * checks. Follow AI uses this to avoid treating a stale native driver
+     * target as active combat.
+     */
+    public static boolean hasActiveAuthoritativeHiredWarCombatTarget(
+            LOTREntityMumakil mumakil
+    ) {
+        if (mumakil == null
+                || mumakil.worldObj == null
+                || mumakil.worldObj.isRemote
+                || !mumakil.isHiredWarMumakil()) {
+            return false;
+        }
+
+        LOTREntityNPC driver = getValidNearHaradDriver(mumakil);
+        if (driver == null
+                || driver.hiredNPCInfo == null
+                || !driver.hiredNPCInfo.isActive) {
+            return false;
+        }
+
+        EntityLivingBase target = getStoredDriverTarget(mumakil);
+        long worldTick = mumakil.worldObj.getTotalWorldTime();
+        if (target == null
+                || !isValidDriverTarget(mumakil, driver, target)
+                || isRejectedDriverTarget(mumakil, target, worldTick)
+                || isTooHighForDrivenMumakilMelee(mumakil, target)
+                || mumakil.getDistanceSqToEntity(target)
+                > AUTONOMOUS_TARGET_RETENTION_RANGE
+                * AUTONOMOUS_TARGET_RETENTION_RANGE) {
+            return false;
+        }
+
+        return driver.getAttackTarget() == target
+                && mumakil.getAttackTarget() == target;
     }
 
     private static boolean setStoredDriverTarget(
