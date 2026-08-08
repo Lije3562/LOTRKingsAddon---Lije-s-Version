@@ -27,8 +27,28 @@ public class LOTRRenderMumakilDriver extends LOTRRenderNearHaradrim {
             float yaw,
             float partialTicks
     ) {
-        MumakilDriverControlEventHandler
-                .applyMountedDriverPoseIfValid(entity);
-        super.doRender(entity, x, y, z, yaw, partialTicks);
+        if (!LOTRModelMumakilDriver.isMountedMumakDriver(entity)) {
+            MumakilDriverControlEventHandler
+                    .applyMountedDriverPoseIfValid(entity);
+            super.doRender(entity, x, y, z, yaw, partialTicks);
+            return;
+        }
+
+        float limbSwing = entity.limbSwing;
+        float limbSwingAmount = entity.limbSwingAmount;
+        float prevLimbSwingAmount = entity.prevLimbSwingAmount;
+        entity.limbSwing = 0.0F;
+        entity.limbSwingAmount = 0.0F;
+        entity.prevLimbSwingAmount = 0.0F;
+
+        try {
+            MumakilDriverControlEventHandler
+                    .applyMountedDriverPoseIfValid(entity);
+            super.doRender(entity, x, y, z, yaw, partialTicks);
+        } finally {
+            entity.limbSwing = limbSwing;
+            entity.limbSwingAmount = limbSwingAmount;
+            entity.prevLimbSwingAmount = prevLimbSwingAmount;
+        }
     }
 }
