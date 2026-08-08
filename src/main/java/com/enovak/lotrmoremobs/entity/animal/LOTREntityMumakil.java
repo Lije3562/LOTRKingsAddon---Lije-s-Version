@@ -370,6 +370,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private UUID mumakilInvasionId;
     private boolean authoritativeMumakilHowdahEquipped;
     private int howdahRosterLoadGraceTicks;
+    private boolean naturalDespawnCleanupInProgress;
+    private boolean naturalDespawnMembersRemoved;
+    private Entity naturalDespawnCapturedDriver;
     private float mumakilSpeedTrait = NORMAL_SPEED_TRAIT;
     private boolean mumakilSpeedTraitInitialized;
     private boolean babyGrowthInitialized;
@@ -389,6 +392,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private float lastRawLocomotionPhase;
     private boolean playerRiddenLocomotionInitialized;
     private boolean wasPlayerRiddenForLocomotion;
+    private int lastMumakilFootfallIndex;
+    private boolean mumakilFootfallTrackingInitialized;
+
     private int debugSeatPlayerEntityId = -1;
     private long debugSeatLastSampleTick = Long.MIN_VALUE;
     private double debugSeatLastMumakX;
@@ -579,10 +585,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         float elapsed = MUMAKIL_TRUMPET_ANIMATION_TICKS
                 - remaining
                 + MathHelper.clamp_float(
-                        partialTicks,
-                        0.0F,
-                        1.0F
-                );
+                partialTicks,
+                0.0F,
+                1.0F
+        );
         return MathHelper.clamp_float(
                 elapsed
                         / (float)MUMAKIL_TRUMPET_ANIMATION_TICKS,
@@ -681,7 +687,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         int priority = inherited == null ? 2 : inherited.priority;
         this.tasks.addTask(priority, new EntityAIMumakilMate());
     }
-public float getCollisionBorderSize() {
+    public float getCollisionBorderSize() {
         // Scale the extra melee/raycast padding with the real physical body size.
         return this.isChild() ? 1.25F * BABY_RENDER_SCALE : 1.25F;
     }
@@ -736,7 +742,7 @@ public float getCollisionBorderSize() {
         boolean spawnAsBaby =
                 herdData.memberIndex
                         >= NATURAL_HERD_ADULTS_BEFORE_BABIES
-                && herdData.babiesSpawned
+                        && herdData.babiesSpawned
                         < herdData.plannedBabyCount;
 
         if (spawnAsBaby) {
@@ -799,15 +805,44 @@ public float getCollisionBorderSize() {
     @Override
     protected void despawnEntity() {
         boolean naturalFormation = this.isNaturalNearHaradFormation();
-        boolean wasDead = this.isDead;
         Entity capturedDriver = this.riddenByEntity;
-        super.despawnEntity();
+        if (!naturalFormation) {
+            super.despawnEntity();
+            return;
+        }
 
-        if (naturalFormation && !wasDead && this.isDead) {
+        this.naturalDespawnCleanupInProgress = true;
+        this.naturalDespawnMembersRemoved = false;
+        this.naturalDespawnCapturedDriver = capturedDriver;
+        try {
+            super.despawnEntity();
+        } finally {
+            this.naturalDespawnCleanupInProgress = false;
+            if (this.isDead && !this.naturalDespawnMembersRemoved) {
+                MumakilWarFormationFactory.removeNaturalFormationMembers(
+                        this,
+                        this.naturalDespawnCapturedDriver
+                );
+                this.naturalDespawnMembersRemoved = true;
+            }
+            this.naturalDespawnCapturedDriver = null;
+        }
+    }
+
+    @Override
+    public void setDead() {
+        boolean wasDead = this.isDead;
+        super.setDead();
+
+        if (!wasDead
+                && this.isDead
+                && this.naturalDespawnCleanupInProgress
+                && !this.naturalDespawnMembersRemoved) {
             MumakilWarFormationFactory.removeNaturalFormationMembers(
                     this,
-                    capturedDriver
+                    this.naturalDespawnCapturedDriver
             );
+            this.naturalDespawnMembersRemoved = true;
         }
     }
 
@@ -906,8 +941,14 @@ public float getCollisionBorderSize() {
                 || origin == MumakilFormationOrigin.CREATIVE_SPAWN_EGG;
     }
 
-    public boolean isAutonomousCombatPassActive() {
+    public boolean isWarCombatFormation() {
         return this.isAutonomousWarFormation()
+                || this.getFormationOrigin()
+                == MumakilFormationOrigin.PLAYER_HIRED;
+    }
+
+    public boolean isAutonomousCombatPassActive() {
+        return this.isWarCombatFormation()
                 && this.mumakilAutonomousCombatPassActive;
     }
 
@@ -1660,13 +1701,13 @@ public float getCollisionBorderSize() {
                     + WILD_HERD_REPATH_COOLDOWN_TICKS;
             this.wildHerdRegroupPathOwned =
                     this.getNavigator().tryMoveToXYZ(
-                    this.wildHerdRegroupX,
-                    MathHelper.floor_double(this.boundingBox.minY),
-                    this.wildHerdRegroupZ,
-                    this.isBabyMumakil()
-                            ? BABY_FOLLOW_SPEED
-                            : WILD_WANDER_SPEED
-            );
+                            this.wildHerdRegroupX,
+                            MathHelper.floor_double(this.boundingBox.minY),
+                            this.wildHerdRegroupZ,
+                            this.isBabyMumakil()
+                                    ? BABY_FOLLOW_SPEED
+                                    : WILD_WANDER_SPEED
+                    );
         }
     }
 
@@ -1765,7 +1806,7 @@ public float getCollisionBorderSize() {
                 || mode == MumakilMode.BABY_TAMED
                 || mode == MumakilMode.ADULT_TAMED;
     }
-public boolean isBabyPanicAnimationActive() {
+    public boolean isBabyPanicAnimationActive() {
         return this.babyPanicAnimationActive;
     }
 
@@ -2011,24 +2052,24 @@ public boolean isBabyPanicAnimationActive() {
                         "heart",
                         child.posX
                                 + (double)(
-                                        LOTREntityMumakil.this.rand
-                                                .nextFloat()
+                                LOTREntityMumakil.this.rand
+                                        .nextFloat()
                                         * child.width * 2.0F
-                                )
+                        )
                                 - (double)child.width,
                         child.posY
                                 + 0.5D
                                 + (double)(
-                                        LOTREntityMumakil.this.rand
-                                                .nextFloat()
+                                LOTREntityMumakil.this.rand
+                                        .nextFloat()
                                         * child.height
-                                ),
+                        ),
                         child.posZ
                                 + (double)(
-                                        LOTREntityMumakil.this.rand
-                                                .nextFloat()
+                                LOTREntityMumakil.this.rand
+                                        .nextFloat()
                                         * child.width * 2.0F
-                                )
+                        )
                                 - (double)child.width,
                         velocityX,
                         velocityY,
@@ -3930,8 +3971,7 @@ public boolean isBabyPanicAnimationActive() {
                 if (execute) {
                     this.attackTarget = target;
                     LOTREntityMumakil.this.getNavigator().setAvoidsWater(
-                            LOTREntityMumakil.this
-                                    .isAutonomousWarFormation()
+                            LOTREntityMumakil.this.isWarCombatFormation()
                     );
                     this.resetControlledPathForNewTarget(target);
                     if (this.canUseAutonomousCombatPass(target)) {
@@ -4246,7 +4286,7 @@ public boolean isBabyPanicAnimationActive() {
                     || LOTREntityMumakil.this.riddenByEntity
                     instanceof EntityPlayer
                     || !LOTREntityMumakil.this
-                    .isAutonomousWarFormation()
+                    .isWarCombatFormation()
                     || !LOTREntityMumakil.this
                     .hasMumakilHowdahEquipped()) {
                 return false;
@@ -4419,11 +4459,11 @@ public boolean isBabyPanicAnimationActive() {
             boolean targetMoved =
                     targetMoveX * targetMoveX
                             + targetMoveZ * targetMoveZ
-                    >= AUTONOMOUS_TARGET_WAYPOINT_REPATH_DISTANCE_SQ;
+                            >= AUTONOMOUS_TARGET_WAYPOINT_REPATH_DISTANCE_SQ;
             boolean needsPath =
                     !this.hasCombatWaypoint
-                    || targetMoved
-                    || LOTREntityMumakil.this.getNavigator().noPath();
+                            || targetMoved
+                            || LOTREntityMumakil.this.getNavigator().noPath();
 
             int currentTick = LOTREntityMumakil.this.ticksExisted;
             if (!needsPath
@@ -4479,11 +4519,11 @@ public boolean isBabyPanicAnimationActive() {
                 } else {
                     combatPathAccepted =
                             LOTREntityMumakil.this
-                            .getNavigator()
-                            .setPath(
-                                    combatPath,
-                                    this.moveSpeed
-                            );
+                                    .getNavigator()
+                                    .setPath(
+                                            combatPath,
+                                            this.moveSpeed
+                                    );
                 }
             }
             long combatPathNanos =
@@ -4654,8 +4694,8 @@ public boolean isBabyPanicAnimationActive() {
             boolean[] attempted =
                     new boolean[AUTONOMOUS_PASS_ANGLES.length];
             for (int i = 0;
-                    i < AUTONOMOUS_PASS_ANGLES.length;
-                    ++i) {
+                 i < AUTONOMOUS_PASS_ANGLES.length;
+                 ++i) {
                 double angle = Math.toRadians(
                         AUTONOMOUS_PASS_ANGLES[i]
                 );
@@ -4685,13 +4725,13 @@ public boolean isBabyPanicAnimationActive() {
             }
 
             for (int attempt = 0;
-                    attempt < AUTONOMOUS_PASS_ANGLES.length;
-                    ++attempt) {
+                 attempt < AUTONOMOUS_PASS_ANGLES.length;
+                 ++attempt) {
                 int bestIndex = -1;
                 double bestScore = -Double.MAX_VALUE;
                 for (int i = 0;
-                        i < candidateScores.length;
-                        ++i) {
+                     i < candidateScores.length;
+                     ++i) {
                     if (!attempted[i]
                             && candidateScores[i] > bestScore) {
                         bestIndex = i;
@@ -4781,8 +4821,8 @@ public boolean isBabyPanicAnimationActive() {
             }
 
             for (int i = 0;
-                    i < AUTONOMOUS_TURNAROUND_ANGLES.length;
-                    ++i) {
+                 i < AUTONOMOUS_TURNAROUND_ANGLES.length;
+                 ++i) {
                 double angle = Math.toRadians(
                         AUTONOMOUS_TURNAROUND_ANGLES[i]
                                 * this.turnaroundDirectionSign
@@ -4893,10 +4933,10 @@ public boolean isBabyPanicAnimationActive() {
                             scanBox
                     );
             for (int i = 0;
-                    i < nearby.size()
-                            && enemies.size()
-                            < AUTONOMOUS_CLUSTER_CANDIDATE_LIMIT;
-                    ++i) {
+                 i < nearby.size()
+                         && enemies.size()
+                         < AUTONOMOUS_CLUSTER_CANDIDATE_LIMIT;
+                 ++i) {
                 EntityLivingBase candidate =
                         (EntityLivingBase)nearby.get(i);
                 if (candidate != primaryTarget
@@ -4988,11 +5028,11 @@ public boolean isBabyPanicAnimationActive() {
                             + (this.attackTarget == null
                             ? -1.0D
                             : Math.sqrt(
-                                    LOTREntityMumakil.this
-                                            .getDistanceSqToEntity(
-                                                    this.attackTarget
-                                            )
-                            ))
+                            LOTREntityMumakil.this
+                                    .getDistanceSqToEntity(
+                                            this.attackTarget
+                                    )
+                    ))
                             + " driverTarget="
                             + this.getDebugDriverTargetId()
                             + " hasPath="
@@ -5005,14 +5045,14 @@ public boolean isBabyPanicAnimationActive() {
                             + LOTREntityMumakil.this.moveForward
                             + " horizontalMotion="
                             + Math.sqrt(
-                                    LOTREntityMumakil.this.motionX
-                                            * LOTREntityMumakil.this
-                                            .motionX
-                                            + LOTREntityMumakil.this
-                                            .motionZ
-                                            * LOTREntityMumakil.this
-                                            .motionZ
-                            )
+                            LOTREntityMumakil.this.motionX
+                                    * LOTREntityMumakil.this
+                                    .motionX
+                                    + LOTREntityMumakil.this
+                                    .motionZ
+                                    * LOTREntityMumakil.this
+                                    .motionZ
+                    )
                             + " "
                             + message
             );
@@ -5056,8 +5096,8 @@ public boolean isBabyPanicAnimationActive() {
                 if (groundY <= 0
                         || groundY
                         + MathHelper.ceiling_float_int(
-                                LOTREntityMumakil.this.height
-                        )
+                        LOTREntityMumakil.this.height
+                )
                         >= 256
                         || !LOTREntityMumakil.this.worldObj
                         .blockExists(blockX, groundY, blockZ)
@@ -5114,11 +5154,11 @@ public boolean isBabyPanicAnimationActive() {
             int maxChunkZ = blockZ + radius >> 4;
 
             for (int chunkX = minChunkX;
-                    chunkX <= maxChunkX;
-                    ++chunkX) {
+                 chunkX <= maxChunkX;
+                 ++chunkX) {
                 for (int chunkZ = minChunkZ;
-                        chunkZ <= maxChunkZ;
-                        ++chunkZ) {
+                     chunkZ <= maxChunkZ;
+                     ++chunkZ) {
                     if (!LOTREntityMumakil.this.worldObj
                             .getChunkProvider()
                             .chunkExists(chunkX, chunkZ)) {
@@ -5868,8 +5908,8 @@ public boolean isBabyPanicAnimationActive() {
         int baseY = MathHelper.floor_double(this.boundingBox.minY);
 
         for (int groundY = baseY + 2;
-                groundY >= baseY - 5;
-                --groundY) {
+             groundY >= baseY - 5;
+             --groundY) {
             Block groundBlock = this.worldObj.getBlock(
                     blockX,
                     groundY,
@@ -5965,6 +6005,7 @@ public boolean isBabyPanicAnimationActive() {
             }
         }
         this.updatePlayerRiddenLocomotionPhase();
+        this.updateMumakilFootfallPhase();
 
         if (!this.worldObj.isRemote
                 && this.getFormationOrigin()
@@ -5982,7 +6023,7 @@ public boolean isBabyPanicAnimationActive() {
                         .removeNaturalFormationMembers(
                                 this,
                                 capturedDriver
-                );
+                        );
                 this.setDead();
                 return;
             }
@@ -6058,7 +6099,7 @@ public boolean isBabyPanicAnimationActive() {
             if (!MumakilPerformanceTracker.DEBUG_DISABLE_MUMAKIL_TREE_CLEARING) {
                 long serverTreeTimingStart =
                         MumakilServerPerformanceDiagnostics
-                        .startTimer(this.worldObj);
+                                .startTimer(this.worldObj);
                 boolean trackTreePerformance =
                         MumakilPerformanceTracker.isEnabled();
                 long treePerfStart = trackTreePerformance
@@ -6133,6 +6174,74 @@ public boolean isBabyPanicAnimationActive() {
 
         this.lastRawLocomotionPhase = rawPhase;
         this.wasPlayerRiddenForLocomotion = playerRidden;
+    }
+
+    private void updateMumakilFootfallPhase() {
+        boolean playerRidden = this.riddenByEntity instanceof EntityPlayer;
+
+        /*
+         * Match the same locomotion phase used by LOTRRenderMumakilGeo.
+         */
+        float locomotionPhase = playerRidden
+                ? this.playerRiddenLocomotionPhase
+                : this.limbSwing;
+
+        /*
+         * Unridden calves use a three-times-faster visible walking phase.
+         * Player-ridden calves intentionally use the normal ridden phase.
+         */
+        if (this.isChild() && !playerRidden) {
+            locomotionPhase *= 3.0F;
+        }
+
+        /*
+         * Renderer uses:
+         *
+         *     walkPhase = limbSwing * 0.55F;
+         *
+         * The two diagonal leg pairs are PI radians apart, so crossing
+         * each PI interval represents the next alternating footfall.
+         */
+        float walkPhase = locomotionPhase * 0.55F;
+
+        boolean walking = this.limbSwingAmount >= 0.15F;
+
+        if (!walking) {
+            this.mumakilFootfallTrackingInitialized = false;
+            return;
+        }
+
+        int footfallIndex = MathHelper.floor_float(
+                walkPhase / (float)Math.PI
+        );
+
+        /*
+         * Starting movement only establishes our position in the cycle.
+         * Do not produce an immediate stomp merely because the Mumak
+         * transitioned from idle to walking.
+         */
+        if (!this.mumakilFootfallTrackingInitialized) {
+            this.lastMumakilFootfallIndex = footfallIndex;
+            this.mumakilFootfallTrackingInitialized = true;
+            return;
+        }
+
+        if (footfallIndex != this.lastMumakilFootfallIndex) {
+            this.lastMumakilFootfallIndex = footfallIndex;
+
+            if (!this.worldObj.isRemote) {
+                float basePitch = this.isBabyMumakil() ? 1.25F : 1.00F;
+                float pitchVariation =
+                        (this.rand.nextFloat() - this.rand.nextFloat()) * 0.08F;
+
+                this.worldObj.playSoundAtEntity(
+                        this,
+                        "lotrmoremobs:mumakil.step",
+                        0.8F,
+                        basePitch + pitchVariation
+                );
+            }
+        }
     }
 
     public float getPlayerRiddenLocomotionPhase(float partialTicks) {
@@ -7239,7 +7348,7 @@ public boolean isBabyPanicAnimationActive() {
         int orderedSlice =
                 AGGRO_OBSTACLE_VERTICAL_SLICE_ORDER[
                         (sliceIndex - 1) % 4
-                ];
+                        ];
         double centerX = this.posX;
         double centerZ = this.posZ;
         double halfWidth = 3.5D;
@@ -7435,10 +7544,10 @@ public boolean isBabyPanicAnimationActive() {
         );
         this.rotationYawHead = this.renderYawOffset
                 + MathHelper.clamp_float(
-                        headFromBody,
-                        -IDLE_HEAD_YAW_LIMIT,
-                        IDLE_HEAD_YAW_LIMIT
-                );
+                headFromBody,
+                -IDLE_HEAD_YAW_LIMIT,
+                IDLE_HEAD_YAW_LIMIT
+        );
     }
 
     private Vec3 getAIMovementDirectionPoint() {
@@ -7799,11 +7908,8 @@ public boolean isBabyPanicAnimationActive() {
 
     @Override
     protected void func_145780_a(int x, int y, int z, Block block) {
-        this.playSound(
-                "lotrmoremobs:mumakil.step",
-                0.8F,
-                0.82F + this.rand.nextFloat() * 0.12F
-        );
+        // Mumakil footsteps are synchronized to the visible locomotion cycle
+        // in updateMumakilFootfallPhase().
     }
 
     protected void dropFewItems(boolean flag, int lootingLevel) {
@@ -7961,3 +8067,4 @@ public boolean isBabyPanicAnimationActive() {
     }
 
 }
+
