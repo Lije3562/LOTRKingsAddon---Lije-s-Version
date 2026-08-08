@@ -179,6 +179,7 @@ public final class LOTRItemMumakilCalfSpawnEgg
          * Run the normal LOTR/Mumakil spawn setup first, then deliberately
          * replace its adult state with the dedicated calf lifecycle.
          */
+        calf.bypassNaturalSpawnSpacing();
         calf.onSpawnWithEgg(null);
         calf.initializeAsSpawnEggCalf();
 

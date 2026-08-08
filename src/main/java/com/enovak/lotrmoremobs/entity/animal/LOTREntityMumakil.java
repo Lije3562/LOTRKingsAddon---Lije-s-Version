@@ -27,6 +27,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityAgeable;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.EnumCreatureType;
 import net.minecraft.entity.IEntityLivingData;
 import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
@@ -62,6 +63,7 @@ import net.minecraft.util.DamageSource;
 import net.minecraft.util.MathHelper;
 import net.minecraft.util.Vec3;
 import net.minecraft.world.World;
+import net.minecraft.world.SpawnerAnimals;
 import software.bernie.geckolib3.core.IAnimatable;
 import software.bernie.geckolib3.core.manager.AnimationData;
 import software.bernie.geckolib3.core.manager.AnimationFactory;
@@ -123,10 +125,15 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int BABY_MELON_FED_WINDOW_TICKS = 5 * 60 * 20; // BABY_MELON_FED_WINDOW_V1
     private static final float TAMED_BABY_MELON_HEAL_AMOUNT = 20.0F; // TAMED_BABY_MELON_HEALING_V1
     private static final int TAMED_BABY_MELON_HEAL_COOLDOWN_TICKS = 30 * 20;
-    private static final int BABY_GROWTH_TICKS = 30 * 60 * 20;
+    private static final int BABY_GROWTH_TICKS = 30 * 20;
+    //30 * 60 * 20
     private static final int NATURAL_HERD_FAMILY_CHANCE = 4; // MUMAKIL_NATURAL_SPAWNING_V1
     private static final int NATURAL_HERD_ADULTS_BEFORE_BABIES = 2;
     private static final int NATURAL_HERD_MAX_BABIES = 2;
+    private static final double NATURAL_HERD_SPACING_RADIUS = 128.0D;
+    private static final double NATURAL_HERD_MEMBER_MIN_RADIUS = 9.0D;
+    private static final double NATURAL_HERD_MEMBER_MAX_RADIUS = 13.0D;
+    private static final int NATURAL_HERD_MEMBER_POSITION_ATTEMPTS = 12;
     private static final double BABY_TAMING_ADULT_PROTECTION_RANGE = 24.0D; // BABY_TAMING_ADULT_PROTECTION_V1 / OCCASIONAL_PLAYER_AGGRESSION_V1
     private static final double BABY_TAMING_ADULT_PROTECTION_VERTICAL_RANGE = 16.0D;
 
@@ -372,6 +379,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private int howdahRosterLoadGraceTicks;
     private boolean naturalDespawnCleanupInProgress;
     private boolean naturalDespawnMembersRemoved;
+    private boolean naturalSpawnSpacingBypassed;
     private Entity naturalDespawnCapturedDriver;
     private float mumakilSpeedTrait = NORMAL_SPEED_TRAIT;
     private boolean mumakilSpeedTraitInitialized;
@@ -394,6 +402,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean wasPlayerRiddenForLocomotion;
     private int lastMumakilFootfallIndex;
     private boolean mumakilFootfallTrackingInitialized;
+    private int lastMumakilFootfallTick = Integer.MIN_VALUE;
 
     private int debugSeatPlayerEntityId = -1;
     private long debugSeatLastSampleTick = Long.MIN_VALUE;
@@ -739,6 +748,21 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             herdData = new MumakilHerdSpawnData(plannedBabyCount);
         }
 
+        boolean firstHerdMember = herdData.memberIndex == 0;
+        if (firstHerdMember
+                && !this.worldObj.isRemote
+                && !this.naturalSpawnSpacingBypassed
+                && this.hasNearbyWildMumakil(
+                NATURAL_HERD_SPACING_RADIUS
+        )) {
+            herdData.spacingRejected = true;
+        }
+
+        if (herdData.spacingRejected) {
+            this.setDead();
+            return herdData;
+        }
+
         boolean spawnAsBaby =
                 herdData.memberIndex
                         >= NATURAL_HERD_ADULTS_BEFORE_BABIES
@@ -761,8 +785,139 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.wasBabyMumakil = spawnAsBaby;
         this.setHealth(this.getMaxHealth());
 
+        if (!this.worldObj.isRemote) {
+            if (firstHerdMember) {
+                herdData.centerX = this.posX;
+                herdData.centerZ = this.posZ;
+            } else {
+                this.placeNaturalHerdMember(herdData);
+            }
+            herdData.members.add(this);
+        }
+
         ++herdData.memberIndex;
         return herdData;
+    }
+
+    /**
+     * Marks this entity as a non-natural creation path. The flag is transient
+     * and exists only because vanilla does not identify the source of the
+     * entity before calling onSpawnWithEgg(null).
+     */
+    public void bypassNaturalSpawnSpacing() {
+        this.naturalSpawnSpacingBypassed = true;
+    }
+
+    private boolean hasNearbyWildMumakil(double radius) {
+        AxisAlignedBB area = this.boundingBox.expand(radius, radius, radius);
+        List nearby = this.worldObj.getEntitiesWithinAABB(
+                LOTREntityMumakil.class,
+                area
+        );
+        double radiusSq = radius * radius;
+
+        for (int i = 0; i < nearby.size(); ++i) {
+            LOTREntityMumakil other =
+                    (LOTREntityMumakil)nearby.get(i);
+            if (other == this
+                    || other.isDead
+                    || !other.isEntityAlive()
+                    || !other.isWildMumakil()) {
+                continue;
+            }
+
+            double dx = other.posX - this.posX;
+            double dz = other.posZ - this.posZ;
+            if (dx * dx + dz * dz <= radiusSq) {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private void placeNaturalHerdMember(MumakilHerdSpawnData herdData) {
+        for (int attempt = 0;
+                attempt < NATURAL_HERD_MEMBER_POSITION_ATTEMPTS;
+                ++attempt) {
+            double angle = this.rand.nextDouble() * Math.PI * 2.0D;
+            double radius = NATURAL_HERD_MEMBER_MIN_RADIUS
+                    + this.rand.nextDouble()
+                    * (NATURAL_HERD_MEMBER_MAX_RADIUS
+                    - NATURAL_HERD_MEMBER_MIN_RADIUS);
+            double candidateX = herdData.centerX
+                    + Math.cos(angle) * radius;
+            double candidateZ = herdData.centerZ
+                    + Math.sin(angle) * radius;
+            int blockX = MathHelper.floor_double(candidateX);
+            int blockZ = MathHelper.floor_double(candidateZ);
+
+            if (!this.worldObj.blockExists(blockX, 0, blockZ)) {
+                continue;
+            }
+
+            int groundY = this.worldObj.getTopSolidOrLiquidBlock(
+                    blockX,
+                    blockZ
+            );
+            if (!this.worldObj.blockExists(blockX, groundY, blockZ)
+                    || !SpawnerAnimals.canCreatureTypeSpawnAtLocation(
+                    EnumCreatureType.creature,
+                    this.worldObj,
+                    blockX,
+                    groundY,
+                    blockZ
+            )) {
+                continue;
+            }
+
+            AxisAlignedBB candidateBox = AxisAlignedBB.getBoundingBox(
+                    candidateX - this.width * 0.5D,
+                    groundY,
+                    candidateZ - this.width * 0.5D,
+                    candidateX + this.width * 0.5D,
+                    groundY + this.height,
+                    candidateZ + this.width * 0.5D
+            );
+            if (this.worldObj.isAnyLiquid(candidateBox)
+                    || !this.worldObj.getCollidingBoundingBoxes(
+                    this,
+                    candidateBox
+            ).isEmpty()
+                    || this.overlapsNaturalHerdMember(
+                    herdData,
+                    candidateX,
+                    candidateZ
+            )) {
+                continue;
+            }
+
+            this.setPosition(candidateX, groundY, candidateZ);
+            this.prevPosX = candidateX;
+            this.prevPosY = groundY;
+            this.prevPosZ = candidateZ;
+            return;
+        }
+    }
+
+    private boolean overlapsNaturalHerdMember(
+            MumakilHerdSpawnData herdData,
+            double candidateX,
+            double candidateZ
+    ) {
+        for (int i = 0; i < herdData.members.size(); ++i) {
+            LOTREntityMumakil other =
+                    (LOTREntityMumakil)herdData.members.get(i);
+            double minimumDistance =
+                    (this.width + other.width) * 0.5D + 1.0D;
+            double dx = candidateX - other.posX;
+            double dz = candidateZ - other.posZ;
+            if (dx * dx + dz * dz
+                    < minimumDistance * minimumDistance) {
+                return true;
+            }
+        }
+        return false;
     }
 
 
@@ -849,8 +1004,12 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final class MumakilHerdSpawnData
             implements IEntityLivingData {
         private final int plannedBabyCount;
+        private final List members = new ArrayList();
+        private double centerX;
+        private double centerZ;
         private int memberIndex;
         private int babiesSpawned;
+        private boolean spacingRejected;
 
         private MumakilHerdSpawnData(int plannedBabyCount) {
             this.plannedBabyCount = Math.max(
@@ -6178,6 +6337,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
     private void updateMumakilFootfallPhase() {
         boolean playerRidden = this.riddenByEntity instanceof EntityPlayer;
+        double deltaX = this.posX - this.prevPosX;
+        double deltaZ = this.posZ - this.prevPosZ;
+        boolean translating = deltaX * deltaX + deltaZ * deltaZ > 0.0004D;
 
         /*
          * Match the same locomotion phase used by LOTRRenderMumakilGeo.
@@ -6204,7 +6366,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
          */
         float walkPhase = locomotionPhase * 0.55F;
 
-        boolean walking = this.limbSwingAmount >= 0.15F;
+        boolean walking = this.limbSwingAmount >= 0.15F && translating;
 
         if (!walking) {
             this.mumakilFootfallTrackingInitialized = false;
@@ -6226,13 +6388,18 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             return;
         }
 
-        if (footfallIndex != this.lastMumakilFootfallIndex) {
+        if (footfallIndex != this.lastMumakilFootfallIndex
+                && (this.lastMumakilFootfallTick == Integer.MIN_VALUE
+                || this.ticksExisted - this.lastMumakilFootfallTick >= 6)) {
             this.lastMumakilFootfallIndex = footfallIndex;
+            this.lastMumakilFootfallTick = this.ticksExisted;
 
             if (!this.worldObj.isRemote) {
                 float basePitch = this.isBabyMumakil() ? 1.25F : 1.00F;
                 float pitchVariation =
                         (this.rand.nextFloat() - this.rand.nextFloat()) * 0.08F;
+
+                float stepVolume = this.isBabyMumakil() ? 0.5F : 0.8F;
 
                 this.worldObj.playSoundAtEntity(
                         this,
@@ -6315,9 +6482,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.5F, 0.45F);
 
-            if (this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE)) {
-                this.playMumakilHitSound();
-            }
+            this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE);
         }
 
         return attacked;
@@ -6339,6 +6504,16 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         if (damaged && !this.worldObj.isRemote && amount > 0.0F) {
+            EntityLivingBase formationAttacker =
+                    this.resolveTamedRetaliationAttacker(source);
+            if (this.isWarCombatFormation()
+                    && this.isValidFormationRetaliationAttacker(
+                    formationAttacker
+            )) {
+                this.recordRecentFormationThreat(formationAttacker);
+                this.setRevengeTarget(formationAttacker);
+                this.setAttackTarget(formationAttacker);
+            }
             this.retaliateAsTamedAdult(source);
         }
 
@@ -6454,6 +6629,32 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         }
 
         return !this.isOwnValidatedFormationMember(attacker);
+    }
+
+    private boolean isValidFormationRetaliationAttacker(
+            EntityLivingBase attacker
+    ) {
+        if (!this.isValidTamedRetaliationAttacker(attacker)) {
+            return false;
+        }
+
+        if (attacker instanceof EntityPlayer) {
+            EntityPlayer player = (EntityPlayer)attacker;
+            if (player.capabilities.isCreativeMode) {
+                return false;
+            }
+
+            if (this.riddenByEntity instanceof LOTREntityNPC) {
+                UUID hiringPlayerId = ((LOTREntityNPC)this.riddenByEntity)
+                        .hiredNPCInfo.getHiringPlayerUUID();
+                if (hiringPlayerId != null
+                        && hiringPlayerId.equals(player.getUniqueID())) {
+                    return false;
+                }
+            }
+        }
+
+        return true;
     }
 
     private boolean isOwnValidatedFormationMember(
@@ -6687,9 +6888,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
             this.startMumakilStrikeAnimation();
             this.applyMumakilHeavyKnockback(target, 1.75F, 0.5F);
 
-            if (this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE)) {
-                this.playMumakilHitSound();
-            }
+            this.applyMumakilStrikeAOEDamage(target, TUSK_AOE_DAMAGE);
         }
     }
 
@@ -7900,10 +8099,20 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private void playMumakilHitSound() {
         this.worldObj.playSoundAtEntity(
                 this,
-                "lotrmoremobs:mumakil.step",
+                "lotrmoremobs:mumakil.trample",
                 1.2F,
                 0.75F + this.rand.nextFloat() * 0.15F
         );
+    }
+
+    @Override
+    public void playSound(String soundName, float volume, float pitch) {
+        if ("mob.horse.jump".equals(soundName)
+                || "mob.horse.land".equals(soundName)) {
+            return;
+        }
+
+        super.playSound(soundName, volume, pitch);
     }
 
     @Override
@@ -8067,4 +8276,3 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
 }
-

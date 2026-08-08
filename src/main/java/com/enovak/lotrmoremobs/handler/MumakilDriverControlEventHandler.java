@@ -1582,8 +1582,12 @@ public class MumakilDriverControlEventHandler {
             return false;
         }
 
+        boolean retaliationThreat =
+                target == mumakil.getRecentFormationThreat();
+
         if ((target instanceof EntityAnimal
                 || target instanceof LOTRAmbientCreature)
+                && !retaliationThreat
                 && !isAttacking(target, mumakil)
                 && !isAttacking(target, driver)
                 && !isAttackingAttachedArcher(target, mumakil)) {
@@ -1634,6 +1638,10 @@ public class MumakilDriverControlEventHandler {
                     LOTRFaction driverFaction = LOTRMod.getNPCFaction((LOTREntityNPC) driver);
                     LOTRFaction targetFaction = LOTRMod.getNPCFaction(targetNPC);
 
+                    if (retaliationThreat) {
+                        return true;
+                    }
+
                     if (driverFaction != null && targetFaction != null && !driverFaction.isBadRelation(targetFaction)) {
                         return false;
                     }
@@ -1653,10 +1661,15 @@ public class MumakilDriverControlEventHandler {
         }
 
         if (driver instanceof EntityCreature) {
-            return LOTRMod.canNPCAttackEntity((EntityCreature) driver, target, false);
+            return retaliationThreat
+                    || LOTRMod.canNPCAttackEntity(
+                    (EntityCreature) driver,
+                    target,
+                    false
+            );
         }
 
-        return target == mumakil.getAttackTarget();
+        return retaliationThreat || target == mumakil.getAttackTarget();
     }
 
     private static boolean isTooHighForDrivenMumakilMelee(LOTREntityMumakil mumakil, EntityLivingBase target) {

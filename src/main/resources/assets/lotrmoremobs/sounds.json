@@ -14,9 +14,24 @@
   "mumakil.step": {
     "category": "hostile",
     "sounds": [
-      "lotrmoremobs:mumakil/step"
+      "lotrmoremobs:mumakil/step1",
+      "lotrmoremobs:mumakil/step2",
+      "lotrmoremobs:mumakil/step3",
+      "lotrmoremobs:mumakil/step4",
+      "lotrmoremobs:mumakil/step5",
+      "lotrmoremobs:mumakil/step6",
+      "lotrmoremobs:mumakil/step7",
+      "lotrmoremobs:mumakil/step8"
     ]
   },
+
+  "mumakil.trample": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:mumakil/strike"
+    ]
+  },
+
   "mumakil.strike": {
     "category": "hostile",
     "sounds": [

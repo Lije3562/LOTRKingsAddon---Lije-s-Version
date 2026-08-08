@@ -50,6 +50,7 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
     @Override
     public EntityLiving createHiredMount(World world) {
         LOTREntityMumakil mumakil = new LOTREntityMumakil(world);
+        mumakil.bypassNaturalSpawnSpacing();
         mumakil.onSpawnWithEgg(null);
         if (!MumakilWarFormationFactory.initializeMount(
                 mumakil,

@@ -699,6 +699,7 @@ public final class MumakilWarFormationFactory {
         );
         mumakil.rotationYawHead = yaw;
         mumakil.renderYawOffset = yaw;
+        mumakil.bypassNaturalSpawnSpacing();
         mumakil.onSpawnWithEgg(null);
         if (!initializeMount(mumakil, origin)) {
             removeCreatedMembers(createdMembers);
