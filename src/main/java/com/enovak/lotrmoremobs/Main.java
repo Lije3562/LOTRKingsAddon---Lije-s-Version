@@ -14,7 +14,6 @@ import com.enovak.lotrmoremobs.item.LOTRItemMumakilCalfSpawnEgg; // MUMAKIL_CALF
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdahSpawnEgg;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
-import com.enovak.lotrmoremobs.materials.AddonMaterial;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
 import com.enovak.lotrmoremobs.siege.command.CommandSiegeGateDebug;
@@ -31,10 +30,6 @@ import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.registry.GameRegistry;
 import lotr.common.entity.LOTREntities;
-import lotr.common.LOTRCreativeTabs;
-import lotr.common.item.LOTRItemArmor;
-import lotr.common.item.LOTRItemSword;
-import lotr.common.item.LOTRMaterial;
 import net.minecraft.item.Item;
 import com.enovak.lotrmoremobs.network.MumakilOpenGuiPacket;
 import cpw.mods.fml.common.network.NetworkRegistry;
@@ -76,8 +71,6 @@ public class Main {
     )
     public static CommonProxy proxy;
 
-    public static Item swordOfIsengard;
-    public static Item helmOfIsengard;
     public static Item mumakilTusk;
     public static Item mumakilShank;
     public static Item mumakilCookedShank;
@@ -181,18 +174,6 @@ public class Main {
         if (MumakilConfig.enableBattleRams) {
             BattleRamUnitTradeInjector.inject();
         }
-
-        swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
-                .setUnlocalizedName("atalcare")
-                .setTextureName("lotrmoremobs:anduril")
-                .setCreativeTab(LOTRCreativeTabs.tabCombat);
-        GameRegistry.registerItem(swordOfIsengard, "atalcare");
-
-        helmOfIsengard = (new LOTRItemArmor(LOTRMaterial.MORDOR, 0, "helmet"))
-                .setUnlocalizedName("Helm of Isengard")
-                .setTextureName("lotrmoremobs:black_numenorean_1")
-                .setCreativeTab(LOTRCreativeTabs.tabCombat);
-        GameRegistry.registerItem(helmOfIsengard, "helm_of_isengard");
     }
 
     @EventHandler
