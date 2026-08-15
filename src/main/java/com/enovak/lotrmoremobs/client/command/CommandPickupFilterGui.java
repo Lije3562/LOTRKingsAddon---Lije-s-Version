@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs.client.command;
 import net.minecraft.command.CommandBase;
 import net.minecraft.command.ICommandSender;
 import com.enovak.lotrmoremobs.client.pickupfilter.PickupFilterGuiOpenHandler;
+import java.util.List;
 
 /**
  * Temporary client-only command used to test the pickup-filter GUI.
@@ -29,6 +30,14 @@ public class CommandPickupFilterGui extends CommandBase {
     @Override
     public boolean canCommandSenderUseCommand(ICommandSender sender) {
         return true;
+    }
+
+    @Override
+    public List addTabCompletionOptions(
+            ICommandSender sender,
+            String[] args
+    ) {
+        return null;
     }
 
     @Override

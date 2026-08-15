@@ -18,9 +18,9 @@ import net.minecraftforge.client.event.GuiOpenEvent;
 public final class UnitTradePledgeNavigationHandler {
     @SubscribeEvent
     public void onGuiOpen(GuiOpenEvent event) {
-        if (event.gui == null
-                || event.gui.getClass()
-                != LOTRGuiUnitTrade.class) {
+        if (!(event.gui instanceof LOTRGuiUnitTrade)
+                || event.gui
+                instanceof LOTRGuiUnitTradePledgeNavigation) {
             return;
         }
 

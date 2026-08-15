@@ -18,6 +18,7 @@ import net.minecraft.entity.Entity;
 import net.minecraft.entity.EntityCreature;
 import net.minecraft.entity.EntityLiving;
 import net.minecraft.entity.EntityLivingBase;
+import net.minecraft.entity.SharedMonsterAttributes;
 import net.minecraft.entity.ai.EntityAIBase;
 import net.minecraft.entity.monster.IMob;
 import net.minecraft.entity.passive.EntityAnimal;
@@ -29,6 +30,7 @@ import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.util.AxisAlignedBB;
 import net.minecraft.util.MathHelper;
 import net.minecraft.world.World;
+import net.minecraft.world.WorldServer;
 import net.minecraftforge.event.entity.EntityJoinWorldEvent;
 import net.minecraftforge.event.entity.living.LivingEvent;
 import net.minecraftforge.event.entity.living.LivingDeathEvent;
@@ -61,7 +63,13 @@ public class MumakilDriverControlEventHandler {
 
     private static final double TARGET_SCAN_RANGE = 16.0D;
     private static final double TARGET_SCAN_VERTICAL_RANGE = 8.0D;
-    private static final double AUTONOMOUS_TARGET_RETENTION_RANGE = 48.0D;
+    /*
+     * Match vanilla/LOTR target retention more closely: use the Mumak's
+     * follow-range attribute (32 blocks for adults) and remember a target
+     * through only a short loss-of-sight window instead of a fixed 48-block
+     * formation leash.
+     */
+    private static final int DRIVER_TARGET_UNSEEN_MEMORY_TICKS = 60;
 
     private static final double APPROACH_STOP_RANGE = 7.0D;
 
@@ -118,6 +126,9 @@ public class MumakilDriverControlEventHandler {
     private static final Map<EntityPlayer, FastTravelMumakSnapshot>
             FAST_TRAVEL_MUMAK_SNAPSHOTS =
             new WeakHashMap<EntityPlayer, FastTravelMumakSnapshot>();
+    private static final Map<EntityPlayer, FastTravelTamedMumakSnapshot>
+            FAST_TRAVEL_TAMED_MUMAK_SNAPSHOTS =
+            new WeakHashMap<EntityPlayer, FastTravelTamedMumakSnapshot>();
 
     @SubscribeEvent(priority = EventPriority.LOWEST)
     public void onMumakilJoinWorldRiderTargetCompatibility(
@@ -245,12 +256,13 @@ public class MumakilDriverControlEventHandler {
     }
 
     /**
-     * LOTR's fast-travel code normally recreates selected hired NPCs and an
-     * EntityLiving mount in one pass. Keep a mounted player-hired Mumak
-     * available as a narrowly scoped fallback when that native selection pass
-     * leaves the original rider alive (for example, when the rider was not in
-     * the native 256-block query). Howdah attachments are intentionally not
-     * handled here.
+     * LOTR fast travel normally recreates the entity a player is riding, but
+     * addon mounts can fall outside that native handoff in some environments.
+     * Keep the existing hired-war fallback and add a separate, owner-checked
+     * fallback for the player's currently ridden tamed Mumak. The fallback
+     * reuses the exact entity/UUID whenever possible and only recreates from
+     * the pre-travel NBT snapshot after the origin chunk has been checked for
+     * that UUID, preventing duplicate Mumakil.
      */
     @SubscribeEvent
     public void onPlayerTick(TickEvent.PlayerTickEvent event) {
@@ -265,24 +277,73 @@ public class MumakilDriverControlEventHandler {
         EntityPlayer player = event.player;
         LOTRPlayerData playerData = LOTRLevelData.getData(player);
         if (playerData.getTargetFTWaypoint() != null) {
-            if (!FAST_TRAVEL_MUMAK_SNAPSHOTS.containsKey(player)) {
-                LOTREntityNPC driver = findPlayerHiredMumakDriver(player);
-                if (driver != null && driver.ridingEntity instanceof LOTREntityMumakil) {
-                    FAST_TRAVEL_MUMAK_SNAPSHOTS.put(
-                            player,
-                            new FastTravelMumakSnapshot(
-                                    player,
-                                    driver,
-                                    (LOTREntityMumakil)driver.ridingEntity
-                            )
-                    );
-                }
-            }
+            captureHiredWarFastTravelSnapshot(player);
+            captureTamedRiddenFastTravelSnapshot(player);
             return;
         }
 
-        FastTravelMumakSnapshot snapshot =
-                FAST_TRAVEL_MUMAK_SNAPSHOTS.remove(player);
+        finishHiredWarFastTravelFallback(
+                player,
+                FAST_TRAVEL_MUMAK_SNAPSHOTS.remove(player)
+        );
+        finishTamedRiddenFastTravelFallback(
+                player,
+                FAST_TRAVEL_TAMED_MUMAK_SNAPSHOTS.remove(player)
+        );
+    }
+
+    private static void captureHiredWarFastTravelSnapshot(
+            EntityPlayer player
+    ) {
+        if (FAST_TRAVEL_MUMAK_SNAPSHOTS.containsKey(player)) {
+            return;
+        }
+
+        LOTREntityNPC driver = findPlayerHiredMumakDriver(player);
+        if (driver != null
+                && driver.ridingEntity instanceof LOTREntityMumakil) {
+            FAST_TRAVEL_MUMAK_SNAPSHOTS.put(
+                    player,
+                    new FastTravelMumakSnapshot(
+                            player,
+                            driver,
+                            (LOTREntityMumakil)driver.ridingEntity
+                    )
+            );
+        }
+    }
+
+    private static void captureTamedRiddenFastTravelSnapshot(
+            EntityPlayer player
+    ) {
+        if (FAST_TRAVEL_TAMED_MUMAK_SNAPSHOTS.containsKey(player)
+                || !(player.ridingEntity instanceof LOTREntityMumakil)) {
+            return;
+        }
+
+        LOTREntityMumakil mumakil =
+                (LOTREntityMumakil)player.ridingEntity;
+        if (mumakil.isDead
+                || !mumakil.isEntityAlive()
+                || !mumakil.isTame()
+                || !mumakil.isTamedByPlayer(player)
+                || mumakil.isHiredWarMumakil()) {
+            return;
+        }
+
+        FAST_TRAVEL_TAMED_MUMAK_SNAPSHOTS.put(
+                player,
+                new FastTravelTamedMumakSnapshot(
+                        player,
+                        mumakil
+                )
+        );
+    }
+
+    private static void finishHiredWarFastTravelFallback(
+            EntityPlayer player,
+            FastTravelMumakSnapshot snapshot
+    ) {
         if (snapshot == null
                 || snapshot.playerWorld != player.worldObj
                 || snapshot.driver.isDead
@@ -302,6 +363,12 @@ public class MumakilDriverControlEventHandler {
                 player.rotationYaw,
                 snapshot.mumakil.rotationPitch
         );
+        snapshot.mumakil.fallDistance = 0.0F;
+        snapshot.mumakil.getNavigator().clearPathEntity();
+        snapshot.playerWorld.updateEntityWithOptionalForce(
+                snapshot.mumakil,
+                false
+        );
         snapshot.driver.mountEntity(snapshot.mumakil);
         snapshot.driver.setLocationAndAngles(
                 spawnX,
@@ -310,6 +377,145 @@ public class MumakilDriverControlEventHandler {
                 player.rotationYaw,
                 snapshot.driver.rotationPitch
         );
+        snapshot.playerWorld.updateEntityWithOptionalForce(
+                snapshot.driver,
+                false
+        );
+    }
+
+    private static void finishTamedRiddenFastTravelFallback(
+            EntityPlayer player,
+            FastTravelTamedMumakSnapshot snapshot
+    ) {
+        if (snapshot == null
+                || snapshot.playerWorld != player.worldObj
+                || snapshot.distanceFromOriginSq(player) < 4096.0D) {
+            return;
+        }
+
+        /*
+         * If LOTR already recreated/remounted this Mumak successfully, leave
+         * the native result alone.
+         */
+        if (player.ridingEntity instanceof LOTREntityMumakil) {
+            LOTREntityMumakil mounted =
+                    (LOTREntityMumakil)player.ridingEntity;
+            if (snapshot.mumakUuid.equals(mounted.getPersistentID())) {
+                return;
+            }
+        }
+
+        LOTREntityMumakil mumakil = findLoadedMumakByUuid(
+                player.worldObj,
+                snapshot.mumakUuid
+        );
+
+        if (mumakil == null
+                && player.worldObj instanceof WorldServer) {
+            /*
+             * Recover the exact saved origin entity before considering NBT
+             * recreation. This is a bounded one-chunk load and prevents an
+             * origin copy from being left behind on disk.
+             */
+            WorldServer worldServer = (WorldServer)player.worldObj;
+            worldServer.theChunkProviderServer.provideChunk(
+                    snapshot.originChunkX,
+                    snapshot.originChunkZ
+            );
+            mumakil = findLoadedMumakByUuid(
+                    player.worldObj,
+                    snapshot.mumakUuid
+            );
+        }
+
+        if (mumakil == null
+                && player.worldObj instanceof WorldServer) {
+            mumakil = new LOTREntityMumakil(player.worldObj);
+            mumakil.readFromNBT(snapshot.entityNbt);
+            if (!snapshot.mumakUuid.equals(mumakil.getPersistentID())) {
+                return;
+            }
+            double yawRadians = Math.toRadians(player.rotationYaw);
+            mumakil.setLocationAndAngles(
+                    player.posX - Math.sin(yawRadians) * 8.0D,
+                    player.posY,
+                    player.posZ + Math.cos(yawRadians) * 8.0D,
+                    player.rotationYaw,
+                    mumakil.rotationPitch
+            );
+            ((WorldServer)player.worldObj).spawnEntityInWorld(mumakil);
+        }
+
+        if (mumakil == null
+                || mumakil.isDead
+                || !mumakil.isEntityAlive()
+                || !mumakil.isTame()
+                || !mumakil.isTamedByPlayer(player)) {
+            return;
+        }
+
+        boolean nativeDestinationCopy =
+                mumakil.getDistanceSqToEntity(player) <= 1024.0D;
+        double yawRadians = Math.toRadians(player.rotationYaw);
+        double spawnX = nativeDestinationCopy
+                ? mumakil.posX
+                : player.posX - Math.sin(yawRadians) * 8.0D;
+        double spawnY = nativeDestinationCopy
+                ? mumakil.posY
+                : player.posY;
+        double spawnZ = nativeDestinationCopy
+                ? mumakil.posZ
+                : player.posZ + Math.cos(yawRadians) * 8.0D;
+
+        mumakil.getNavigator().clearPathEntity();
+        mumakil.setAttackTarget(null);
+        mumakil.setRevengeTarget(null);
+        mumakil.motionX = 0.0D;
+        mumakil.motionY = 0.0D;
+        mumakil.motionZ = 0.0D;
+        mumakil.fallDistance = 0.0F;
+        mumakil.setLocationAndAngles(
+                spawnX,
+                spawnY,
+                spawnZ,
+                player.rotationYaw,
+                mumakil.rotationPitch
+        );
+        player.worldObj.updateEntityWithOptionalForce(
+                mumakil,
+                false
+        );
+
+        if (player.ridingEntity != null) {
+            player.mountEntity(null);
+        }
+        player.mountEntity(mumakil);
+    }
+
+    private static LOTREntityMumakil findLoadedMumakByUuid(
+            World world,
+            UUID mumakUuid
+    ) {
+        if (world == null || mumakUuid == null) {
+            return null;
+        }
+
+        List loaded = world.loadedEntityList;
+        for (int i = 0; i < loaded.size(); ++i) {
+            Object candidate = loaded.get(i);
+            if (candidate instanceof LOTREntityMumakil) {
+                LOTREntityMumakil mumakil =
+                        (LOTREntityMumakil)candidate;
+                if (!mumakil.isDead
+                        && mumakil.isEntityAlive()
+                        && mumakUuid.equals(
+                        mumakil.getPersistentID()
+                )) {
+                    return mumakil;
+                }
+            }
+        }
+        return null;
     }
 
     private static LOTREntityNPC findPlayerHiredMumakDriver(EntityPlayer player) {
@@ -398,12 +604,44 @@ public class MumakilDriverControlEventHandler {
         }
     }
 
+    private static final class FastTravelTamedMumakSnapshot {
+        private final World playerWorld;
+        private final UUID mumakUuid;
+        private final NBTTagCompound entityNbt;
+        private final double originX;
+        private final double originZ;
+        private final int originChunkX;
+        private final int originChunkZ;
+
+        private FastTravelTamedMumakSnapshot(
+                EntityPlayer player,
+                LOTREntityMumakil mumakil
+        ) {
+            this.playerWorld = player.worldObj;
+            this.mumakUuid = mumakil.getPersistentID();
+            this.entityNbt = new NBTTagCompound();
+            mumakil.writeToNBT(this.entityNbt);
+            this.originX = player.posX;
+            this.originZ = player.posZ;
+            this.originChunkX = MathHelper.floor_double(mumakil.posX) >> 4;
+            this.originChunkZ = MathHelper.floor_double(mumakil.posZ) >> 4;
+        }
+
+        private double distanceFromOriginSq(EntityPlayer player) {
+            double dx = player.posX - this.originX;
+            double dz = player.posZ - this.originZ;
+            return dx * dx + dz * dz;
+        }
+    }
+
     private static final class DriverTargetRuntimeState {
         private int targetEntityId = -1;
         private int rejectedTargetEntityId = -1;
         private long rejectedUntilTick;
         private int observedTargetEntityId;
         private long targetLostSinceTick;
+        private int retentionTargetEntityId = -1;
+        private int unseenTargetTicks;
     }
 
     private static DriverTargetRuntimeState getDriverTargetRuntimeState(
@@ -795,16 +1033,17 @@ public class MumakilDriverControlEventHandler {
         }
 
         /*
-         * War formations supplement native driver target ownership with the
-         * bounded formation scan below, so a transient null from the mounted
-         * driver's own AI must not erase a still-valid shared formation target.
+         * Follow native LOTR target ownership: when the mounted NPC releases
+         * its target, do not immediately write the handler's cached target
+         * back onto it. Clear the shared target and let the bounded scan choose
+         * a current nearby enemy again. This prevents stale target fixation.
          */
         if (driver != null
                 && authoritativeTarget == null
-                && currentTarget != null
-                && !warCombatFormation) {
+                && currentTarget != null) {
             clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
             clearStoredDriverTarget(mumakil);
+            scheduleImmediateDriverTargetScan(mumakil);
             currentTarget = null;
         }
 
@@ -834,6 +1073,7 @@ public class MumakilDriverControlEventHandler {
                                 .recordAutonomousTargetReplacement(world);
                     }
                     clearStoredDriverTarget(mumakil);
+                    scheduleImmediateDriverTargetScan(mumakil);
                     currentTarget = null;
                 }
             }
@@ -849,6 +1089,7 @@ public class MumakilDriverControlEventHandler {
             }
             clearStoredDriverTarget(mumakil);
             clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
+            scheduleImmediateDriverTargetScan(mumakil);
             currentTarget = null;
         }
 
@@ -862,14 +1103,17 @@ public class MumakilDriverControlEventHandler {
             }
             clearStoredDriverTarget(mumakil);
             clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
+            scheduleImmediateDriverTargetScan(mumakil);
             currentTarget = null;
         }
 
         if (currentTarget != null
                 && warCombatFormation
-                && mumakil.getDistanceSqToEntity(currentTarget)
-                > AUTONOMOUS_TARGET_RETENTION_RANGE
-                * AUTONOMOUS_TARGET_RETENTION_RANGE) {
+                && !shouldRetainDriverTarget(
+                mumakil,
+                driver,
+                currentTarget
+        )) {
             if (autonomousFormation) {
                 MumakilServerPerformanceDiagnostics
                         .recordAutonomousTargetReplacement(world);
@@ -880,6 +1124,7 @@ public class MumakilDriverControlEventHandler {
                     driver,
                     currentTarget
             );
+            scheduleImmediateDriverTargetScan(mumakil);
             currentTarget = null;
         }
 
@@ -901,6 +1146,7 @@ public class MumakilDriverControlEventHandler {
 
             clearAuthoritativeAttackTarget(mumakil, driver, currentTarget);
             clearStoredDriverTarget(mumakil);
+            scheduleImmediateDriverTargetScan(mumakil);
             return;
         }
 
@@ -1068,13 +1314,18 @@ public class MumakilDriverControlEventHandler {
 
         EntityLivingBase target = getStoredDriverTarget(mumakil);
         long worldTick = mumakil.worldObj.getTotalWorldTime();
+        DriverTargetRuntimeState state =
+                getDriverTargetRuntimeState(mumakil);
+        double retentionRange = getDriverTargetRetentionRange(mumakil);
         if (target == null
                 || !isValidDriverTarget(mumakil, driver, target)
                 || isRejectedDriverTarget(mumakil, target, worldTick)
                 || isTooHighForDrivenMumakilMelee(mumakil, target)
                 || mumakil.getDistanceSqToEntity(target)
-                > AUTONOMOUS_TARGET_RETENTION_RANGE
-                * AUTONOMOUS_TARGET_RETENTION_RANGE) {
+                > retentionRange * retentionRange
+                || state.retentionTargetEntityId == target.getEntityId()
+                && state.unseenTargetTicks
+                > DRIVER_TARGET_UNSEEN_MEMORY_TICKS) {
             return false;
         }
 
@@ -1094,6 +1345,10 @@ public class MumakilDriverControlEventHandler {
         DriverTargetRuntimeState state =
                 getDriverTargetRuntimeState(mumakil);
         int targetId = target.getEntityId();
+        if (state.retentionTargetEntityId != targetId) {
+            state.retentionTargetEntityId = targetId;
+            state.unseenTargetTicks = 0;
+        }
         boolean storedTargetChanged = state.targetEntityId != targetId;
 
         if (storedTargetChanged) {
@@ -1338,6 +1593,8 @@ public class MumakilDriverControlEventHandler {
         }
 
         state.targetEntityId = -1;
+        state.retentionTargetEntityId = -1;
+        state.unseenTargetTicks = 0;
         mumakil.getDriverTargetProgressState().reset();
     }
 
@@ -1348,6 +1605,8 @@ public class MumakilDriverControlEventHandler {
         state.targetEntityId = -1;
         state.rejectedTargetEntityId = -1;
         state.rejectedUntilTick = 0L;
+        state.retentionTargetEntityId = -1;
+        state.unseenTargetTicks = 0;
         data.setLong(NBT_NEXT_TARGET_SCAN_TICK, 0L);
         mumakil.getDriverTargetProgressState().reset();
     }
@@ -1546,6 +1805,7 @@ public class MumakilDriverControlEventHandler {
             }
             clearAuthoritativeAttackTarget(mumakil, driver, target);
             clearStoredDriverTarget(mumakil);
+            scheduleImmediateDriverTargetScan(mumakil);
         }
     }
 
@@ -1593,6 +1853,84 @@ public class MumakilDriverControlEventHandler {
         return rejectedId == target.getEntityId();
     }
 
+    private static void scheduleImmediateDriverTargetScan(
+            LOTREntityMumakil mumakil
+    ) {
+        if (mumakil != null) {
+            mumakil.getEntityData().setLong(
+                    NBT_NEXT_TARGET_SCAN_TICK,
+                    0L
+            );
+        }
+    }
+
+    private static double getDriverTargetRetentionRange(
+            LOTREntityMumakil mumakil
+    ) {
+        if (mumakil != null
+                && mumakil.getEntityAttribute(
+                SharedMonsterAttributes.followRange
+        ) != null) {
+            return Math.max(
+                    TARGET_SCAN_RANGE,
+                    mumakil.getEntityAttribute(
+                            SharedMonsterAttributes.followRange
+                    ).getAttributeValue()
+            );
+        }
+        return 32.0D;
+    }
+
+    private static boolean shouldRetainDriverTarget(
+            LOTREntityMumakil mumakil,
+            LOTREntityNPC driver,
+            EntityLivingBase target
+    ) {
+        if (mumakil == null || target == null) {
+            return false;
+        }
+
+        double retentionRange = getDriverTargetRetentionRange(mumakil);
+        if (mumakil.getDistanceSqToEntity(target)
+                > retentionRange * retentionRange) {
+            return false;
+        }
+
+        DriverTargetRuntimeState state =
+                getDriverTargetRuntimeState(mumakil);
+        int targetId = target.getEntityId();
+        if (state.retentionTargetEntityId != targetId) {
+            state.retentionTargetEntityId = targetId;
+            state.unseenTargetTicks = 0;
+        }
+
+        boolean canSee = driver != null
+                ? driver.getEntitySenses().canSee(target)
+                : mumakil.getEntitySenses().canSee(target);
+        if (canSee) {
+            state.unseenTargetTicks = 0;
+            return true;
+        }
+
+        ++state.unseenTargetTicks;
+        return state.unseenTargetTicks
+                <= DRIVER_TARGET_UNSEEN_MEMORY_TICKS;
+    }
+
+    private static boolean canSeeNewDriverTarget(
+            LOTREntityMumakil mumakil,
+            EntityLivingBase driver,
+            EntityLivingBase target
+    ) {
+        if (target == mumakil.getRecentFormationThreat()) {
+            return true;
+        }
+        if (driver instanceof EntityLiving) {
+            return ((EntityLiving)driver).getEntitySenses().canSee(target);
+        }
+        return mumakil.getEntitySenses().canSee(target);
+    }
+
     private static EntityLivingBase findNewDriverTarget(LOTREntityMumakil mumakil, EntityLivingBase driver, long worldTick) {
         NBTTagCompound data = mumakil.getEntityData();
 
@@ -1627,6 +1965,10 @@ public class MumakilDriverControlEventHandler {
             EntityLivingBase candidate = (EntityLivingBase) nearby.get(i);
 
             if (!isValidDriverTarget(mumakil, driver, candidate)) {
+                continue;
+            }
+
+            if (!canSeeNewDriverTarget(mumakil, driver, candidate)) {
                 continue;
             }
 
@@ -1747,7 +2089,14 @@ public class MumakilDriverControlEventHandler {
             return false;
         }
 
-        if (!target.isEntityAlive()) {
+        if (target.isDead
+                || !target.isEntityAlive()
+                || mumakil.worldObj == null
+                || target.worldObj != mumakil.worldObj
+                || target.getEntityId() <= 0
+                || mumakil.worldObj.getEntityByID(
+                target.getEntityId()
+        ) != target) {
             return false;
         }
 

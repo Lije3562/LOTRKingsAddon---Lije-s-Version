@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.item;
 
-import net.minecraft.creativetab.CreativeTabs;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
+import lotr.common.LOTRCreativeTabs;
 import net.minecraft.entity.EntityLivingBase;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.ItemStack;
@@ -9,7 +10,9 @@ public class LOTRItemMumakilHowdah extends LOTRItemMumakilEquipment {
 
     public LOTRItemMumakilHowdah() {
         this.setMaxStackSize(1);
-        this.setCreativeTab(CreativeTabs.tabTransport);
+        if (MumakilConfig.enableMumakil) {
+            this.setCreativeTab(LOTRCreativeTabs.tabUtil);
+        }
         this.setUnlocalizedName("mumakil_howdah");
         this.setTextureName("lotrmoremobs:mumakil_howdah");
     }

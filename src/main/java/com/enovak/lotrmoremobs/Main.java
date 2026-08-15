@@ -8,6 +8,7 @@ import com.enovak.lotrmoremobs.recipe.MumakilHowdahRecipeRegistry; // MUMAKIL_NE
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.hiring.MumakilUnitTradeInjector;
+import com.enovak.lotrmoremobs.hiring.BattleRamUnitTradeInjector;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdah;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilCalfSpawnEgg; // MUMAKIL_CALF_SPAWN_EGG_V1
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilHowdahSpawnEgg;
@@ -15,6 +16,10 @@ import com.enovak.lotrmoremobs.item.LOTRItemMumakilShank;
 import com.enovak.lotrmoremobs.item.LOTRItemMumakilTusk;
 import com.enovak.lotrmoremobs.materials.AddonMaterial;
 import com.enovak.lotrmoremobs.proxy.CommonProxy;
+import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.command.CommandSiegeGateDebug;
+import com.enovak.lotrmoremobs.siege.network.SiegeNetwork;
+import com.enovak.lotrmoremobs.siege.network.SiegeRequestLifecycle;
 import com.enovak.lotrmoremobs.spawning.MumakilNaturalSpawnRegistry;
 import com.enovak.lotrmoremobs.spawning.MumakilWarFormationSpawnRegistry;
 import com.enovak.lotrmoremobs.spawning.MumakilInvasionFormationRegistry;
@@ -26,6 +31,7 @@ import cpw.mods.fml.common.event.FMLPostInitializationEvent;
 import cpw.mods.fml.common.event.FMLPreInitializationEvent;
 import cpw.mods.fml.common.registry.GameRegistry;
 import lotr.common.entity.LOTREntities;
+import lotr.common.LOTRCreativeTabs;
 import lotr.common.item.LOTRItemArmor;
 import lotr.common.item.LOTRItemSword;
 import lotr.common.item.LOTRMaterial;
@@ -36,9 +42,12 @@ import cpw.mods.fml.common.network.simpleimpl.SimpleNetworkWrapper;
 import cpw.mods.fml.relauncher.Side;
 import com.enovak.lotrmoremobs.command.CommandPickupFilter;
 import cpw.mods.fml.common.event.FMLServerStartingEvent;
+import cpw.mods.fml.common.event.FMLServerStoppingEvent;
 import com.enovak.lotrmoremobs.network.PickupFilterClearPacket;
 import com.enovak.lotrmoremobs.network.PickupFilterSyncPacket;
 import com.enovak.lotrmoremobs.network.PickupFilterTogglePacket;
+import com.enovak.lotrmoremobs.pickupfilter.PickupFilterRequestManager;
+import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 
 @Mod(
         modid = Main.MODID,
@@ -51,9 +60,14 @@ import com.enovak.lotrmoremobs.network.PickupFilterTogglePacket;
 public class Main {
 
     public static final String MODID = "lotrmoremobs";
-    public static final String VERSION = "1.0.0";
+    public static final String VERSION = "1.0.1";
     public static final String NAME =
             "LOTR Kings of Middle Earth Addon";
+    public static final String DESCRIPTION =
+            "Adds Mumakil, Mumakil equipment and war formations, an item "
+                    + "pickup filter, Mortal Gandalf, customizable siege gates, "
+                    + "battle rams, and additional Middle-earth content designed "
+                    + "for The Lord of the Rings Mod.";
     public static SimpleNetworkWrapper network;
 
     @SidedProxy(
@@ -73,6 +87,12 @@ public class Main {
 
     @EventHandler
     public void preInit(FMLPreInitializationEvent event) {
+        if (event.getModMetadata() != null) {
+            event.getModMetadata().name = NAME;
+            event.getModMetadata().version = VERSION;
+            event.getModMetadata().description = DESCRIPTION;
+        }
+
         MumakilConfig.load(event.getSuggestedConfigurationFile());
         network = NetworkRegistry.INSTANCE.newSimpleChannel("lotrmoremobs");
         network.registerMessage(
@@ -100,10 +120,13 @@ public class Main {
                 3,
                 Side.SERVER
         );
+        SiegeNetwork.register();
     }
 
     @EventHandler
     public void init(FMLInitializationEvent event) {
+        SiegeRegistry.register();
+
         LOTREntities.registerCreature(LOTREntityMumakil.class, "Mumakil", 811, 6118481, 12171165);
         LOTREntities.registerCreature(
                 LOTREntityMumakilHowdahArcher.class,
@@ -122,11 +145,13 @@ public class Main {
         mumakilCookedShank = new LOTRItemMumakilShank(true);
         GameRegistry.registerItem(mumakilCookedShank, "cooked_mumakil_shank");
 
-        GameRegistry.addSmelting(
-                mumakilShank,
-                new ItemStack(mumakilCookedShank),
-                0.35F
-        );
+        if (MumakilConfig.enableMumakil) {
+            GameRegistry.addSmelting(
+                    mumakilShank,
+                    new ItemStack(mumakilCookedShank),
+                    0.35F
+            );
+        }
 
         mumakilHowdah = new LOTRItemMumakilHowdah();
         GameRegistry.registerItem(mumakilHowdah, "mumakil_howdah");
@@ -149,17 +174,24 @@ public class Main {
                 "mumakil_howdah_spawn_egg"
         );
 
-        MumakilUnitTradeInjector.inject();
-        MumakilItemTradeInjector.inject();
+        if (MumakilConfig.enableMumakil) {
+            MumakilUnitTradeInjector.inject();
+            MumakilItemTradeInjector.inject();
+        }
+        if (MumakilConfig.enableBattleRams) {
+            BattleRamUnitTradeInjector.inject();
+        }
 
         swordOfIsengard = new LOTRItemSword(AddonMaterial.LEGENDARY.toToolMaterial())
                 .setUnlocalizedName("atalcare")
-                .setTextureName("lotrmoremobs:anduril");
+                .setTextureName("lotrmoremobs:anduril")
+                .setCreativeTab(LOTRCreativeTabs.tabCombat);
         GameRegistry.registerItem(swordOfIsengard, "atalcare");
 
         helmOfIsengard = (new LOTRItemArmor(LOTRMaterial.MORDOR, 0, "helmet"))
                 .setUnlocalizedName("Helm of Isengard")
-                .setTextureName("lotrmoremobs:black_numenorean_1");
+                .setTextureName("lotrmoremobs:black_numenorean_1")
+                .setCreativeTab(LOTRCreativeTabs.tabCombat);
         GameRegistry.registerItem(helmOfIsengard, "helm_of_isengard");
     }
 
@@ -168,14 +200,31 @@ public class Main {
         /*
          * Register after LOTR has populated its faction crafting lists.
          */
-        MumakilAchievements.register();
-        MumakilHowdahRecipeRegistry.register();
-        MumakilNaturalSpawnRegistry.register(); // MUMAKIL_NATURAL_SPAWNING_V1
-        MumakilWarFormationSpawnRegistry.register();
-        MumakilInvasionFormationRegistry.register();
+        if (MumakilConfig.enableMumakil) {
+            MumakilAchievements.register();
+            MumakilHowdahRecipeRegistry.register();
+            if (MumakilConfig.enableNaturalMumakSpawning) {
+                MumakilNaturalSpawnRegistry.register(); // MUMAKIL_NATURAL_SPAWNING_V1
+            }
+            MumakilWarFormationSpawnRegistry.register();
+            MumakilInvasionFormationRegistry.register();
+        }
     }
     @EventHandler
     public void serverStarting(FMLServerStartingEvent event) {
-        event.registerServerCommand(new CommandPickupFilter());
+        if (MumakilConfig.enableItemPickupFilter) {
+            event.registerServerCommand(new CommandPickupFilter());
+        }
+        if (MumakilConfig.enableSiegeGates) {
+            event.registerServerCommand(new CommandSiegeGateDebug());
+        }
+    }
+
+    @EventHandler
+    public void serverStopping(FMLServerStoppingEvent event) {
+        PickupFilterRequestManager.resetServerState();
+        PlayerPickupFilterData.clearAllCaches();
+        MumakilOpenGuiPacket.resetServerState();
+        SiegeRequestLifecycle.resetServerState();
     }
 }

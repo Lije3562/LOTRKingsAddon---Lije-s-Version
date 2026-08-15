@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.entity.animal;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.achievement.MumakilAchievements;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHowdahArcher;
 import com.enovak.lotrmoremobs.handler.MumakilDriverControlEventHandler;
@@ -202,6 +203,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final int MOB_TARGET_CHECK_INTERVAL = 20;
     private static final double MOB_TARGET_RANGE = 18.0D;
     private static final double MOB_TARGET_VERTICAL_RANGE = 8.0D;
+    private static final double WILD_TARGET_RETENTION_RANGE = 32.0D;
+    private static final int WILD_TARGET_UNSEEN_MEMORY_TICKS = 60;
 
     private static final int ANGER_WAVE_MIN_DURATION = 60;
     private static final int ANGER_WAVE_RANDOM_DURATION = 61;
@@ -453,6 +456,8 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean mumakilHirePreview;
     private int recentFormationThreatEntityId;
     private long recentFormationThreatUntilTick;
+    private int wildRetainedTargetEntityId = -1;
+    private int wildTargetUnseenTicks;
 
     private int mumakilStrikeAnimationTicks;
     private int prevMumakilStrikeAnimationTicks;
@@ -1400,6 +1405,60 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     // ---------------------------------------------------------------------
     // Wild target selection and movement AI
     // ---------------------------------------------------------------------
+
+    private void validateWildAttackTargetLifecycle() {
+        if (!this.isWildAdultMumakil()) {
+            this.wildRetainedTargetEntityId = -1;
+            this.wildTargetUnseenTicks = 0;
+            return;
+        }
+
+        EntityLivingBase target = this.getAttackTarget();
+        if (target == null) {
+            this.wildRetainedTargetEntityId = -1;
+            this.wildTargetUnseenTicks = 0;
+            return;
+        }
+
+        boolean present = !target.isDead
+                && target.isEntityAlive()
+                && target.worldObj == this.worldObj
+                && target.getEntityId() > 0
+                && this.worldObj.getEntityByID(target.getEntityId()) == target;
+        boolean inRange = present
+                && this.getDistanceSqToEntity(target)
+                <= WILD_TARGET_RETENTION_RANGE
+                * WILD_TARGET_RETENTION_RANGE;
+        boolean legal = present && this.canTuskAttackTarget(target);
+
+        if (!present || !inRange || !legal) {
+            this.setAttackTarget(null);
+            if (this.getAITarget() == target) {
+                this.setRevengeTarget(null);
+            }
+            this.wildRetainedTargetEntityId = -1;
+            this.wildTargetUnseenTicks = 0;
+            return;
+        }
+
+        int targetId = target.getEntityId();
+        if (this.wildRetainedTargetEntityId != targetId) {
+            this.wildRetainedTargetEntityId = targetId;
+            this.wildTargetUnseenTicks = 0;
+        }
+
+        if (this.getEntitySenses().canSee(target)) {
+            this.wildTargetUnseenTicks = 0;
+        } else if (++this.wildTargetUnseenTicks
+                > WILD_TARGET_UNSEEN_MEMORY_TICKS) {
+            this.setAttackTarget(null);
+            if (this.getAITarget() == target) {
+                this.setRevengeTarget(null);
+            }
+            this.wildRetainedTargetEntityId = -1;
+            this.wildTargetUnseenTicks = 0;
+        }
+    }
 
     private void tryAcquireWildMobTarget() {
         if (!this.isWildAdultMumakil()
@@ -6453,6 +6512,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
             this.updateAngerWave();
             this.updateTerritorialWarningAndHerdRegroup();
+            this.validateWildAttackTargetLifecycle();
             this.tryAcquireWildMobTarget();
             this.tryTuskReachAttack();
             if (!MumakilPerformanceTracker.DEBUG_DISABLE_MUMAKIL_TREE_CLEARING) {
@@ -7505,6 +7565,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         return true;
     }
 
+    public boolean isTamedByPlayer(EntityPlayer player) {
+        return player != null && this.isOwner(player);
+    }
+
     private boolean isOwner(EntityPlayer player) {
         if (!this.isTame()) {
             return false;
@@ -7812,6 +7876,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     }
 
     private boolean shouldBreakForwardTrees() {
+        if (!MumakilConfig.mumakBreaksTrees) {
+            return false;
+        }
         if (this.riddenByEntity instanceof EntityPlayer) {
             return false;
         }

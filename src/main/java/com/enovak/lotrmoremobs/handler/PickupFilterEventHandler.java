@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.handler;
 
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 import cpw.mods.fml.common.eventhandler.EventPriority;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
@@ -13,7 +14,8 @@ public class PickupFilterEventHandler {
 
     @SubscribeEvent(priority = EventPriority.HIGHEST)
     public void onEntityItemPickup(EntityItemPickupEvent event) {
-        if (event == null
+        if (!MumakilConfig.enableItemPickupFilter
+                || event == null
                 || event.entityPlayer == null
                 || event.entityPlayer.worldObj == null
                 || event.entityPlayer.worldObj.isRemote

@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.item;
 
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.spawning.MumakilWarFormationFactory;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
@@ -30,7 +31,9 @@ public final class LOTRItemMumakilHowdahSpawnEgg
     public LOTRItemMumakilHowdahSpawnEgg() {
         this.setHasSubtypes(false);
         this.setMaxStackSize(64);
-        this.setCreativeTab(LOTRCreativeTabs.tabSpawn);
+        if (MumakilConfig.enableMumakil) {
+            this.setCreativeTab(LOTRCreativeTabs.tabSpawn);
+        }
         this.setUnlocalizedName("mumakil_howdah_spawn_egg");
         this.setTextureName("spawn_egg");
     }
@@ -57,7 +60,9 @@ public final class LOTRItemMumakilHowdahSpawnEgg
             net.minecraft.creativetab.CreativeTabs creativeTab,
             List itemList
     ) {
-        itemList.add(new ItemStack(item));
+        if (MumakilConfig.enableMumakil) {
+            itemList.add(new ItemStack(item));
+        }
     }
 
     @Override
@@ -73,6 +78,9 @@ public final class LOTRItemMumakilHowdahSpawnEgg
             float hitY,
             float hitZ
     ) {
+        if (!MumakilConfig.enableMumakil) {
+            return false;
+        }
         if (world.isRemote) {
             return true;
         }
@@ -106,6 +114,9 @@ public final class LOTRItemMumakilHowdahSpawnEgg
             World world,
             EntityPlayer player
     ) {
+        if (!MumakilConfig.enableMumakil) {
+            return stack;
+        }
         if (world.isRemote) {
             return stack;
         }

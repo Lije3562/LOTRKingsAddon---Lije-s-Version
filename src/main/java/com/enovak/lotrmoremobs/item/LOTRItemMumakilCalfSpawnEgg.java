@@ -1,11 +1,13 @@
 package com.enovak.lotrmoremobs.item;
 
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import java.util.List;
 import net.minecraft.block.Block;
 import net.minecraft.block.BlockLiquid;
+import lotr.common.LOTRCreativeTabs;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.item.Item;
@@ -33,7 +35,9 @@ public final class LOTRItemMumakilCalfSpawnEgg
     public LOTRItemMumakilCalfSpawnEgg() {
         this.setHasSubtypes(false);
         this.setMaxStackSize(64);
-        this.setCreativeTab(CreativeTabs.tabMisc);
+        if (MumakilConfig.enableMumakil) {
+            this.setCreativeTab(LOTRCreativeTabs.tabSpawn);
+        }
         this.setUnlocalizedName("mumakil_calf_spawn_egg");
         this.setTextureName("spawn_egg");
     }
@@ -60,7 +64,9 @@ public final class LOTRItemMumakilCalfSpawnEgg
             CreativeTabs creativeTab,
             List itemList
     ) {
-        itemList.add(new ItemStack(item));
+        if (MumakilConfig.enableMumakil) {
+            itemList.add(new ItemStack(item));
+        }
     }
 
     @Override
@@ -76,6 +82,9 @@ public final class LOTRItemMumakilCalfSpawnEgg
             float hitY,
             float hitZ
     ) {
+        if (!MumakilConfig.enableMumakil) {
+            return false;
+        }
         if (world.isRemote) {
             return true;
         }
@@ -112,6 +121,9 @@ public final class LOTRItemMumakilCalfSpawnEgg
             World world,
             EntityPlayer player
     ) {
+        if (!MumakilConfig.enableMumakil) {
+            return stack;
+        }
         if (world.isRemote) {
             return stack;
         }

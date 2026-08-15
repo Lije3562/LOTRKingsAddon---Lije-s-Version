@@ -125,9 +125,9 @@ public final class LOTRGuiUnitTradePledgeNavigation
     }
 
     /**
-     * Matches LOTR's native foreground exactly except that a faction pledge
+     * Matches LOTR's native foreground except that every pledge requirement
      * row is owned by the real GuiButton drawn in the normal button pass.
-     * Non-faction pledge types and every native tooltip remain native.
+     * Cost/alignment, reward-slot, and extra-info behavior remain native.
      */
     @Override
     protected void drawGuiContainerForegroundLayer(
@@ -210,18 +210,13 @@ public final class LOTRGuiUnitTradePledgeNavigation
         );
 
         if (trade.getPledgeType() != PledgeType.NONE) {
+            /*
+             * The real navigation button owns this row for every pledge type
+             * (FACTION, ANY_ELF, ANY_DWARF, etc.). Keeping the row reserved
+             * preserves the native spacing without drawing the old "More..."
+             * implementation underneath it.
+             */
             nextRequirementY += requirementGap;
-            if (trade.getPledgeType() != PledgeType.FACTION) {
-                this.drawNativeNonFactionPledge(
-                        trade,
-                        requirementX,
-                        requirementTextX,
-                        nextRequirementY,
-                        requirementTextOffsetY,
-                        mouseX,
-                        mouseY
-                );
-            }
         }
 
         LOTRContainerUnitTrade container =
@@ -385,14 +380,32 @@ public final class LOTRGuiUnitTradePledgeNavigation
             int mouseY
     ) {
         LOTRUnitTradeEntry trade = this.currentTrade();
-        if (!trade.hasExtraInfo()
-                || !this.isExtraInfoHovered(mouseX, mouseY)) {
+        String tooltipText = null;
+
+        if (this.pledgeButton != null
+                && this.pledgeButton.visible
+                && this.pledgeButton.isMouseOver(
+                mouseX,
+                mouseY
+        )
+                && trade.getPledgeType() != PledgeType.NONE
+                && !this.isPledgedToTraderFaction()) {
+
+            tooltipText =
+                    "Pledge to " + this.traderFaction.factionName();
+        } else if (trade.hasExtraInfo()
+                && this.isExtraInfoHovered(mouseX, mouseY)) {
+
+            tooltipText = trade.getFormattedExtraInfo();
+        }
+
+        if (tooltipText == null) {
             return;
         }
 
         List description = this.fontRendererObj
                 .listFormattedStringToWidth(
-                        trade.getFormattedExtraInfo(),
+                        tooltipText,
                         200
                 );
         RenderItem renderItem = RenderItem.getInstance();
@@ -464,11 +477,11 @@ public final class LOTRGuiUnitTradePledgeNavigation
         }
 
         LOTRUnitTradeEntry trade = this.currentTrade();
-        boolean factionPledge =
-                trade.getPledgeType() == PledgeType.FACTION;
-        this.pledgeButton.visible = factionPledge;
-        this.pledgeButton.enabled = factionPledge;
-        if (!factionPledge) {
+        boolean pledgeRequired =
+                trade.getPledgeType() != PledgeType.NONE;
+        this.pledgeButton.visible = pledgeRequired;
+        this.pledgeButton.enabled = pledgeRequired;
+        if (!pledgeRequired) {
             return;
         }
 
@@ -493,20 +506,23 @@ public final class LOTRGuiUnitTradePledgeNavigation
     }
 
     private String getPledgeLabel() {
+        LOTRUnitTradeEntry trade = this.currentTrade();
+        if (trade.getPledgeType() != PledgeType.NONE) {
+            return this.isPledgedToTraderFaction()
+                    ? StatCollector.translateToLocal(
+                    "gui.lotrmoremobs.unitTrade.pledged"
+            )
+                    : "Pledge";
+        }
+
+        return "";
+    }
+
+    private boolean isPledgedToTraderFaction() {
         LOTRPlayerData playerData = LOTRLevelData.getData(
                 this.mc.thePlayer
         );
-        if (playerData.isPledgedTo(this.traderFaction)) {
-            return StatCollector.translateToLocal(
-                    "gui.lotrmoremobs.unitTrade.pledged"
-            );
-        }
-        return StatCollector.translateToLocalFormatted(
-                "gui.lotrmoremobs.unitTrade.pledgeTo",
-                new Object[] {
-                        this.traderFaction.factionName()
-                }
-        );
+        return playerData.isPledgedTo(this.traderFaction);
     }
 
     private void openFactionPage(LOTRFaction faction) {

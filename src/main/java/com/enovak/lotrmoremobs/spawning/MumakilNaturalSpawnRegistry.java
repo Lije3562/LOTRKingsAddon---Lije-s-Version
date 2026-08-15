@@ -3,6 +3,7 @@ package com.enovak.lotrmoremobs.spawning;
 
 
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 
 import java.lang.reflect.Field;
 
@@ -32,20 +33,6 @@ import net.minecraft.world.biome.BiomeGenBase;
 
 public final class MumakilNaturalSpawnRegistry {
 
-    /*
-
-     * Temporary testing values. Lower SPAWN_WEIGHT after verification.
-
-     */
-
-    private static final int SPAWN_WEIGHT = 8;
-
-    private static final int MIN_GROUP_SIZE = 3;
-
-    private static final int MAX_GROUP_SIZE = 5;
-
-
-
     private static boolean registered;
 
 
@@ -57,6 +44,11 @@ public final class MumakilNaturalSpawnRegistry {
 
 
     public static void register() {
+
+        if (!MumakilConfig.enableMumakil
+                || !MumakilConfig.enableNaturalMumakSpawning) {
+            return;
+        }
 
         if (registered) {
 
@@ -103,11 +95,11 @@ List eligibleBiomes = collectEligibleRegionBiomes();
 
                             LOTREntityMumakil.class,
 
-                            SPAWN_WEIGHT,
+                            MumakilConfig.mumakNaturalSpawnWeight,
 
-                            MIN_GROUP_SIZE,
+                            MumakilConfig.mumakNaturalSpawnMinGroupSize,
 
-                            MAX_GROUP_SIZE
+                            MumakilConfig.mumakNaturalSpawnMaxGroupSize
 
                     )
 
@@ -131,11 +123,11 @@ List eligibleBiomes = collectEligibleRegionBiomes();
 
                             + biome.getClass().getName()
 
-                            + " weight=" + SPAWN_WEIGHT
+                            + " weight=" + MumakilConfig.mumakNaturalSpawnWeight
 
-                            + " group=" + MIN_GROUP_SIZE
+                            + " group=" + MumakilConfig.mumakNaturalSpawnMinGroupSize
 
-                            + "-" + MAX_GROUP_SIZE
+                            + "-" + MumakilConfig.mumakNaturalSpawnMaxGroupSize
 
             );
 

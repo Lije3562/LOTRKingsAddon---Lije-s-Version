@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.client.pickupfilter;
 
+import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 import net.minecraft.item.ItemStack;
 
 import java.util.ArrayList;
@@ -29,9 +30,12 @@ public final class ClientPickupFilterState {
         }
 
         for (ItemStack stack : items) {
-            if (stack != null) {
-                ItemStack copy = stack.copy();
-                copy.stackSize = 1;
+            if (excludedItems.size()
+                    >= PlayerPickupFilterData.MAX_EXCLUDED_ITEMS) {
+                break;
+            }
+            ItemStack copy = PlayerPickupFilterData.sanitizeStack(stack);
+            if (copy != null) {
                 excludedItems.add(copy);
             }
         }

@@ -1,6 +1,6 @@
 package com.enovak.lotrmoremobs.network;
 
-import com.enovak.lotrmoremobs.pickupfilter.PickupFilterNetwork;
+import com.enovak.lotrmoremobs.pickupfilter.PickupFilterRequestManager;
 import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
@@ -12,9 +12,7 @@ import net.minecraft.item.ItemStack;
 
 /**
  * Client -> server request to toggle one item in the player's pickup filter.
- *
- * The server remains authoritative and sends the updated complete filter
- * back to the client after applying the change.
+ * The handler performs bounded intake only; mutation occurs on the server tick.
  */
 public class PickupFilterTogglePacket implements IMessage {
 
@@ -24,18 +22,17 @@ public class PickupFilterTogglePacket implements IMessage {
     }
 
     public PickupFilterTogglePacket(ItemStack stack) {
-        if (stack != null) {
-            this.stack = stack.copy();
-            this.stack.stackSize = 1;
-        }
+        this.stack = PlayerPickupFilterData.sanitizeStack(stack);
     }
 
     @Override
     public void fromBytes(ByteBuf buf) {
-        stack = ByteBufUtils.readItemStack(buf);
-
-        if (stack != null) {
-            stack.stackSize = 1;
+        stack = null;
+        try {
+            stack = PlayerPickupFilterData.sanitizeStack(
+                    ByteBufUtils.readItemStack(buf)
+            );
+        } catch (RuntimeException ignored) {
         }
     }
 
@@ -52,34 +49,17 @@ public class PickupFilterTogglePacket implements IMessage {
                 PickupFilterTogglePacket message,
                 MessageContext ctx
         ) {
-            if (message.stack == null) {
+            if (message == null || message.stack == null) {
                 return null;
             }
 
-            EntityPlayerMP player =
-                    ctx.getServerHandler().playerEntity;
-
-            if (player == null) {
-                return null;
-            }
-
-            if (PlayerPickupFilterData.isExcluded(
-                    player,
-                    message.stack
-            )) {
-                PlayerPickupFilterData.removeExcludedItem(
-                        player,
-                        message.stack
-                );
-            } else {
-                PlayerPickupFilterData.addExcludedItem(
+            EntityPlayerMP player = ctx.getServerHandler().playerEntity;
+            if (player != null) {
+                PickupFilterRequestManager.enqueueToggle(
                         player,
                         message.stack
                 );
             }
-
-            PickupFilterNetwork.syncToPlayer(player);
-
             return null;
         }
     }

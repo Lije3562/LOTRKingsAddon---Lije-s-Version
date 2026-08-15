@@ -61,5 +61,60 @@
     "sounds": [
       "lotrmoremobs:harad_warhorn/haradrim_war_horn"
     ]
+  },
+  "siege.gate_breach": {
+    "category": "block",
+    "sounds": [
+      "lotrmoremobs:siege/breach"
+    ]
+  },
+  "siege.gate_finalize": {
+    "category": "block",
+    "sounds": [
+      "lotrmoremobs:siege/finalize"
+    ]
+  },
+  "siege.gate_open": {
+    "category": "block",
+    "sounds": [
+      "lotrmoremobs:siege/gate_opens"
+    ]
+  },
+  "siege.gate_close": {
+    "category": "block",
+    "sounds": [
+      "lotrmoremobs:siege/gate_close"
+    ]
+  },
+  "siege.ram_hit": {
+    "category": "hostile",
+    "sounds": [
+      "lotrmoremobs:siege/hit1",
+      "lotrmoremobs:siege/hit2",
+      "lotrmoremobs:siege/hit3"
+    ]
+  },
+  "siege.repair": {
+    "category": "block",
+    "sounds": [
+      "lotrmoremobs:siege/repair1",
+      "lotrmoremobs:siege/repair2",
+      "lotrmoremobs:siege/repair3",
+      "lotrmoremobs:siege/repair4"
+    ]
+  },
+  "siege.repair_build": {
+    "category": "neutral",
+    "sounds": [
+      "lotrmoremobs:siege/repair5",
+      "lotrmoremobs:siege/repair6",
+      "lotrmoremobs:siege/repair7"
+    ]
+  },
+  "siege.ram_target_set": {
+    "category": "neutral",
+    "sounds": [
+      "lotrmoremobs:siege/set_ram_target"
+    ]
   }
 }

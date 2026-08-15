@@ -14,7 +14,9 @@ public final class MortalGandalfCorePlugin
     public String[] getASMTransformerClass() {
         return new String[] {
                 MortalGandalfTransformer.class.getName(),
-                RespawnMarkerProjectileCollisionTransformer.class.getName()
+                RespawnMarkerProjectileCollisionTransformer.class.getName(),
+                EntitySensesGateSightTransformer.class.getName(),
+                PathFinderGatePartTransformer.class.getName()
         };
     }
 

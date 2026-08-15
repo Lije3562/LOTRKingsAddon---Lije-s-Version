@@ -1,10 +1,11 @@
 package com.enovak.lotrmoremobs.item;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import cpw.mods.fml.relauncher.Side;
 import cpw.mods.fml.relauncher.SideOnly;
 import net.minecraft.client.renderer.texture.IIconRegister;
-import net.minecraft.creativetab.CreativeTabs;
+import lotr.common.LOTRCreativeTabs;
 import net.minecraft.item.Item;
 
 public class LOTRItemMumakilTusk extends Item {
@@ -12,7 +13,9 @@ public class LOTRItemMumakilTusk extends Item {
 
     public LOTRItemMumakilTusk() {
         this.setMaxStackSize(16);
-        this.setCreativeTab(CreativeTabs.tabMaterials);
+        if (MumakilConfig.enableMumakil) {
+            this.setCreativeTab(LOTRCreativeTabs.tabMaterials);
+        }
         this.setUnlocalizedName("mumakil_tusk");
         this.setTextureName(TUSK_ICON_NAME);
     }

@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.item;
 
 import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import java.lang.reflect.Field;
 import lotr.common.LOTRCreativeTabs;
 import net.minecraft.item.ItemFood;
@@ -53,7 +54,9 @@ public class LOTRItemMumakilShank extends ItemFood {
                         ? "cooked_mumakil_shank"
                         : "mumakil_shank"
         );
-        this.setCreativeTab(LOTR_FOOD_CREATIVE_TAB);
+        if (MumakilConfig.enableMumakil) {
+            this.setCreativeTab(LOTR_FOOD_CREATIVE_TAB);
+        }
         this.setTextureName(
                 cooked ? COOKED_TEXTURE : RAW_TEXTURE
         );

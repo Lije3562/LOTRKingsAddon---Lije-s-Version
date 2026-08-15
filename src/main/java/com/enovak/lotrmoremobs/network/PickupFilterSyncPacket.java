@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.network;
 
-import com.enovak.lotrmoremobs.client.pickupfilter.ClientPickupFilterState;
+import com.enovak.lotrmoremobs.Main;
+import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 import cpw.mods.fml.common.network.ByteBufUtils;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
 import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
@@ -13,14 +14,11 @@ import java.util.List;
 
 /**
  * Server -> client packet containing the player's complete pickup-filter list.
- *
- * The server remains authoritative; this only updates the client's cached
- * copy for display in the future GUI.
+ * The server remains authoritative; this only updates the client display cache.
  */
 public class PickupFilterSyncPacket implements IMessage {
 
-    private List<ItemStack> excludedItems =
-            new ArrayList<ItemStack>();
+    private List<ItemStack> excludedItems = new ArrayList<ItemStack>();
 
     public PickupFilterSyncPacket() {
     }
@@ -31,9 +29,12 @@ public class PickupFilterSyncPacket implements IMessage {
         }
 
         for (ItemStack stack : excludedItems) {
-            if (stack != null) {
-                ItemStack copy = stack.copy();
-                copy.stackSize = 1;
+            if (this.excludedItems.size()
+                    >= PlayerPickupFilterData.MAX_EXCLUDED_ITEMS) {
+                break;
+            }
+            ItemStack copy = PlayerPickupFilterData.sanitizeStack(stack);
+            if (copy != null) {
                 this.excludedItems.add(copy);
             }
         }
@@ -44,12 +45,18 @@ public class PickupFilterSyncPacket implements IMessage {
         excludedItems.clear();
 
         int count = buf.readInt();
+        if (count < 0
+                || count > PlayerPickupFilterData.MAX_EXCLUDED_ITEMS) {
+            throw new IllegalArgumentException(
+                    "Invalid Pickup Filter sync count: " + count
+            );
+        }
 
         for (int i = 0; i < count; ++i) {
-            ItemStack stack = ByteBufUtils.readItemStack(buf);
-
+            ItemStack stack = PlayerPickupFilterData.sanitizeStack(
+                    ByteBufUtils.readItemStack(buf)
+            );
             if (stack != null) {
-                stack.stackSize = 1;
                 excludedItems.add(stack);
             }
         }
@@ -57,11 +64,26 @@ public class PickupFilterSyncPacket implements IMessage {
 
     @Override
     public void toBytes(ByteBuf buf) {
-        buf.writeInt(excludedItems.size());
+        int count = Math.min(
+                excludedItems.size(),
+                PlayerPickupFilterData.MAX_EXCLUDED_ITEMS
+        );
+        buf.writeInt(count);
 
-        for (ItemStack stack : excludedItems) {
-            ByteBufUtils.writeItemStack(buf, stack);
+        for (int i = 0; i < count; ++i) {
+            ByteBufUtils.writeItemStack(buf, excludedItems.get(i));
         }
+    }
+
+    public List<ItemStack> getExcludedItems() {
+        List<ItemStack> copy = new ArrayList<ItemStack>();
+        for (ItemStack stack : excludedItems) {
+            ItemStack sanitized = PlayerPickupFilterData.sanitizeStack(stack);
+            if (sanitized != null) {
+                copy.add(sanitized);
+            }
+        }
+        return copy;
     }
 
     public static class Handler
@@ -72,10 +94,9 @@ public class PickupFilterSyncPacket implements IMessage {
                 PickupFilterSyncPacket message,
                 MessageContext ctx
         ) {
-            ClientPickupFilterState.setExcludedItems(
-                    message.excludedItems
-            );
-
+            if (message != null) {
+                Main.proxy.handlePickupFilterSync(message);
+            }
             return null;
         }
     }

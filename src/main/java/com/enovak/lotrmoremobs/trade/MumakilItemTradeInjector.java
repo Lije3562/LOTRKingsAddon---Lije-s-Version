@@ -7,15 +7,32 @@ import net.minecraft.item.Item;
 import net.minecraft.item.ItemStack;
 
 /**
- * MUMAKIL_SHANK_SYSTEM_V1_1
+ * MUMAKIL_MATERIAL_TRADES_V2
  *
- * Adds Mumakil materials to the Harad hunter's buy pool.
- * Prices are LOTR trade-pool base prices and therefore use the LOTR mod's
- * normal per-trader price variation when trades are generated.
+ * Adds Mumakil materials to southern LOTR trader pools which naturally occur
+ * in or around Mumakil country.
+ *
+ * Important LOTR 36.15 naming convention:
+ *   *_BUY  = NPC sells the item to the player.
+ *   *_SELL = NPC buys the item from the player.
+ *
+ * Prices below are LOTR trade-pool base prices, so normal LOTR per-trader
+ * price variation is still applied when an NPC generates its trades.
  */
 public final class MumakilItemTradeInjector {
-    public static final int MUMAK_TUSK_HUNTSMAN_PRICE = 50;
-    public static final int MUMAK_TUSK_GOLDSMITH_PRICE = 25;
+    // NPC -> player prices.
+    public static final int MUMAK_RAW_SHANK_HUNTER_SELL_PRICE = 12;
+    public static final int MUMAK_RAW_SHANK_BUTCHER_SELL_PRICE = 8;
+    public static final int MUMAK_COOKED_SHANK_BUTCHER_SELL_PRICE = 12;
+    public static final int MUMAK_TUSK_HUNTER_SELL_PRICE = 45;
+    public static final int MUMAK_RAW_SHANK_MOREDAIN_SELL_PRICE = 8;
+
+    // Player -> NPC payouts.
+    public static final int MUMAK_TUSK_HARNEDOR_HUNTER_BUY_PRICE = 20;
+    public static final int MUMAK_TUSK_GOLDSMITH_BUY_PRICE = 25;
+    public static final int MUMAK_TUSK_BLACKSMITH_BUY_PRICE = 20;
+    public static final int MUMAK_TUSK_MOREDAIN_BUY_PRICE = 18;
+    public static final int MUMAK_TUSK_HALF_TROLL_BUY_PRICE = 12;
 
     private MumakilItemTradeInjector() {
     }
@@ -31,46 +48,171 @@ public final class MumakilItemTradeInjector {
             return;
         }
 
-        LOTRTradeEntries huntsmanPool =
+        /*
+         * Shared native LOTR pools:
+         * - HARAD_BUTCHER_* is used by Harnedor, Southron, Umbar, and Gulf
+         *   butchers.
+         * - HARAD_GOLDSMITH_* is used by Southron, Umbar, and Gulf goldsmiths.
+         *
+         * Harnedor Hunter and Gulf Hunter use separate hunter pools.
+         */
+        LOTRTradeEntries harnedorHunterNpcSells =
                 LOTRTradeEntries.HARAD_HUNTER_BUY;
-        LOTRTradeEntries goldsmithPool =
+        LOTRTradeEntries harnedorHunterNpcBuys =
+                LOTRTradeEntries.HARAD_HUNTER_SELL;
+        LOTRTradeEntries haradButchersNpcSell =
+                LOTRTradeEntries.HARAD_BUTCHER_BUY;
+        LOTRTradeEntries haradGoldsmithsNpcBuy =
                 LOTRTradeEntries.HARAD_GOLDSMITH_SELL;
+        LOTRTradeEntries harnedorBlacksmithNpcBuys =
+                LOTRTradeEntries.HARNEDOR_BLACKSMITH_SELL;
+        LOTRTradeEntries nearHaradBlacksmithNpcBuys =
+                LOTRTradeEntries.NEAR_HARAD_BLACKSMITH_SELL;
+        LOTRTradeEntries umbarBlacksmithNpcBuys =
+                LOTRTradeEntries.UMBAR_BLACKSMITH_SELL;
+        LOTRTradeEntries gulfHunterNpcSells =
+                LOTRTradeEntries.GULF_HUNTER_BUY;
+        LOTRTradeEntries gulfBlacksmithNpcBuys =
+                LOTRTradeEntries.GULF_BLACKSMITH_SELL;
+        LOTRTradeEntries moredainHuntsmanNpcSells =
+                LOTRTradeEntries.MOREDAIN_HUNTSMAN_BUY;
+        LOTRTradeEntries moredainHuntsmanNpcBuys =
+                LOTRTradeEntries.MOREDAIN_HUNTSMAN_SELL;
+        LOTRTradeEntries halfTrollScavengerNpcBuys =
+                LOTRTradeEntries.HALF_TROLL_SCAVENGER_SELL;
 
-        if (!isReady(huntsmanPool) || !isReady(goldsmithPool)) {
+        if (!isReady(harnedorHunterNpcSells)
+                || !isReady(harnedorHunterNpcBuys)
+                || !isReady(haradButchersNpcSell)
+                || !isReady(haradGoldsmithsNpcBuy)
+                || !isReady(harnedorBlacksmithNpcBuys)
+                || !isReady(nearHaradBlacksmithNpcBuys)
+                || !isReady(umbarBlacksmithNpcBuys)
+                || !isReady(gulfHunterNpcSells)
+                || !isReady(gulfBlacksmithNpcBuys)
+                || !isReady(moredainHuntsmanNpcSells)
+                || !isReady(moredainHuntsmanNpcBuys)
+                || !isReady(halfTrollScavengerNpcBuys)) {
             System.out.println(
-                    "[LOTRMoreMobs] Near Harad material trades were not ready"
-                            + " for Mumakil item injection."
+                    "[LOTRMoreMobs] Mumakil material trade pools were not ready"
+                            + " for item injection."
             );
             return;
         }
 
+        // Harnedor Hunter: sells raw shank/tusk; buys tusks from hunters.
         ensureTrade(
-                huntsmanPool,
+                harnedorHunterNpcSells,
                 Main.mumakilShank,
-                15
+                MUMAK_RAW_SHANK_HUNTER_SELL_PRICE
         );
         ensureTrade(
-                huntsmanPool,
+                harnedorHunterNpcSells,
+                Main.mumakilTusk,
+                MUMAK_TUSK_HUNTER_SELL_PRICE
+        );
+        ensureTrade(
+                harnedorHunterNpcBuys,
+                Main.mumakilTusk,
+                MUMAK_TUSK_HARNEDOR_HUNTER_BUY_PRICE
+        );
+
+        // Harnedor, Southron, Umbar, and Gulf butchers share this pool.
+        ensureTrade(
+                haradButchersNpcSell,
+                Main.mumakilShank,
+                MUMAK_RAW_SHANK_BUTCHER_SELL_PRICE
+        );
+        ensureTrade(
+                haradButchersNpcSell,
                 Main.mumakilCookedShank,
-                20
+                MUMAK_COOKED_SHANK_BUTCHER_SELL_PRICE
+        );
+
+        // Southron, Umbar, and Gulf goldsmiths share this pool.
+        ensureTrade(
+                haradGoldsmithsNpcBuy,
+                Main.mumakilTusk,
+                MUMAK_TUSK_GOLDSMITH_BUY_PRICE
+        );
+
+        // Regional southern blacksmiths buy tusks as a crafting material.
+        ensureTrade(
+                harnedorBlacksmithNpcBuys,
+                Main.mumakilTusk,
+                MUMAK_TUSK_BLACKSMITH_BUY_PRICE
         );
         ensureTrade(
-                huntsmanPool,
+                nearHaradBlacksmithNpcBuys,
                 Main.mumakilTusk,
-                MUMAK_TUSK_HUNTSMAN_PRICE
+                MUMAK_TUSK_BLACKSMITH_BUY_PRICE
         );
         ensureTrade(
-                goldsmithPool,
+                umbarBlacksmithNpcBuys,
                 Main.mumakilTusk,
-                MUMAK_TUSK_GOLDSMITH_PRICE
+                MUMAK_TUSK_BLACKSMITH_BUY_PRICE
+        );
+        ensureTrade(
+                gulfBlacksmithNpcBuys,
+                Main.mumakilTusk,
+                MUMAK_TUSK_BLACKSMITH_BUY_PRICE
+        );
+
+        // Gulf Hunter mirrors the Harnedor Hunter's local game-animal sales.
+        ensureTrade(
+                gulfHunterNpcSells,
+                Main.mumakilShank,
+                MUMAK_RAW_SHANK_HUNTER_SELL_PRICE
+        );
+        ensureTrade(
+                gulfHunterNpcSells,
+                Main.mumakilTusk,
+                MUMAK_TUSK_HUNTER_SELL_PRICE
+        );
+
+        // Moredain Huntsman: cheap local meat seller and lower-paying tusk buyer.
+        ensureTrade(
+                moredainHuntsmanNpcSells,
+                Main.mumakilShank,
+                MUMAK_RAW_SHANK_MOREDAIN_SELL_PRICE
+        );
+        ensureTrade(
+                moredainHuntsmanNpcBuys,
+                Main.mumakilTusk,
+                MUMAK_TUSK_MOREDAIN_BUY_PRICE
+        );
+
+        /*
+         * Half-Troll Scavenger buys tusks only. Intentionally no raw Mumakil
+         * shank trade here.
+         */
+        ensureTrade(
+                halfTrollScavengerNpcBuys,
+                Main.mumakilTusk,
+                MUMAK_TUSK_HALF_TROLL_BUY_PRICE
         );
 
         System.out.println(
-                "[LOTRMoreMobs] Ensured Near Harad Mumak trades:"
-                        + " huntsman tusk=" + MUMAK_TUSK_HUNTSMAN_PRICE
-                        + ", goldsmith tusk="
-                        + MUMAK_TUSK_GOLDSMITH_PRICE
-                        + ", shank trades preserved."
+                "[LOTRMoreMobs] Ensured southern Mumakil material trades:"
+                        + " hunters sell raw shank="
+                        + MUMAK_RAW_SHANK_HUNTER_SELL_PRICE
+                        + " and tusk="
+                        + MUMAK_TUSK_HUNTER_SELL_PRICE
+                        + "; butchers sell raw/cooked shank="
+                        + MUMAK_RAW_SHANK_BUTCHER_SELL_PRICE
+                        + "/"
+                        + MUMAK_COOKED_SHANK_BUTCHER_SELL_PRICE
+                        + "; goldsmiths buy tusk="
+                        + MUMAK_TUSK_GOLDSMITH_BUY_PRICE
+                        + "; blacksmiths buy tusk="
+                        + MUMAK_TUSK_BLACKSMITH_BUY_PRICE
+                        + "; Moredain sells raw shank="
+                        + MUMAK_RAW_SHANK_MOREDAIN_SELL_PRICE
+                        + " and buys tusk="
+                        + MUMAK_TUSK_MOREDAIN_BUY_PRICE
+                        + "; Half-Troll Scavenger buys tusk="
+                        + MUMAK_TUSK_HALF_TROLL_BUY_PRICE
+                        + " only."
         );
     }
 

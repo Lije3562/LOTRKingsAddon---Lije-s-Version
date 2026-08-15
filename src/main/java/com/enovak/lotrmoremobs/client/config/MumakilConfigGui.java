@@ -16,7 +16,7 @@ public final class MumakilConfigGui extends GuiConfig {
     public MumakilConfigGui(GuiScreen parentScreen) {
         super(
                 parentScreen,
-                getFlatConfigElements(),
+                getCategoryElements(),
                 Main.MODID,
                 false,
                 false,
@@ -24,23 +24,30 @@ public final class MumakilConfigGui extends GuiConfig {
         );
     }
 
-    private static List<IConfigElement> getFlatConfigElements() {
-        List<IConfigElement> elements =
-                new ArrayList<IConfigElement>();
-        elements.addAll(
-                new ConfigElement(
-                        MumakilConfig.getConfiguration().getCategory(
-                                MumakilConfig.CATEGORY_GAMEPLAY
-                        )
-                ).getChildElements()
-        );
-        elements.addAll(
-                new ConfigElement(
-                        MumakilConfig.getConfiguration().getCategory(
-                                MumakilConfig.CATEGORY_SPAWNING
-                        )
-                ).getChildElements()
-        );
+    /**
+     * Keep the first screen clean: each top-level element opens one focused
+     * feature category instead of flattening every property into one list.
+     */
+    private static List<IConfigElement> getCategoryElements() {
+        List<IConfigElement> elements = new ArrayList<IConfigElement>();
+        addCategory(elements, MumakilConfig.CATEGORY_MUMAKIL);
+        addCategory(elements, MumakilConfig.CATEGORY_PICKUP_FILTER);
+        addCategory(elements, MumakilConfig.CATEGORY_MORTAL_GANDALF);
+        addCategory(elements, MumakilConfig.CATEGORY_SIEGE_GATES);
+        addCategory(elements, MumakilConfig.CATEGORY_BATTLE_RAMS);
         return elements;
+    }
+
+    private static void addCategory(
+            List<IConfigElement> elements,
+            String categoryName
+    ) {
+        elements.add(
+                new ConfigElement(
+                        MumakilConfig.getConfiguration().getCategory(
+                                categoryName
+                        )
+                )
+        );
     }
 }

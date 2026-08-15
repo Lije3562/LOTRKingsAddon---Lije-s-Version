@@ -12,8 +12,8 @@ import com.enovak.lotrmoremobs.pickupfilter.PickupFilterNetwork;
 import java.util.List;
 
 /**
- * Temporary developer/test command for validating the pickup-filter core before
- * the inventory GUI is implemented.
+ * Supported text fallback for managing the Pickup Filter when a player prefers
+ * commands or cannot use the inventory button. The normal GUI remains primary.
  */
 public class CommandPickupFilter extends CommandBase {
 
@@ -35,6 +35,27 @@ public class CommandPickupFilter extends CommandBase {
     @Override
     public boolean canCommandSenderUseCommand(ICommandSender sender) {
         return sender instanceof EntityPlayerMP;
+    }
+
+
+    @Override
+    public List addTabCompletionOptions(
+            ICommandSender sender,
+            String[] args
+    ) {
+        if (args != null
+                && args.length == 1) {
+
+            return getListOfStringsMatchingLastWord(
+                    args,
+                    "add",
+                    "remove",
+                    "clear",
+                    "list"
+            );
+        }
+
+        return null;
     }
 
     @Override
