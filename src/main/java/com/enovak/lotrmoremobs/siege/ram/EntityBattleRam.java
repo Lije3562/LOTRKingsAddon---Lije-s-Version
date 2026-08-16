@@ -2117,10 +2117,33 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         double centerZ =
                 gate.zCoord + (minZ + maxZ + 1) * 0.5D;
 
+        int nearestSideSign = orientation == GateOrientation.WIDTH_X
+                ? (posZ < centerZ ? -1 : 1)
+                : (posX < centerX ? -1 : 1);
+
         if (attackSideSign == 0) {
-            attackSideSign = orientation == GateOrientation.WIDTH_X
-                    ? (posZ < centerZ ? -1 : 1)
-                    : (posX < centerX ? -1 : 1);
+            attackSideSign = nearestSideSign;
+        } else if (getRamState() == BattleRamState.MOVE_TO_GATE
+                && !triedOppositeSide
+                && attackSideSign != nearestSideSign) {
+            /*
+             * While making the normal approach, keep the ram assigned to the
+             * gate face nearest its current position. This lets a ram that
+             * starts or moves around the opposite side approach that side
+             * directly instead of remaining locked to the first face chosen.
+             *
+             * Once pathfinding deliberately flips to the opposite side as a
+             * recovery attempt, triedOppositeSide stays true and preserves
+             * that fallback choice rather than immediately undoing it here.
+             */
+            attackSideSign = nearestSideSign;
+            pathFailureTicks = 0;
+            pathProgressCheckTicks = 0;
+            pathRequestCooldownTicks = 0;
+            lastPathDistance = Double.MAX_VALUE;
+            lastPathRequestSucceeded = false;
+            pathRequestFailedSinceProgressCheck = false;
+            getNavigator().clearPathEntity();
         }
 
         double normalX = orientation == GateOrientation.WIDTH_Z

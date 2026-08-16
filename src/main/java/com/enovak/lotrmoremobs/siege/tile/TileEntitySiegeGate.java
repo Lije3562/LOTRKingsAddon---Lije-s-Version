@@ -764,10 +764,17 @@ public class TileEntitySiegeGate extends TileEntity {
     }
 
     /**
-     * A cosmetic controller skin must be a normal opaque full cube.
+     * A cosmetic controller skin must still behave visually like a solid,
+     * opaque full cube, but it does not need to use vanilla render type 0.
      *
-     * This deliberately rejects stairs, slabs, fences, panes, chests,
-     * plants, carpets, leaves, glass, doors, etc.
+     * LOTR has full-cube wood/log/beam blocks which use custom render IDs
+     * only to orient or decorate their textures. The controller renderer
+     * asks the selected block for its face icons and tint, so requiring
+     * render type 0 hid otherwise safe LOTR texture choices from the picker.
+     *
+     * Keeping the solid + normal-block + opaque checks continues to reject
+     * stairs, slabs, fences, panes, chests, plants, carpets, leaves, glass,
+     * doors, and other non-full-cube appearances.
      */
     public static boolean isValidControllerAppearanceBlock(
             Block block
@@ -784,7 +791,6 @@ public class TileEntitySiegeGate extends TileEntity {
             return block.getMaterial() != null
                     && block.getMaterial().isSolid()
                     && block.renderAsNormalBlock()
-                    && block.getRenderType() == 0
                     && block.isOpaqueCube();
 
         } catch (RuntimeException ignored) {

@@ -1,15 +1,21 @@
 package com.enovak.lotrmoremobs.siege.gate;
 
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.creation.GateCreationManager;
+import com.enovak.lotrmoremobs.siege.repair.GateManagementManager;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
 import cpw.mods.fml.common.eventhandler.EventPriority;
 import cpw.mods.fml.common.eventhandler.SubscribeEvent;
 import cpw.mods.fml.common.gameevent.TickEvent;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
+import net.minecraft.item.ItemBlock;
+import net.minecraft.item.ItemStack;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.util.ChatComponentText;
 import net.minecraft.world.World;
+import net.minecraftforge.event.entity.player.PlayerInteractEvent;
 import net.minecraftforge.event.world.BlockEvent;
 import net.minecraftforge.event.world.ChunkEvent;
 import net.minecraftforge.event.world.WorldEvent;
@@ -109,6 +115,80 @@ public final class SiegeGateLifecycleHandler {
                     "The durable gate-removal journal is unavailable or full; "
                             + "the controller was preserved."
             );
+        }
+    }
+
+    /**
+     * Sneak-right-click keeps block placement available while making the gate
+     * GUI accessible with an empty hand or a non-block item.
+     *
+     * Forge normally gives a sneaking held item first chance to use itself,
+     * which means Block#onBlockActivated may never run for items such as
+     * weapons or tools. Intercept the server-side interaction event so those
+     * non-placeable clicks still open the appropriate gate GUI.
+     */
+    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    public void onPlayerInteract(PlayerInteractEvent event) {
+        if (event.world == null
+                || event.world.isRemote
+                || event.action != PlayerInteractEvent.Action.RIGHT_CLICK_BLOCK
+                || !MumakilConfig.enableSiegeGates) {
+            return;
+        }
+
+        EntityPlayer player = event.entityPlayer;
+        if (!(player instanceof EntityPlayerMP)
+                || !player.isSneaking()) {
+            return;
+        }
+
+        /*
+         * A held block keeps normal sneak-placement semantics. Everything
+         * else -- including an empty hand -- is treated as a GUI request.
+         */
+        ItemStack held = player.getCurrentEquippedItem();
+        if (held != null && held.getItem() instanceof ItemBlock) {
+            return;
+        }
+
+        TileEntitySiegeGate controller = null;
+
+        if (event.world.getBlock(event.x, event.y, event.z)
+                == SiegeRegistry.gateController) {
+
+            TileEntity tileEntity = event.world.getTileEntity(
+                    event.x,
+                    event.y,
+                    event.z
+            );
+            if (tileEntity instanceof TileEntitySiegeGate) {
+                controller = (TileEntitySiegeGate)tileEntity;
+            }
+
+        } else if (event.world.getBlock(event.x, event.y, event.z)
+                == SiegeRegistry.gatePart) {
+
+            controller = GateRegistry.getController(
+                    event.world,
+                    event.x,
+                    event.y,
+                    event.z
+            );
+        } else {
+            return;
+        }
+
+        if (controller == null) {
+            return;
+        }
+
+        event.setCanceled(true);
+
+        EntityPlayerMP serverPlayer = (EntityPlayerMP)player;
+        if (controller.isFinalized()) {
+            GateManagementManager.open(serverPlayer, controller);
+        } else {
+            GateCreationManager.openControls(serverPlayer, controller);
         }
     }
 
