@@ -202,3 +202,10 @@ publishing {
         // Add the repositories you want to publish to here.
     }
 }
+
+// AQUA_DEV_LVT_WORKAROUND
+// Old ForgeGradle/LOTR dev bytecode can contain duplicate LocalVariableTable
+// metadata. Disable verifier checks only for the development client.
+runClient {
+    jvmArgs "-Xverify:none"
+}

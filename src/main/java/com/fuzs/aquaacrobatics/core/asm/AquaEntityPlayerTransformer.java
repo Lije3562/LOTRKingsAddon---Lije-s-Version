@@ -88,6 +88,7 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
     private static final String CAN_FORCE_CRAWLING = "canForceCrawling";
     private static final String IS_POSE_CLEAR = "isPoseClear";
     private static final String WATER_LOGIC = "com/fuzs/aquaacrobatics/entity/player/AquaPlayerWaterLogic";
+    private static final String ON_ENTITY_UPDATE_MCP = "onEntityUpdate";
     private static final String ON_ENTITY_UPDATE_SRG = "func_70030_z";
     private static final String GET_FLAG_SRG = "func_70083_f";
     private static final String SET_FLAG_SRG = "func_70052_a";
@@ -332,8 +333,8 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
         classNode.methods.add(this.createWaterLogicGetter(playerDescriptor, GET_WATER_VISION, "()F"));
         // Forge's runtime deobfuscation uses SRG member names. Do not infer a member
         // namespace from the ClassNode superclass: class and member namespaces can differ.
-        classNode.methods.add(this.createSwimmingGetter(classNode.name, playerDescriptor, GET_FLAG_SRG));
-        classNode.methods.add(this.createSwimmingSetter(classNode.name, SET_FLAG_SRG));
+        classNode.methods.add(this.createSwimmingGetter(classNode.name, playerDescriptor, com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore.isDevEnv() ? "getFlag" : GET_FLAG_SRG));
+        classNode.methods.add(this.createSwimmingSetter(classNode.name, com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore.isDevEnv() ? "setFlag" : SET_FLAG_SRG));
     }
 
     private MethodNode createWaterStateUpdate(String superName, String playerDescriptor, String onEntityUpdate) {
@@ -481,10 +482,10 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
     }
 
     private String getOnEntityUpdateName(ClassNode classNode) {
-        // Like protected flag members, EntityPlayer lifecycle members must use Forge's
-        // stable SRG namespace. The raw 1.7.10 onEntityUpdate name is C, not z; class
-        // names alone are not a safe indication of the member namespace.
-        return ON_ENTITY_UPDATE_SRG;
+        // runClient uses MCP/deobfuscated members; production uses Forge SRG members.
+        return com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore.isDevEnv()
+            ? ON_ENTITY_UPDATE_MCP
+            : ON_ENTITY_UPDATE_SRG;
     }
 
     private void requireMissingMethod(ClassNode classNode, String name, String descriptor) {
@@ -1248,9 +1249,9 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
 
                 if (!(instruction instanceof MethodInsnNode)) continue;
                 MethodInsnNode invocation = (MethodInsnNode) instruction;
-                if (IS_SWIMMING.equals(method.name) && GET_FLAG_SRG.equals(invocation.name)
+                if (IS_SWIMMING.equals(method.name) && (com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore.isDevEnv() ? "getFlag" : GET_FLAG_SRG).equals(invocation.name)
                     && "(I)Z".equals(invocation.desc)) ++flagGetterCalls;
-                if (SET_SWIMMING.equals(method.name) && SET_FLAG_SRG.equals(invocation.name)
+                if (SET_SWIMMING.equals(method.name) && (com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore.isDevEnv() ? "setFlag" : SET_FLAG_SRG).equals(invocation.name)
                     && "(IZ)V".equals(invocation.desc)) ++flagSetterCalls;
             }
         }
