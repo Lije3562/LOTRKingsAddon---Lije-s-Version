@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.coremod;
 
+import com.fuzs.aquaacrobatics.core.AquaAcrobaticsCore;
 import cpw.mods.fml.relauncher.IFMLLoadingPlugin;
 import java.util.Map;
 
@@ -16,7 +17,13 @@ public final class MortalGandalfCorePlugin
                 MortalGandalfTransformer.class.getName(),
                 RespawnMarkerProjectileCollisionTransformer.class.getName(),
                 EntitySensesGateSightTransformer.class.getName(),
-                PathFinderGatePartTransformer.class.getName()
+                PathFinderGatePartTransformer.class.getName(),
+                "com.fuzs.aquaacrobatics.core.asm.AquaEntityPlayerTransformer",
+                "com.fuzs.aquaacrobatics.core.asm.AquaServerPlayerTransformer",
+                "com.fuzs.aquaacrobatics.core.asm.AquaBiomeTransformer",
+                "com.fuzs.aquaacrobatics.core.asm.AquaCommonWorldTransformer",
+                "com.fuzs.aquaacrobatics.core.asm.AquaClientEntityTransformer",
+                "com.fuzs.aquaacrobatics.core.asm.AquaLateClientPlayerTransformer"
         };
     }
 
@@ -32,6 +39,7 @@ public final class MortalGandalfCorePlugin
 
     @Override
     public void injectData(Map<String, Object> data) {
+        new AquaAcrobaticsCore().injectData(data);
     }
 
     @Override

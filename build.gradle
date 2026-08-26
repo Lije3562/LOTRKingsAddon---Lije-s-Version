@@ -140,7 +140,8 @@ jar {
         attributes(
                 'FMLCorePlugin':
                         'com.enovak.lotrmoremobs.coremod.MortalGandalfCorePlugin',
-                'FMLCorePluginContainsFMLMod': 'true'
+                'FMLCorePluginContainsFMLMod': 'true',
+                'FMLAT': 'aquaacrobatics_at.cfg'
         )
     }
 }
