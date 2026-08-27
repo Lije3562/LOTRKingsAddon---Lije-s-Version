@@ -4113,6 +4113,22 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     GL11.GL_ONE_MINUS_SRC_ALPHA
             );
 
+            /*
+             * The normal block render path leaves alpha testing enabled.
+             * That is a poor fit for this deliberately faint blended overlay:
+             * at oblique camera angles texture filtering can lower thin crack
+             * texels below Minecraft's alpha-test cutoff, making parts of the
+             * destroy texture appear to pop in and out as the view moves.
+             *
+             * Damage is already isolated behind glPushAttrib(GL_ENABLE_BIT),
+             * so disable alpha testing only for this pass and let blending
+             * preserve the filtered crack coverage. The caller's state is
+             * restored exactly by glPopAttrib().
+             */
+            GL11.glDisable(
+                    GL11.GL_ALPHA_TEST
+            );
+
             GL11.glDepthMask(
                     false
             );
@@ -4121,10 +4137,28 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     GL11.GL_POLYGON_OFFSET_FILL
             );
 
-            GL11.glPolygonOffset(
-                    -1.0F,
-                    -10.0F
-            );
+            /*
+             * Detached gate geometry is already pulled toward the camera by
+             * DETACHED_DEPTH_BIAS_* in renderLeafVisualEffects(). A weaker
+             * slope factor here lets the base leaf overtake the crack layer at
+             * oblique angles, which makes portions of the overlay disappear
+             * while an open/opening/closing leaf rotates relative to the view.
+             *
+             * Keep the verified closed-gate bias unchanged. Only detached
+             * leaves get a stronger overlay bias so the crack layer always
+             * remains in front of the detached base geometry.
+             */
+            if (blockAccess.isDetached()) {
+                GL11.glPolygonOffset(
+                        -3.0F,
+                        -16.0F
+                );
+            } else {
+                GL11.glPolygonOffset(
+                        -1.0F,
+                        -10.0F
+                );
+            }
 
             if (splitPart != null) {
                 enableSplitClipPlane(
