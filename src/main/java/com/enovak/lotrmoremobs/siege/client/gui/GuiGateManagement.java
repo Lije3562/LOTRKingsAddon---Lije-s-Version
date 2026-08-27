@@ -130,15 +130,31 @@ public class GuiGateManagement extends GuiScreen {
                 );
 
         /*
-         * One compact control-mode button communicates the current operating
-         * policy and cycles through the three supported modes.
+         * Mirror the condition controls: Max HP belongs under Health on the
+         * left, while the operating mode belongs under State on the right.
          */
+        maxHealthField =
+                createField(
+                        centerX - 80,
+                        top + 61,
+                        80,
+                        7,
+                        gate == null
+                                ? Integer.toString(
+                                TileEntitySiegeGate
+                                        .getConfiguredDefaultMaxHealth()
+                        )
+                                : Integer.toString(
+                                gate.getMaxHealth()
+                        )
+                );
+
         buttonList.add(
                 new GuiButton(
                         GATE_CONTROL_MODE_BUTTON,
-                        centerX - 82,
-                        top + 69,
-                        164,
+                        centerX + 45,
+                        top + 61,
+                        84,
                         20,
                         gate == null
                                 ? GateControlMode.AUTOMATIC.getDisplayName()
@@ -165,7 +181,7 @@ public class GuiGateManagement extends GuiScreen {
                 new GuiGateFactionArrowButton(
                         FACTION_PREVIOUS_BUTTON,
                         factionX - 26,
-                        top + 110,
+                        top + 103,
                         true
                 )
         );
@@ -176,7 +192,7 @@ public class GuiGateManagement extends GuiScreen {
                         factionX
                                 + factionWidth
                                 + 6,
-                        top + 110,
+                        top + 103,
                         false
                 )
         );
@@ -189,7 +205,7 @@ public class GuiGateManagement extends GuiScreen {
                 centerX - 123;
 
         int actionRowY =
-                top + 148;
+                top + 142;
 
         buttonList.add(
                 new GuiGateAppearanceButton(
@@ -222,32 +238,17 @@ public class GuiGateManagement extends GuiScreen {
         );
 
         /*
-         * Maintenance stays on one line: label + max-health field + repair.
+         * Repair is one full-width stateful control instead of a button plus
+         * a second competing status label.
          */
-        maxHealthField =
-                createField(
-                        centerX - 66,
-                        top + 181,
-                        82,
-                        7,
-                        gate == null
-                                ? Integer.toString(
-                                TileEntitySiegeGate
-                                        .getConfiguredDefaultMaxHealth()
-                        )
-                                : Integer.toString(
-                                gate.getMaxHealth()
-                        )
-                );
-
         buttonList.add(
-                new GuiButton(
+                new GuiGateRepairButton(
                         BEGIN_REPAIR_BUTTON,
-                        centerX + 20,
-                        top + 181,
-                        110,
+                        centerX - 120,
+                        top + 176,
+                        240,
                         20,
-                        "Repair"
+                        "Repair Gate"
                 )
         );
 
@@ -255,7 +256,7 @@ public class GuiGateManagement extends GuiScreen {
                 new GuiButton(
                         CLOSE_BUTTON,
                         centerX - 45,
-                        top + 229,
+                        top + 216,
                         90,
                         20,
                         "Close"
@@ -647,64 +648,82 @@ public class GuiGateManagement extends GuiScreen {
                 0xBBBBBB
         );
 
-        drawCenteredString(
+        int leftColumnX =
+                centerX - 125;
+
+        int rightColumnX =
+                centerX + 10;
+
+        drawString(
+                fontRendererObj,
+                "Health:",
+                leftColumnX,
+                top + 43,
+                0xBBBBBB
+        );
+
+        drawString(
                 fontRendererObj,
                 gate.getCurrentHealth()
                         + " / "
                         + gate.getMaxHealth(),
-                centerX - 55,
-                top + 42,
+                centerX - 80,
+                top + 43,
                 0xCCCCCC
         );
 
-        drawCenteredString(
+        drawString(
+                fontRendererObj,
+                "State:",
+                rightColumnX,
+                top + 43,
+                0xBBBBBB
+        );
+
+        drawString(
                 fontRendererObj,
                 gate.getGateState().name(),
-                centerX + 55,
-                top + 42,
+                centerX + 48,
+                top + 43,
                 0xCCCCCC
         );
 
-        drawCenteredString(
+        drawString(
                 fontRendererObj,
-                "Control",
-                centerX,
-                top + 57,
-                0xBBBBBB
+                "Max HP:",
+                leftColumnX,
+                top + 67,
+                creative
+                        ? 0xBBBBBB
+                        : 0x666666
+        );
+
+        drawString(
+                fontRendererObj,
+                "Mode:",
+                rightColumnX,
+                top + 67,
+                canManage
+                        ? 0xBBBBBB
+                        : 0x666666
         );
 
         drawCenteredString(
                 fontRendererObj,
                 "Faction",
                 centerX,
-                top + 98,
+                top + 91,
                 0xBBBBBB
         );
 
         drawFactionBox(
                 centerX,
-                top + 110
+                top + 103
         );
 
         drawSectionDivider(
                 centerX,
-                top + 138
-        );
-
-        drawString(
-                fontRendererObj,
-                "Max HP",
-                centerX - 116,
-                top + 187,
-                creative
-                        ? 0xBBBBBB
-                        : 0x666666
-        );
-
-        drawRepairSummary(
-                gate,
-                centerX,
-                top + 210
+                top + 132
         );
 
         List<String> selectableFactions =
@@ -783,15 +802,15 @@ public class GuiGateManagement extends GuiScreen {
                 mouseX,
                 mouseY,
                 centerX,
-                top + 110
+                top + 103
         );
 
         if (!creative) {
             drawCreativeHealthTooltip(
                     mouseX,
                     mouseY,
-                    centerX - 25,
-                    top + 181
+                    centerX - 40,
+                    top + 61
             );
         }
 
@@ -2550,20 +2569,25 @@ public class GuiGateManagement extends GuiScreen {
     private void updateRepairButton(
             TileEntitySiegeGate gate
     ) {
-        GuiButton repairButton =
+        GuiButton button =
                 getButton(
                         BEGIN_REPAIR_BUTTON
                 );
 
-        if (repairButton == null) {
+        if (!(button instanceof GuiGateRepairButton)) {
             return;
         }
+
+        GuiGateRepairButton repairButton =
+                (GuiGateRepairButton)button;
 
         if (gate.getMissingHealth()
                 <= 0) {
 
             repairButton.displayString =
-                    "Repaired";
+                    "Fully Repaired";
+
+            repairButton.setShowCoin(false);
 
             repairButton.enabled =
                     false;
@@ -2572,10 +2596,31 @@ public class GuiGateManagement extends GuiScreen {
         }
 
         if (gate.isRepairActive()) {
+            int purchased =
+                    Math.max(
+                            1,
+                            gate.getRepairPurchasedHealth()
+                    );
+
+            int percent =
+                    Math.max(
+                            0,
+                            Math.min(
+                                    100,
+                                    gate.getRepairAppliedHealth()
+                                            * 100
+                                            / purchased
+                            )
+                    );
+
             repairButton.displayString =
-                    gate.isRepairPaused()
-                            ? "Paused"
-                            : "Repairing";
+                    (gate.isRepairPaused()
+                            ? "Repair Paused - "
+                            : "Repairing - ")
+                            + percent
+                            + "%";
+
+            repairButton.setShowCoin(false);
 
             repairButton.enabled =
                     false;
@@ -2584,7 +2629,10 @@ public class GuiGateManagement extends GuiScreen {
         }
 
         repairButton.displayString =
-                "Repair";
+                "Repair Gate - "
+                        + gate.getRepairCostToFull();
+
+        repairButton.setShowCoin(true);
 
         repairButton.enabled =
                 true;
@@ -2629,5 +2677,151 @@ public class GuiGateManagement extends GuiScreen {
         long minutes = totalSeconds / 60L;
         long seconds = totalSeconds % 60L;
         return minutes + ":" + (seconds < 10L ? "0" : "") + seconds;
+    }
+
+    private static class GuiGateRepairButton
+            extends GuiButton {
+
+        private boolean showCoin;
+
+        private GuiGateRepairButton(
+                int id,
+                int x,
+                int y,
+                int width,
+                int height,
+                String text
+        ) {
+            super(
+                    id,
+                    x,
+                    y,
+                    width,
+                    height,
+                    text
+            );
+        }
+
+        private void setShowCoin(
+                boolean showCoin
+        ) {
+            this.showCoin =
+                    showCoin;
+        }
+
+        @Override
+        public void drawButton(
+                net.minecraft.client.Minecraft mc,
+                int mouseX,
+                int mouseY
+        ) {
+            if (!showCoin) {
+                super.drawButton(
+                        mc,
+                        mouseX,
+                        mouseY
+                );
+
+                return;
+            }
+
+            /*
+             * Let vanilla draw the normal button background and hover state,
+             * but suppress its normal centered text because we need to center
+             * the text + coin icon together as one unit.
+             */
+            String text =
+                    displayString;
+
+            displayString =
+                    "";
+
+            super.drawButton(
+                    mc,
+                    mouseX,
+                    mouseY
+            );
+
+            displayString =
+                    text;
+
+            int iconSize =
+                    12;
+
+            int gap =
+                    3;
+
+            int textWidth =
+                    mc.fontRenderer
+                            .getStringWidth(
+                                    text
+                            );
+
+            int totalWidth =
+                    textWidth
+                            + gap
+                            + iconSize;
+
+            int startX =
+                    xPosition
+                            + (width - totalWidth) / 2;
+
+            int textY =
+                    yPosition
+                            + (height - 8) / 2;
+
+            boolean hovered =
+                    mouseX >= xPosition
+                            && mouseY >= yPosition
+                            && mouseX < xPosition + width
+                            && mouseY < yPosition + height;
+
+            int textColor =
+                    hovered
+                            ? 0xFFFFA0
+                            : 0xE0E0E0;
+
+            mc.fontRenderer
+                    .drawStringWithShadow(
+                            text,
+                            startX,
+                            textY,
+                            textColor
+                    );
+
+            int coinX =
+                    startX
+                            + textWidth
+                            + gap;
+
+            int coinY =
+                    yPosition
+                            + (height - iconSize) / 2;
+
+            mc.getTextureManager()
+                    .bindTexture(
+                            COIN_TEXTURE
+                    );
+
+            GL11.glColor4f(
+                    1.0F,
+                    1.0F,
+                    1.0F,
+                    1.0F
+            );
+
+            func_152125_a(
+                    coinX,
+                    coinY,
+                    0,
+                    0,
+                    16,
+                    16,
+                    iconSize,
+                    iconSize,
+                    16.0F,
+                    16.0F
+            );
+        }
     }
 }
