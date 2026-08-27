@@ -245,6 +245,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private static final String NBT_BABY_GROWTH_INITIALIZED = "lotrmoremobs_babyGrowthInitialized";
     private static final String NBT_BABY_MELON_FED_UNTIL = "lotrmoremobs_babyMelonFedUntilTick";
     private static final String NBT_TAMED_BABY_MELON_HEAL_UNTIL = "lotrmoremobs_tamedBabyMelonHealUntilTick";
+    private static final String NBT_CAPTIVE_BRED = "lotrmoremobs_captiveBred";
     private static final int HOWDAH_ROSTER_LOAD_GRACE_TICKS = 160;
 
     // ---------------------------------------------------------------------
@@ -393,6 +394,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
     private boolean babyGrowthInitialized;
     private long babyMelonFedUntilTick;
     private long tamedBabyMelonHealUntilTick;
+    private boolean captiveBred;
     private boolean babyLifecycleInitialized;
     private boolean babyPanicAnimationActive;
     private EntityPlayer lastMountedPlayerForSafeDismount; // ADULT_TAMING_BLOCK_SAFE_DISMOUNT_V1
@@ -5969,6 +5971,7 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         nbt.setBoolean(NBT_BABY_GROWTH_INITIALIZED, this.babyGrowthInitialized);
         nbt.setLong(NBT_BABY_MELON_FED_UNTIL, this.babyMelonFedUntilTick);
         nbt.setLong(NBT_TAMED_BABY_MELON_HEAL_UNTIL, this.tamedBabyMelonHealUntilTick);
+        nbt.setBoolean(NBT_CAPTIVE_BRED, this.captiveBred);
     }
 
     public void readEntityFromNBT(NBTTagCompound nbt) {
@@ -6015,6 +6018,9 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
         this.babyGrowthInitialized = nbt.getBoolean(NBT_BABY_GROWTH_INITIALIZED);
         this.babyMelonFedUntilTick = nbt.getLong(NBT_BABY_MELON_FED_UNTIL);
         this.tamedBabyMelonHealUntilTick = nbt.getLong(NBT_TAMED_BABY_MELON_HEAL_UNTIL);
+        // Old worlds and all non-bred Mumakil intentionally default to false.
+        this.captiveBred = nbt.hasKey(NBT_CAPTIVE_BRED)
+                && nbt.getBoolean(NBT_CAPTIVE_BRED);
 
         MumakilMode loadedMode = nbt.hasKey(NBT_MUMAKIL_MODE)
                 ? MumakilMode.fromId(nbt.getInteger(NBT_MUMAKIL_MODE))
@@ -6130,6 +6136,10 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
 
         LOTREntityMumakil child =
                 (LOTREntityMumakil)childEntity;
+
+        // Offspring produced by the player-controlled tame breeding path
+        // remain valuable mounts, but use the reduced captive-bred tusk table.
+        child.captiveBred = true;
 
         if (otherParent instanceof LOTREntityMumakil) {
             LOTREntityMumakil otherMumakil =
@@ -8399,18 +8409,36 @@ public class LOTREntityMumakil extends LOTREntityHorse implements IAnimatable {
                     2 + this.rand.nextInt(2)
                             + this.rand.nextInt(boundedLooting + 1)
             );
-            tusks = Math.min(
-                    6,
-                    1 + this.rand.nextInt(2)
-                            + this.rand.nextInt(boundedLooting + 1)
-            );
+            if (this.captiveBred) {
+                // Captive-bred calves are renewable mounts, not an efficient
+                // replacement for hunting wild Mumakil for trophy tusks.
+                tusks = Math.min(
+                        2,
+                        this.rand.nextInt(2)
+                                + this.rand.nextInt(boundedLooting + 1)
+                );
+            } else {
+                tusks = Math.min(
+                        6,
+                        1 + this.rand.nextInt(2)
+                                + this.rand.nextInt(boundedLooting + 1)
+                );
+            }
         } else {
             shanks = 4;
-            tusks = Math.min(
-                    6,
-                    4 + this.rand.nextInt(2)
-                            + this.rand.nextInt(boundedLooting + 1)
-            );
+            if (this.captiveBred) {
+                tusks = Math.min(
+                        3,
+                        1 + this.rand.nextInt(2)
+                                + this.rand.nextInt(boundedLooting + 1)
+                );
+            } else {
+                tusks = Math.min(
+                        6,
+                        4 + this.rand.nextInt(2)
+                                + this.rand.nextInt(boundedLooting + 1)
+                );
+            }
         }
 
         for (int j = 0; j < shanks; ++j) {
