@@ -76,9 +76,6 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
 
         LOTREntityNPC hiringNpc = (LOTREntityNPC)hireable;
 
-        /* Native LOTR invokes the trade callback before charging the player. */
-        hireable.onUnitTrade(player);
-
         /*
          * Build the exact entities before payment, while they are still
          * unspawned. This lets the placement search validate the real rider
@@ -117,11 +114,14 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
             return;
         }
 
-        /* Native LOTR transaction semantics, with the mount already built. */
-        LOTRItemCoin.takeCoins(
-                this.getCost(player, hireable),
-                player
-        );
+        /*
+         * Preserve native LOTR ordering, but only after the custom Mumak-sized
+         * placement preflight has accepted the transaction. A refused hire
+         * must not trigger the Warlord trade callback/achievement.
+         */
+        int hireCost = this.getCost(player, hireable);
+        hireable.onUnitTrade(player);
+        LOTRItemCoin.takeCoins(hireCost, player);
         hiringNpc.playTradeSound();
 
         boolean alreadyLoaded = player.worldObj.loadedEntityList.contains(driver);
@@ -149,12 +149,21 @@ public class LOTRUnitTradeEntryMumakil extends LOTRUnitTradeEntry {
         mumakil.updateRiderPosition();
 
         if (!player.worldObj.spawnEntityInWorld(driver)) {
+            LOTRItemCoin.giveCoins(hireCost, player);
             this.discardUnspawnedHire(driver, mumakil);
+            player.addChatMessage(new ChatComponentText(
+                    "The Mumakil formation could not be deployed. Your coins were returned."
+            ));
             return;
         }
         if (!player.worldObj.spawnEntityInWorld(mumakil)) {
+            LOTRItemCoin.giveCoins(hireCost, player);
             driver.setDead();
             mumakil.setDead();
+            player.addChatMessage(new ChatComponentText(
+                    "The Mumakil formation could not be deployed. Your coins were returned."
+            ));
+            return;
         }
     }
 
