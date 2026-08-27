@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.siege.client.render;
 
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.gate.GateAnimation;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
 import com.enovak.lotrmoremobs.siege.gate.GateHingeSide;
@@ -38,8 +39,12 @@ import net.minecraft.util.ResourceLocation;
 import net.minecraft.world.World;
 import org.lwjgl.opengl.GL11;
 import org.lwjgl.opengl.GL13;
+import lotr.client.model.LOTRModelBanner;
+import lotr.client.model.LOTRModelBannerWall;
+import lotr.client.render.entity.LOTRRenderBanner;
 import lotr.client.render.tileentity.LOTRRenderDwarvenGlow;
 import lotr.common.block.LOTRBlockGateDwarvenIthildin;
+import lotr.common.item.LOTRItemBanner;
 import lotr.common.tileentity.LOTRTileEntityDwarvenDoor;
 import java.nio.DoubleBuffer;
 import org.lwjgl.BufferUtils;
@@ -53,6 +58,12 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
 
     private final DoubleBuffer splitClipEquation =
             BufferUtils.createDoubleBuffer(4);
+
+    private final LOTRModelBanner lotrBannerModel =
+            new LOTRModelBanner();
+
+    private final LOTRModelBannerWall lotrBannerWallModel =
+            new LOTRModelBannerWall();
     private static final int[][] FACE_OFFSETS = {
             {0, -1, 0}, {0, 1, 0},
             {0, 0, -1}, {0, 0, 1},
@@ -521,6 +532,18 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                         GateLeaf.RIGHT,
                         cache.rightBlockAccess,
                         partialTicks
+                );
+
+                renderBannerVisuals(
+                        controller,
+                        GateLeaf.LEFT,
+                        cache.leftBlockAccess
+                );
+
+                renderBannerVisuals(
+                        controller,
+                        GateLeaf.RIGHT,
+                        cache.rightBlockAccess
                 );
             }
 
@@ -3062,6 +3085,12 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     partialTicks
             );
 
+            renderBannerVisuals(
+                    controller,
+                    leaf,
+                    blockAccess
+            );
+
         } finally {
             GL11.glPopAttrib();
             GL11.glPopMatrix();
@@ -5027,6 +5056,158 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
     ) {
         return sourceBlock == Blocks.chest
                 || sourceBlock == Blocks.trapped_chest;
+    }
+
+    /**
+     * Draws inert LOTR banner attachments with LOTR's own 36.15 models and
+     * textures. This runs inside the same leaf hinge matrix as the moving gate
+     * geometry, but never constructs or spawns a LOTR banner entity, so banner
+     * protection/whitelist gameplay remains completely absent while attached.
+     */
+    private void renderBannerVisuals(
+            TileEntitySiegeGate controller,
+            GateLeaf leaf,
+            GateRenderBlockAccess blockAccess
+    ) {
+        if (controller == null
+                || leaf == null
+                || blockAccess == null) {
+            return;
+        }
+
+        java.util.List<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>
+                attachments = controller.getBannerRenderAttachments();
+        if (attachments.isEmpty()) {
+            return;
+        }
+
+        for (SiegeGateBannerAttachmentData.RenderAttachmentSnapshot attachment
+                : attachments) {
+            if (attachment == null || attachment.getLeaf() != leaf) {
+                continue;
+            }
+
+            LOTRItemBanner.BannerType bannerType =
+                    LOTRItemBanner.BannerType.forID(
+                            attachment.getBannerTypeId()
+                    );
+            if (bannerType == null) {
+                continue;
+            }
+
+            int packedBrightness =
+                    blockAccess.getLightBrightnessForSkyBlocks(
+                            attachment.getRelativeSupportX(),
+                            attachment.getRelativeSupportY(),
+                            attachment.getRelativeSupportZ(),
+                            0
+                    );
+
+            float previousBrightnessX =
+                    OpenGlHelper.lastBrightnessX;
+            float previousBrightnessY =
+                    OpenGlHelper.lastBrightnessY;
+
+            GL11.glPushMatrix();
+            GL11.glPushAttrib(
+                    GL11.GL_ENABLE_BIT
+                            | GL11.GL_LIGHTING_BIT
+                            | GL11.GL_COLOR_BUFFER_BIT
+            );
+
+            try {
+                /*
+                 * RenderGlobal normally enters entity rendering with standard
+                 * item lighting active. The surrounding gate TESR disables it
+                 * for RenderBlocks parity, so restore it only for this native
+                 * entity-model visual and let glPopAttrib return to gate state.
+                 */
+                GL11.glEnable(GL11.GL_LIGHTING);
+                GL11.glDisable(GL11.GL_CULL_FACE);
+                GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+
+                OpenGlHelper.setLightmapTextureCoords(
+                        OpenGlHelper.lightmapTexUnit,
+                        packedBrightness & 65535,
+                        packedBrightness >> 16
+                );
+
+                if (attachment.getKind()
+                        == SiegeGateBannerAttachmentData.RenderKind.STANDING) {
+                    renderStandingBannerVisual(attachment, bannerType);
+                } else if (attachment.getKind()
+                        == SiegeGateBannerAttachmentData.RenderKind.WALL) {
+                    renderWallBannerVisual(attachment, bannerType);
+                }
+            } catch (RuntimeException ignored) {
+                /*
+                 * A visual-only native LOTR model must never be able to crash
+                 * the Siege Gate TESR or compromise gate persistence.
+                 */
+            } finally {
+                OpenGlHelper.setLightmapTextureCoords(
+                        OpenGlHelper.lightmapTexUnit,
+                        previousBrightnessX,
+                        previousBrightnessY
+                );
+
+                GL11.glPopAttrib();
+                GL11.glPopMatrix();
+
+                bindTexture(TextureMap.locationBlocksTexture);
+                GL11.glColor4f(1.0F, 1.0F, 1.0F, 1.0F);
+            }
+        }
+    }
+
+    private void renderStandingBannerVisual(
+            SiegeGateBannerAttachmentData.RenderAttachmentSnapshot attachment,
+            LOTRItemBanner.BannerType bannerType
+    ) {
+        GL11.glTranslated(
+                attachment.getRelativeEntityX(),
+                attachment.getRelativeEntityY() + 1.5D,
+                attachment.getRelativeEntityZ()
+        );
+        GL11.glScalef(-1.0F, -1.0F, 1.0F);
+        GL11.glRotatef(
+                180.0F - attachment.getRotationYaw(),
+                0.0F,
+                1.0F,
+                0.0F
+        );
+        GL11.glTranslatef(0.0F, 0.01F, 0.0F);
+
+        bindTexture(LOTRRenderBanner.getStandTexture(bannerType));
+        lotrBannerModel.renderStand(0.0625F);
+        lotrBannerModel.renderPost(0.0625F);
+
+        bindTexture(LOTRRenderBanner.getBannerTexture(bannerType));
+        lotrBannerModel.renderBanner(0.0625F);
+    }
+
+    private void renderWallBannerVisual(
+            SiegeGateBannerAttachmentData.RenderAttachmentSnapshot attachment,
+            LOTRItemBanner.BannerType bannerType
+    ) {
+        GL11.glTranslated(
+                attachment.getRelativeEntityX(),
+                attachment.getRelativeEntityY(),
+                attachment.getRelativeEntityZ()
+        );
+        GL11.glScalef(-1.0F, -1.0F, 1.0F);
+        GL11.glRotatef(
+                attachment.getRotationYaw(),
+                0.0F,
+                1.0F,
+                0.0F
+        );
+
+        bindTexture(LOTRRenderBanner.getStandTexture(bannerType));
+        lotrBannerWallModel.renderPost(0.0625F);
+
+        bindTexture(LOTRRenderBanner.getBannerTexture(bannerType));
+        lotrBannerWallModel.renderBanner(0.0625F);
     }
 
     private void renderChestVisuals(

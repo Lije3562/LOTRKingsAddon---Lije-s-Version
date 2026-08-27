@@ -8,12 +8,14 @@ import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
 import cpw.mods.fml.common.FMLLog;
 import java.util.ArrayList;
 import java.util.Collection;
+import java.util.Collections;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.UUID;
 import lotr.common.entity.item.LOTREntityBanner;
 import lotr.common.entity.item.LOTREntityBannerWall;
+import lotr.common.item.LOTRItemBanner;
 import net.minecraft.entity.Entity;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.nbt.NBTTagList;
@@ -49,6 +51,8 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
     private static final int MAX_RESTORES_PER_TICK = 16;
 
     private static final int TAG_INT = 3;
+    private static final int TAG_FLOAT = 5;
+    private static final int TAG_DOUBLE = 6;
     private static final int TAG_STRING = 8;
     private static final int TAG_LIST = 9;
     private static final int TAG_COMPOUND = 10;
@@ -589,6 +593,11 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
                 markDirty();
             }
 
+            if (record.state == RecordState.ATTACHED) {
+                syncRenderAttachments(world, record);
+                continue;
+            }
+
             if (record.state == RecordState.RESTORING
                     && remainingRestores > 0) {
                 int used = restoreRecord(
@@ -602,6 +611,124 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
             if (remainingRestores <= 0) {
                 break;
             }
+        }
+    }
+
+    /**
+     * Copies only the visual subset of the durable native entity snapshot onto
+     * the loaded controller. The controller then persists/synchronizes that
+     * inert render data to clients. No LOTR banner entity is spawned here.
+     */
+    private void syncRenderAttachments(World world, GateRecord record) {
+        if (world == null
+                || record == null
+                || !world.blockExists(
+                        record.controllerX,
+                        record.controllerY,
+                        record.controllerZ
+                )) {
+            return;
+        }
+
+        TileEntity tileEntity = world.getTileEntity(
+                record.controllerX,
+                record.controllerY,
+                record.controllerZ
+        );
+        if (!(tileEntity instanceof TileEntitySiegeGate)) {
+            return;
+        }
+
+        TileEntitySiegeGate controller = (TileEntitySiegeGate)tileEntity;
+        if (!record.gateUuid.equals(controller.getExistingGateUuid())
+                || !controller.isFinalized()) {
+            return;
+        }
+
+        controller.setBannerRenderAttachments(
+                buildRenderSnapshots(world, record)
+        );
+    }
+
+    private List<RenderAttachmentSnapshot> buildRenderSnapshots(
+            World world,
+            GateRecord record
+    ) {
+        if (record.renderSnapshots != null) {
+            return record.renderSnapshots;
+        }
+
+        List<RenderAttachmentSnapshot> snapshots =
+                new ArrayList<RenderAttachmentSnapshot>(
+                        record.attachments.size()
+                );
+
+        for (Attachment attachment : record.attachments) {
+            RenderAttachmentSnapshot snapshot =
+                    buildRenderSnapshot(world, record, attachment);
+            if (snapshot != null) {
+                snapshots.add(snapshot);
+            } else {
+                FMLLog.warning(
+                        "[LOTRMoreMobs] Siege Gate banner attachment %s has "
+                                + "valid restoration data but no renderable visual snapshot.",
+                        attachment.entityUuid
+                );
+            }
+        }
+
+        record.renderSnapshots = Collections.unmodifiableList(snapshots);
+        return record.renderSnapshots;
+    }
+
+    private RenderAttachmentSnapshot buildRenderSnapshot(
+            World world,
+            GateRecord record,
+            Attachment attachment
+    ) {
+        if (world == null || record == null || attachment == null) {
+            return null;
+        }
+
+        Entity detached = attachment.kind == AttachmentKind.STANDING
+                ? new LOTREntityBanner(world)
+                : new LOTREntityBannerWall(world);
+        try {
+            detached.readFromNBT(
+                    (NBTTagCompound)attachment.entityNbt.copy()
+            );
+
+            LOTRItemBanner.BannerType bannerType;
+            if (detached instanceof LOTREntityBanner) {
+                bannerType = ((LOTREntityBanner)detached).getBannerType();
+            } else if (detached instanceof LOTREntityBannerWall) {
+                bannerType = ((LOTREntityBannerWall)detached).getBannerType();
+            } else {
+                return null;
+            }
+
+            if (bannerType == null) {
+                return null;
+            }
+
+            return new RenderAttachmentSnapshot(
+                    attachment.kind == AttachmentKind.STANDING
+                            ? RenderKind.STANDING
+                            : RenderKind.WALL,
+                    attachment.relativeSupportX,
+                    attachment.relativeSupportY,
+                    attachment.relativeSupportZ,
+                    attachment.leaf,
+                    bannerType.bannerID,
+                    detached.posX - record.controllerX,
+                    detached.posY - record.controllerY,
+                    detached.posZ - record.controllerZ,
+                    detached.rotationYaw
+            );
+        } catch (RuntimeException exception) {
+            return null;
+        } finally {
+            detached.setDead();
         }
     }
 
@@ -1019,6 +1146,233 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
         }
     }
 
+    public enum RenderKind {
+        STANDING,
+        WALL;
+
+        static RenderKind fromName(String name) {
+            if (name == null) {
+                return null;
+            }
+            try {
+                return valueOf(name);
+            } catch (IllegalArgumentException ignored) {
+                return null;
+            }
+        }
+    }
+
+    /**
+     * Minimal client-visible banner state. It intentionally excludes LOTR
+     * protection, owner, whitelist, and permission NBT. Those values remain
+     * only in the durable server-side attachment snapshot used for restoration.
+     */
+    public static final class RenderAttachmentSnapshot {
+        private static final String NBT_RENDER_BANNER_TYPE = "BannerType";
+        private static final String NBT_RENDER_ENTITY_X = "EntityX";
+        private static final String NBT_RENDER_ENTITY_Y = "EntityY";
+        private static final String NBT_RENDER_ENTITY_Z = "EntityZ";
+        private static final String NBT_RENDER_YAW = "Yaw";
+        private static final double MAX_RENDER_OFFSET = 64.0D;
+
+        private final RenderKind kind;
+        private final int relativeSupportX;
+        private final int relativeSupportY;
+        private final int relativeSupportZ;
+        private final GateLeaf leaf;
+        private final int bannerTypeId;
+        private final double relativeEntityX;
+        private final double relativeEntityY;
+        private final double relativeEntityZ;
+        private final float rotationYaw;
+
+        private RenderAttachmentSnapshot(
+                RenderKind kind,
+                int relativeSupportX,
+                int relativeSupportY,
+                int relativeSupportZ,
+                GateLeaf leaf,
+                int bannerTypeId,
+                double relativeEntityX,
+                double relativeEntityY,
+                double relativeEntityZ,
+                float rotationYaw
+        ) {
+            this.kind = kind;
+            this.relativeSupportX = relativeSupportX;
+            this.relativeSupportY = relativeSupportY;
+            this.relativeSupportZ = relativeSupportZ;
+            this.leaf = leaf;
+            this.bannerTypeId = bannerTypeId;
+            this.relativeEntityX = relativeEntityX;
+            this.relativeEntityY = relativeEntityY;
+            this.relativeEntityZ = relativeEntityZ;
+            this.rotationYaw = rotationYaw;
+        }
+
+        public RenderKind getKind() {
+            return kind;
+        }
+
+        public int getRelativeSupportX() {
+            return relativeSupportX;
+        }
+
+        public int getRelativeSupportY() {
+            return relativeSupportY;
+        }
+
+        public int getRelativeSupportZ() {
+            return relativeSupportZ;
+        }
+
+        public GateLeaf getLeaf() {
+            return leaf;
+        }
+
+        public int getBannerTypeId() {
+            return bannerTypeId;
+        }
+
+        public double getRelativeEntityX() {
+            return relativeEntityX;
+        }
+
+        public double getRelativeEntityY() {
+            return relativeEntityY;
+        }
+
+        public double getRelativeEntityZ() {
+            return relativeEntityZ;
+        }
+
+        public float getRotationYaw() {
+            return rotationYaw;
+        }
+
+        public NBTTagCompound writeToNBT() {
+            NBTTagCompound nbt = new NBTTagCompound();
+            nbt.setString(NBT_KIND, kind.name());
+            nbt.setInteger(NBT_RELATIVE_SUPPORT_X, relativeSupportX);
+            nbt.setInteger(NBT_RELATIVE_SUPPORT_Y, relativeSupportY);
+            nbt.setInteger(NBT_RELATIVE_SUPPORT_Z, relativeSupportZ);
+            nbt.setString(NBT_LEAF, leaf.name());
+            nbt.setInteger(NBT_RENDER_BANNER_TYPE, bannerTypeId);
+            nbt.setDouble(NBT_RENDER_ENTITY_X, relativeEntityX);
+            nbt.setDouble(NBT_RENDER_ENTITY_Y, relativeEntityY);
+            nbt.setDouble(NBT_RENDER_ENTITY_Z, relativeEntityZ);
+            nbt.setFloat(NBT_RENDER_YAW, rotationYaw);
+            return nbt;
+        }
+
+        public static RenderAttachmentSnapshot fromNBT(
+                NBTTagCompound nbt
+        ) {
+            if (nbt == null
+                    || !nbt.hasKey(NBT_KIND, TAG_STRING)
+                    || !nbt.hasKey(NBT_RELATIVE_SUPPORT_X, TAG_INT)
+                    || !nbt.hasKey(NBT_RELATIVE_SUPPORT_Y, TAG_INT)
+                    || !nbt.hasKey(NBT_RELATIVE_SUPPORT_Z, TAG_INT)
+                    || !nbt.hasKey(NBT_LEAF, TAG_STRING)
+                    || !nbt.hasKey(NBT_RENDER_BANNER_TYPE, TAG_INT)
+                    || !nbt.hasKey(NBT_RENDER_ENTITY_X, TAG_DOUBLE)
+                    || !nbt.hasKey(NBT_RENDER_ENTITY_Y, TAG_DOUBLE)
+                    || !nbt.hasKey(NBT_RENDER_ENTITY_Z, TAG_DOUBLE)
+                    || !nbt.hasKey(NBT_RENDER_YAW, TAG_FLOAT)) {
+                return null;
+            }
+
+            RenderKind kind = RenderKind.fromName(nbt.getString(NBT_KIND));
+            GateLeaf leaf = GateLeaf.fromSerializedName(nbt.getString(NBT_LEAF));
+            int supportX = nbt.getInteger(NBT_RELATIVE_SUPPORT_X);
+            int supportY = nbt.getInteger(NBT_RELATIVE_SUPPORT_Y);
+            int supportZ = nbt.getInteger(NBT_RELATIVE_SUPPORT_Z);
+            int bannerTypeId = nbt.getInteger(NBT_RENDER_BANNER_TYPE);
+            double entityX = nbt.getDouble(NBT_RENDER_ENTITY_X);
+            double entityY = nbt.getDouble(NBT_RENDER_ENTITY_Y);
+            double entityZ = nbt.getDouble(NBT_RENDER_ENTITY_Z);
+            float yaw = nbt.getFloat(NBT_RENDER_YAW);
+
+            if (kind == null
+                    || leaf == null
+                    || leaf.isSplitCenter()
+                    || Math.abs((long)supportX) > (long)MAX_RENDER_OFFSET
+                    || Math.abs((long)supportY) > (long)MAX_RENDER_OFFSET
+                    || Math.abs((long)supportZ) > (long)MAX_RENDER_OFFSET
+                    || LOTRItemBanner.BannerType.forID(bannerTypeId) == null
+                    || !isFiniteAndBounded(entityX)
+                    || !isFiniteAndBounded(entityY)
+                    || !isFiniteAndBounded(entityZ)
+                    || Float.isNaN(yaw)
+                    || Float.isInfinite(yaw)) {
+                return null;
+            }
+
+            return new RenderAttachmentSnapshot(
+                    kind,
+                    supportX,
+                    supportY,
+                    supportZ,
+                    leaf,
+                    bannerTypeId,
+                    entityX,
+                    entityY,
+                    entityZ,
+                    yaw
+            );
+        }
+
+        private static boolean isFiniteAndBounded(double value) {
+            return !Double.isNaN(value)
+                    && !Double.isInfinite(value)
+                    && Math.abs(value) <= MAX_RENDER_OFFSET;
+        }
+
+        @Override
+        public boolean equals(Object other) {
+            if (this == other) {
+                return true;
+            }
+            if (!(other instanceof RenderAttachmentSnapshot)) {
+                return false;
+            }
+            RenderAttachmentSnapshot snapshot =
+                    (RenderAttachmentSnapshot)other;
+            return kind == snapshot.kind
+                    && relativeSupportX == snapshot.relativeSupportX
+                    && relativeSupportY == snapshot.relativeSupportY
+                    && relativeSupportZ == snapshot.relativeSupportZ
+                    && leaf == snapshot.leaf
+                    && bannerTypeId == snapshot.bannerTypeId
+                    && Double.doubleToLongBits(relativeEntityX)
+                    == Double.doubleToLongBits(snapshot.relativeEntityX)
+                    && Double.doubleToLongBits(relativeEntityY)
+                    == Double.doubleToLongBits(snapshot.relativeEntityY)
+                    && Double.doubleToLongBits(relativeEntityZ)
+                    == Double.doubleToLongBits(snapshot.relativeEntityZ)
+                    && Float.floatToIntBits(rotationYaw)
+                    == Float.floatToIntBits(snapshot.rotationYaw);
+        }
+
+        @Override
+        public int hashCode() {
+            int result = kind.hashCode();
+            result = 31 * result + relativeSupportX;
+            result = 31 * result + relativeSupportY;
+            result = 31 * result + relativeSupportZ;
+            result = 31 * result + leaf.hashCode();
+            result = 31 * result + bannerTypeId;
+            long bits = Double.doubleToLongBits(relativeEntityX);
+            result = 31 * result + (int)(bits ^ (bits >>> 32));
+            bits = Double.doubleToLongBits(relativeEntityY);
+            result = 31 * result + (int)(bits ^ (bits >>> 32));
+            bits = Double.doubleToLongBits(relativeEntityZ);
+            result = 31 * result + (int)(bits ^ (bits >>> 32));
+            result = 31 * result + Float.floatToIntBits(rotationYaw);
+            return result;
+        }
+    }
+
     private enum AttachmentKind {
         STANDING,
         WALL;
@@ -1048,6 +1402,7 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
         private final int controllerZ;
         private RecordState state;
         private final List<Attachment> attachments;
+        private List<RenderAttachmentSnapshot> renderSnapshots;
 
         private GateRecord(
                 UUID gateUuid,

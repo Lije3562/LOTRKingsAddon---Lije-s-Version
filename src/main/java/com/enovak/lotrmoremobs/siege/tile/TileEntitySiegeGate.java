@@ -161,6 +161,8 @@ public class TileEntitySiegeGate extends TileEntity {
     private static final String NBT_ACCESS_WHITELIST = "AccessWhitelist";
     private static final String NBT_RESERVED_RAM_UUID = "ReservedRamUUID";
     private static final String NBT_GATE_PARTS = "GateParts";
+    private static final String NBT_GATE_BANNER_RENDER_ATTACHMENTS =
+            "GateBannerRenderAttachments";
     private static final String NBT_RELATIVE_X = "RelativeX";
     private static final String NBT_RELATIVE_Y = "RelativeY";
     private static final String NBT_RELATIVE_Z = "RelativeZ";
@@ -217,6 +219,9 @@ public class TileEntitySiegeGate extends TileEntity {
     private long reservedRamLastSeenTick;
     private final List<GatePartData> gateParts =
             new ArrayList<GatePartData>();
+    private final List<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>
+            bannerRenderAttachments =
+            new ArrayList<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>();
     private final Map<RelativePosition, GatePartData> gatePartsByPosition =
             new HashMap<RelativePosition, GatePartData>();
     private GateHinge leftHinge;
@@ -332,6 +337,7 @@ public class TileEntitySiegeGate extends TileEntity {
         writeAccessStateToNBT(nbt);
         writeControllerAppearanceToNBT(nbt);
         writeGateStructureToNBT(nbt, true);
+        writeBannerRenderAttachmentsToNBT(nbt);
         writeGateConfigurationToNBT(nbt);
     }
 
@@ -355,6 +361,7 @@ public class TileEntitySiegeGate extends TileEntity {
         readAccessStateFromNBT(nbt);
         readControllerAppearanceFromNBT(nbt);
         readGateDataFromNBT(nbt);
+        readBannerRenderAttachmentsFromNBT(nbt);
     }
 
     @Override
@@ -368,6 +375,7 @@ public class TileEntitySiegeGate extends TileEntity {
         writeAccessStateToNBT(syncData);
         writeControllerAppearanceToNBT(syncData);
         writeGateStructureToNBT(syncData, true);
+        writeBannerRenderAttachmentsToNBT(syncData);
         writeGateConfigurationToNBT(syncData);
         return new S35PacketUpdateTileEntity(
                 xCoord,
@@ -394,6 +402,7 @@ public class TileEntitySiegeGate extends TileEntity {
         readAccessStateFromNBT(syncData);
         readControllerAppearanceFromNBT(syncData);
         readGateDataFromNBT(syncData);
+        readBannerRenderAttachmentsFromNBT(syncData);
         rebuildRegistryLinks();
         refreshGateWorldLighting();
         markGatePartsForRenderUpdate();
@@ -1903,6 +1912,53 @@ public class TileEntitySiegeGate extends TileEntity {
         return 256.0D * 256.0D;
     }
 
+    public List<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>
+            getBannerRenderAttachments() {
+        return Collections.unmodifiableList(
+                new ArrayList<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>(
+                        bannerRenderAttachments
+                )
+        );
+    }
+
+    /**
+     * Server-side bridge from the durable banner sidecar to the controller's
+     * inert client render state. Protection/owner/whitelist NBT never enters
+     * this list.
+     */
+    public void setBannerRenderAttachments(
+            Collection<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot> snapshots
+    ) {
+        if (worldObj == null || worldObj.isRemote) {
+            return;
+        }
+
+        List<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot> normalized =
+                new ArrayList<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>();
+        if (snapshots != null) {
+            if (snapshots.size() > GateStructureValidator.MAX_GATE_PARTS * 4) {
+                return;
+            }
+            for (SiegeGateBannerAttachmentData.RenderAttachmentSnapshot snapshot
+                    : snapshots) {
+                if (snapshot == null) {
+                    return;
+                }
+                normalized.add(snapshot);
+            }
+        }
+
+        if (bannerRenderAttachments.equals(normalized)) {
+            return;
+        }
+
+        bannerRenderAttachments.clear();
+        bannerRenderAttachments.addAll(normalized);
+        markRenderDataChanged();
+        markDirty();
+        worldObj.markBlockForUpdate(xCoord, yCoord, zCoord);
+    }
+
     public List<GatePartData> getGateParts() {
         return Collections.unmodifiableList(
                 new ArrayList<GatePartData>(gateParts)
@@ -2673,6 +2729,63 @@ public class TileEntitySiegeGate extends TileEntity {
             }
         }
         return -1;
+    }
+
+    private void writeBannerRenderAttachmentsToNBT(
+            NBTTagCompound nbt
+    ) {
+        NBTTagList list = new NBTTagList();
+        for (SiegeGateBannerAttachmentData.RenderAttachmentSnapshot snapshot
+                : bannerRenderAttachments) {
+            if (snapshot != null) {
+                list.appendTag(snapshot.writeToNBT());
+            }
+        }
+        nbt.setTag(NBT_GATE_BANNER_RENDER_ATTACHMENTS, list);
+    }
+
+    private void readBannerRenderAttachmentsFromNBT(
+            NBTTagCompound nbt
+    ) {
+        bannerRenderAttachments.clear();
+        if (nbt == null
+                || !nbt.hasKey(NBT_GATE_BANNER_RENDER_ATTACHMENTS)) {
+            cachedRenderBoundingBox = null;
+            return;
+        }
+        if (!nbt.hasKey(NBT_GATE_BANNER_RENDER_ATTACHMENTS, TAG_LIST)) {
+            cachedRenderBoundingBox = null;
+            return;
+        }
+
+        NBTTagList list = (NBTTagList)nbt.getTag(
+                NBT_GATE_BANNER_RENDER_ATTACHMENTS
+        );
+        if (list.tagCount() > GateStructureValidator.MAX_GATE_PARTS * 4
+                || (list.tagCount() > 0
+                && list.func_150303_d() != TAG_COMPOUND)) {
+            cachedRenderBoundingBox = null;
+            return;
+        }
+
+        List<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot> parsed =
+                new ArrayList<SiegeGateBannerAttachmentData.RenderAttachmentSnapshot>(
+                        list.tagCount()
+                );
+        for (int i = 0; i < list.tagCount(); ++i) {
+            SiegeGateBannerAttachmentData.RenderAttachmentSnapshot snapshot =
+                    SiegeGateBannerAttachmentData.RenderAttachmentSnapshot.fromNBT(
+                            list.getCompoundTagAt(i)
+                    );
+            if (snapshot == null) {
+                cachedRenderBoundingBox = null;
+                return;
+            }
+            parsed.add(snapshot);
+        }
+
+        bannerRenderAttachments.addAll(parsed);
+        cachedRenderBoundingBox = null;
     }
 
     private void writeGateStructureToNBT(
@@ -4439,7 +4552,9 @@ public class TileEntitySiegeGate extends TileEntity {
                 );
             }
         }
-        return bounds.toAxisAlignedBB(0.25D);
+        return bounds.toAxisAlignedBB(
+                bannerRenderAttachments.isEmpty() ? 0.25D : 3.25D
+        );
     }
 
     private void includeLeafSweepBounds(
