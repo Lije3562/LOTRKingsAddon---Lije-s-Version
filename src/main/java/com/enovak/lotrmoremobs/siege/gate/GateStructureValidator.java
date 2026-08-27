@@ -13,10 +13,10 @@ import java.util.Set;
  */
 public final class GateStructureValidator {
 
-    public static final int MAX_GATE_PARTS = 20 * 40 * 2;
+    public static final int MAX_GATE_PARTS = 20 * 40 * 4;
     public static final int MAX_GATE_WIDTH = 20;
     public static final int MAX_GATE_HEIGHT = 40;
-    public static final int MAX_GATE_THICKNESS = 2;
+    public static final int MAX_GATE_THICKNESS = 4;
 
     private static final int[][] FACE_OFFSETS = {
             {1, 0, 0}, {-1, 0, 0},
@@ -89,7 +89,7 @@ public final class GateStructureValidator {
         if (parts.size() > MAX_GATE_PARTS) {
             return ValidationResult.failure(
                     Failure.TOO_MANY_PARTS,
-                    "A gate may contain at most 1600 parts."
+                    "A gate may contain at most " + MAX_GATE_PARTS + " parts."
             );
         }
 
@@ -177,7 +177,9 @@ public final class GateStructureValidator {
         if (spanY > MAX_GATE_HEIGHT || !validHorizontalBounds) {
             return ValidationResult.failure(
                     Failure.ENVELOPE_EXCEEDED,
-                    "Gate bounds must fit 20 wide x 40 high x 2 thick."
+                    "Gate bounds must fit " + MAX_GATE_WIDTH + " wide x "
+                            + MAX_GATE_HEIGHT + " high x "
+                            + MAX_GATE_THICKNESS + " thick."
             );
         }
         if (!isFaceConnected(left)) {

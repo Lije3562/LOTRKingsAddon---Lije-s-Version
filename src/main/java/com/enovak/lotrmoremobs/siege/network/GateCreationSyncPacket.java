@@ -5,6 +5,7 @@ import com.enovak.lotrmoremobs.siege.creation.GateBlockPosition;
 import com.enovak.lotrmoremobs.siege.creation.GateSelectionMode;
 import com.enovak.lotrmoremobs.siege.gate.GateLeaf;
 import com.enovak.lotrmoremobs.siege.gate.GateOpeningDirection;
+import com.enovak.lotrmoremobs.siege.gate.GateStructureValidator;
 import cpw.mods.fml.common.network.simpleimpl.IMessage;
 import cpw.mods.fml.common.network.simpleimpl.IMessageHandler;
 import cpw.mods.fml.common.network.simpleimpl.MessageContext;
@@ -19,7 +20,7 @@ public class GateCreationSyncPacket implements IMessage {
     public static final int CONFIGURATION = 1;
     public static final int PART_UPDATE = 2;
     public static final int END = 3;
-    private static final int MAX_PARTS = 1600;
+    private static final int MAX_PARTS = GateStructureValidator.MAX_GATE_PARTS;
 
     private int operation;
     private int dimensionId;

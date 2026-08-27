@@ -2819,7 +2819,8 @@ public class TileEntitySiegeGate extends TileEntity {
             quarantineGateStructure(
                     "GateParts contains "
                             + partCount
-                            + " entries; maximum is 1600."
+                            + " entries; maximum is "
+                            + GateStructureValidator.MAX_GATE_PARTS + "."
             );
 
             return;
