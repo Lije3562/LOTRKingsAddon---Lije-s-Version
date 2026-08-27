@@ -116,9 +116,11 @@ public final class GateSourceBlockValidator {
     /**
      * TileEntity-backed source blocks are allowed when their live TileEntity
      * exists at selection/finalization time. Gate finalization/edit commit
-     * snapshots the complete TE NBT before replacing the source with an inert
-     * GatePart, and the existing restoration path reapplies that snapshot when
-     * the source block is restored.
+     * snapshots inert TE NBT before replacing the source with an inert
+     * GatePart. Inventory-backed TileEntities have their item contents removed
+     * from the stored snapshot so replacement drops cannot be restored a second
+     * time later. The existing restoration path reapplies the remaining state
+     * when the source block is restored.
      *
      * We intentionally do not instantiate arbitrary captured TileEntities
      * while the block belongs to a moving Siege Gate. Their NBT remains inert

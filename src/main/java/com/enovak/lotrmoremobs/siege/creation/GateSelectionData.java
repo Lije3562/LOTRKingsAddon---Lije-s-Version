@@ -13,7 +13,9 @@ final class GateSelectionData {
     private final int sourceMetadata;
 
     /*
-     * Optional exact snapshot of the original source TileEntity.
+     * Optional inert snapshot of the original source TileEntity.
+     * Inventory item contents may be intentionally omitted so replacement
+     * drops cannot also be restored later.
      *
      * This is DATA ONLY. It is never ticked or inserted into the world while
      * the block belongs to a finalized Siege Gate.

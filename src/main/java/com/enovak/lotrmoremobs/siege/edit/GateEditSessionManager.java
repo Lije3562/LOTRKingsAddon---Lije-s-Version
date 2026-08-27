@@ -6,6 +6,7 @@ import com.enovak.lotrmoremobs.siege.creation.GateSourceBlockValidator;
 import com.enovak.lotrmoremobs.siege.gate.GateEnclosedAreaFill;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
 import com.enovak.lotrmoremobs.siege.gate.GateRegistry;
+import com.enovak.lotrmoremobs.siege.gate.GateSourceTileEntitySnapshot;
 import com.enovak.lotrmoremobs.siege.gate.SiegeGateOwnershipData;
 import com.enovak.lotrmoremobs.siege.gate.GateStructureValidator;
 import com.enovak.lotrmoremobs.siege.gate.GatePartData;
@@ -638,8 +639,11 @@ public final class GateEditSessionManager {
                 return null;
             }
             if (sourceTileEntity != null) {
-                sourceTileEntityNbt = new NBTTagCompound();
-                sourceTileEntity.writeToNBT(sourceTileEntityNbt);
+                sourceTileEntityNbt =
+                        GateSourceTileEntitySnapshot
+                                .captureForGateStorage(
+                                        sourceTileEntity
+                                );
             }
         } catch (RuntimeException ignored) {
             return null;
@@ -865,11 +869,10 @@ public final class GateEditSessionManager {
 
             if (sourceTileEntity != null) {
                 sourceTileEntityNbt =
-                        new NBTTagCompound();
-
-                sourceTileEntity.writeToNBT(
-                        sourceTileEntityNbt
-                );
+                        GateSourceTileEntitySnapshot
+                                .captureForGateStorage(
+                                        sourceTileEntity
+                                );
             }
 
         } catch (RuntimeException exception) {

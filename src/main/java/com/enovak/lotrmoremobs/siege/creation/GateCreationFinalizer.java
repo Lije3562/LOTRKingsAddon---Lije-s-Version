@@ -68,11 +68,10 @@ final class GateCreationFinalizer {
             if (sourceTileEntity != null) {
                 try {
                     sourceTileEntityNbt =
-                            new NBTTagCompound();
-
-                    sourceTileEntity.writeToNBT(
-                            sourceTileEntityNbt
-                    );
+                            GateSourceTileEntitySnapshot
+                                    .captureForGateStorage(
+                                            sourceTileEntity
+                                    );
 
                 } catch (RuntimeException exception) {
                     return "Gate conversion stopped because a source "

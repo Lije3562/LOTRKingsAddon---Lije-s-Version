@@ -4,6 +4,7 @@ import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
 import com.enovak.lotrmoremobs.siege.gate.GateEnclosedAreaFill;
 import com.enovak.lotrmoremobs.siege.gate.GateLeaf;
+import com.enovak.lotrmoremobs.siege.gate.GateSourceTileEntitySnapshot;
 import com.enovak.lotrmoremobs.siege.network.GateCreationActionPacket;
 import com.enovak.lotrmoremobs.siege.network.GateCreationSyncPacket;
 import com.enovak.lotrmoremobs.siege.network.SiegeRequestLimiter;
@@ -575,11 +576,10 @@ public final class GateCreationManager {
         if (sourceTileEntity != null) {
             try {
                 sourceTileEntityNbt =
-                        new NBTTagCompound();
-
-                sourceTileEntity.writeToNBT(
-                        sourceTileEntityNbt
-                );
+                        GateSourceTileEntitySnapshot
+                                .captureForGateStorage(
+                                        sourceTileEntity
+                                );
             } catch (RuntimeException exception) {
                 sendMessage(
                         player,
@@ -799,8 +799,11 @@ public final class GateCreationManager {
 
         if (sourceTileEntity != null) {
             try {
-                sourceTileEntityNbt = new NBTTagCompound();
-                sourceTileEntity.writeToNBT(sourceTileEntityNbt);
+                sourceTileEntityNbt =
+                        GateSourceTileEntitySnapshot
+                                .captureForGateStorage(
+                                        sourceTileEntity
+                                );
             } catch (RuntimeException ignored) {
                 return null;
             }
