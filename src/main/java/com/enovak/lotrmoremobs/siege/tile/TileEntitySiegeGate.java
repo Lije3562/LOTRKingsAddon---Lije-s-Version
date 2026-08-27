@@ -156,6 +156,8 @@ public class TileEntitySiegeGate extends TileEntity {
     private static final String NBT_GATE_FACTION = "GateFaction";
     private static final String NBT_REQUIRED_ALIGNMENT =
             "RequiredAlignment";
+    private static final String NBT_FACTION_ACCESS_ENABLED =
+            "FactionAccessEnabled";
     private static final String NBT_EDITORS = "Editors";
     private static final String NBT_OPERATORS = "Operators";
     private static final String NBT_ACCESS_WHITELIST = "AccessWhitelist";
@@ -212,6 +214,7 @@ public class TileEntitySiegeGate extends TileEntity {
     private UUID ownerUuid;
     private LOTRFaction gateFaction;
     private int requiredAlignment = DEFAULT_REQUIRED_ALIGNMENT;
+    private boolean factionAccessEnabled = true;
     private final Set<UUID> editorUuids = new HashSet<UUID>();
     private final Set<UUID> operatorUuids = new HashSet<UUID>();
     private final Set<UUID> accessWhitelistUuids = new HashSet<UUID>();
@@ -1324,6 +1327,10 @@ public class TileEntitySiegeGate extends TileEntity {
         return requiredAlignment;
     }
 
+    public boolean isFactionAccessEnabled() {
+        return factionAccessEnabled;
+    }
+
     public Set<UUID> getEditorUuids() {
         return Collections.unmodifiableSet(
                 new HashSet<UUID>(editorUuids)
@@ -1434,6 +1441,18 @@ public class TileEntitySiegeGate extends TileEntity {
          */
         if (gateFaction == null) {
             return true;
+        }
+
+        /*
+         * Faction identity and faction-wide operation are separate settings.
+         *
+         * Existing gates default this switch to ON for compatibility. When it
+         * is OFF, the faction still identifies the gate for rendering, ram
+         * hostility, announcements, etc., but alignment alone grants no player
+         * operation rights.
+         */
+        if (!factionAccessEnabled) {
+            return false;
         }
 
         return LOTRLevelData.getData(player).getAlignment(gateFaction)
@@ -1593,6 +1612,29 @@ public class TileEntitySiegeGate extends TileEntity {
         return true;
     }
 
+    public boolean setFactionAccessEnabled(
+            EntityPlayerMP player,
+            boolean enabled
+    ) {
+        if (isPersistentGateMutationLocked()
+                || !canManage(player)
+                || gateFaction == null) {
+
+            return false;
+        }
+
+        if (factionAccessEnabled == enabled) {
+            return true;
+        }
+
+        factionAccessEnabled =
+                enabled;
+
+        onAccessStateChanged();
+
+        return true;
+    }
+
     public boolean toggleEditor(
             EntityPlayerMP player,
             UUID targetUuid
@@ -1641,8 +1683,8 @@ public class TileEntitySiegeGate extends TileEntity {
         }
 
         /*
-         * Editors may manage ordinary Access entries, but only the Owner or a
-         * server administrator may create, remove, or demote Editors.
+         * Managers may manage ordinary Access entries, but only the Owner or a
+         * server administrator may create, remove, or demote Managers.
          */
         if ((accessLevel == PLAYER_ACCESS_LEVEL_EDITOR
                 || editorUuids.contains(targetUuid))
@@ -1895,6 +1937,7 @@ public class TileEntitySiegeGate extends TileEntity {
             UUID synchronizedOwner,
             String synchronizedFaction,
             int synchronizedRequiredAlignment,
+            boolean synchronizedFactionAccessEnabled,
             Collection<UUID> synchronizedEditors,
             Collection<UUID> synchronizedOperators,
             Collection<UUID> synchronizedWhitelist
@@ -1915,6 +1958,8 @@ public class TileEntitySiegeGate extends TileEntity {
                         MAX_REQUIRED_ALIGNMENT
                 )
         );
+        factionAccessEnabled =
+                synchronizedFactionAccessEnabled;
         replaceUuidSet(editorUuids, synchronizedEditors);
         replaceUuidSet(operatorUuids, synchronizedOperators);
         replaceUuidSet(accessWhitelistUuids, synchronizedWhitelist);
@@ -3756,6 +3801,10 @@ public class TileEntitySiegeGate extends TileEntity {
             nbt.setString(NBT_GATE_FACTION, gateFaction.codeName());
         }
         nbt.setInteger(NBT_REQUIRED_ALIGNMENT, requiredAlignment);
+        nbt.setBoolean(
+                NBT_FACTION_ACCESS_ENABLED,
+                factionAccessEnabled
+        );
         nbt.setTag(NBT_EDITORS, writeUuidList(editorUuids));
         nbt.setTag(NBT_OPERATORS, writeUuidList(operatorUuids));
         nbt.setTag(
@@ -3843,6 +3892,18 @@ public class TileEntitySiegeGate extends TileEntity {
                 1,
                 Math.min(requiredAlignment, MAX_REQUIRED_ALIGNMENT)
         );
+
+        /*
+         * Missing key means this is a gate saved before faction access became
+         * independently configurable. Preserve its historical behavior.
+         */
+        factionAccessEnabled =
+                !nbt.hasKey(
+                        NBT_FACTION_ACCESS_ENABLED
+                )
+                        || nbt.getBoolean(
+                        NBT_FACTION_ACCESS_ENABLED
+                );
         readUuidList(nbt, NBT_EDITORS, editorUuids);
         readUuidList(nbt, NBT_OPERATORS, operatorUuids);
         readUuidList(nbt, NBT_ACCESS_WHITELIST, accessWhitelistUuids);

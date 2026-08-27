@@ -60,7 +60,8 @@ public final class GateAccess {
             return;
         }
         String denialMessage;
-        if (gate.getGateFaction() != null) {
+        if (gate.getGateFaction() != null
+                && gate.isFactionAccessEnabled()) {
             float currentAlignment =
                     LOTRLevelData.getData(player)
                             .getAlignment(gate.getGateFaction());
@@ -74,6 +75,11 @@ public final class GateAccess {
                             + " or explicit Player Access to operate "
                             + gate.getGateName()
                             + ".";
+        } else if (gate.getGateFaction() != null) {
+            denialMessage =
+                    "Faction alignment access is disabled for "
+                            + gate.getGateName()
+                            + "; you need explicit Player Access.";
         } else {
             denialMessage =
                     "You are not authorized to operate "

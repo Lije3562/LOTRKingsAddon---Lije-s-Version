@@ -630,6 +630,10 @@ public class GuiGateManagement extends GuiScreen {
                 selectedFactionName == null
                         || selectedFactionName.isEmpty();
 
+        boolean factionAccessEnabled =
+                !neutralFaction
+                        && gate.isFactionAccessEnabled();
+
         /*
          * Header
          */
@@ -688,9 +692,9 @@ public class GuiGateManagement extends GuiScreen {
                 "Required Alignment",
                 centerX + 56,
                 top + 116,
-                neutralFaction
-                        ? 0x777777
-                        : 0xBBBBBB
+                factionAccessEnabled
+                        ? 0xBBBBBB
+                        : 0x777777
         );
 
         /*
@@ -775,7 +779,7 @@ public class GuiGateManagement extends GuiScreen {
 
         alignmentField.setEnabled(
                 canManage
-                        && !neutralFaction
+                        && factionAccessEnabled
         );
 
         maxHealthField.setEnabled(

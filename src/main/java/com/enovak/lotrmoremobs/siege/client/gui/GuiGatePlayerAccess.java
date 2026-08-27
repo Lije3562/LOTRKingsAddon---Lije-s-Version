@@ -33,7 +33,7 @@ public class GuiGatePlayerAccess
             19;
 
     private static final int ROWS_TOP_OFFSET =
-            30;
+            55;
 
     private static final int BACK_TOP_OFFSET =
             ROWS_TOP_OFFSET
@@ -48,6 +48,9 @@ public class GuiGatePlayerAccess
 
     private static final int SCROLL_DOWN_BUTTON =
             3;
+
+    private static final int FACTION_ACCESS_BUTTON =
+            4;
 
     private static final int ROW_ACTION_BASE =
             100;
@@ -112,7 +115,7 @@ public class GuiGatePlayerAccess
         int top =
                 Math.max(
                         0,
-                        height / 2 - 120
+                        height / 2 - 133
                 );
 
         if (gate == null
@@ -132,6 +135,27 @@ public class GuiGatePlayerAccess
 
             return;
         }
+
+        GuiButton factionAccessButton =
+                new GuiButton(
+                        FACTION_ACCESS_BUTTON,
+                        centerX - 85,
+                        top + 30,
+                        170,
+                        20,
+                        getFactionAccessButtonText(
+                                gate
+                        )
+                );
+
+        factionAccessButton.enabled =
+                GateManagementClientContext
+                        .canManage()
+                        && gate.getGateFaction() != null;
+
+        buttonList.add(
+                factionAccessButton
+        );
 
         List<AccessEntry> entries =
                 getEntries(
@@ -266,15 +290,15 @@ public class GuiGatePlayerAccess
                                     actionWidth,
                                     ROW_HEIGHT,
                                     entry.editor
-                                            ? "Editor"
+                                            ? "Manager"
                                             : "Access"
                             )
                     );
                 }
 
                 /*
-                 * Editors may remove ordinary Access entries, but only the
-                 * Owner/Admin may remove or change Editor entries.
+                 * Managers may remove ordinary Access entries, but only the
+                 * Owner/Admin may remove or change Manager entries.
                  */
                 if (!entry.owner
                         && (canEditRoles
@@ -393,7 +417,7 @@ public class GuiGatePlayerAccess
         int top =
                 Math.max(
                         0,
-                        height / 2 - 120
+                        height / 2 - 133
                 );
 
         drawCenteredString(
@@ -406,7 +430,7 @@ public class GuiGatePlayerAccess
 
         drawCenteredString(
                 fontRendererObj,
-                "Access = operate/repair    Editor = operate/configure",
+                "Access = operate/repair    Manager = operate/configure",
                 centerX,
                 top + 15,
                 0xAAAAAA
@@ -494,7 +518,7 @@ public class GuiGatePlayerAccess
                         rowOwners[row]
                                 ? "Owner"
                                 : rowEditors[row]
-                                ? "Editor"
+                                ? "Manager"
                                 : "Access";
                 int y =
                         top
@@ -536,6 +560,30 @@ public class GuiGatePlayerAccess
                 == BACK_BUTTON) {
 
             returnToManagement();
+
+            return;
+        }
+
+        if (button.id
+                == FACTION_ACCESS_BUTTON) {
+
+            TileEntitySiegeGate gate =
+                    getGate();
+
+            if (gate != null
+                    && gate.getGateFaction() != null
+                    && GateManagementClientContext
+                    .canManage()) {
+
+                sendAction(
+                        GateManagementActionPacket
+                                .SET_FACTION_ACCESS,
+                        gate.isFactionAccessEnabled()
+                                ? 0
+                                : 1,
+                        ""
+                );
+            }
 
             return;
         }
@@ -794,6 +842,21 @@ public class GuiGatePlayerAccess
         }
 
         return false;
+    }
+
+    private String getFactionAccessButtonText(
+            TileEntitySiegeGate gate
+    ) {
+        if (gate == null
+                || gate.getGateFaction() == null) {
+
+            return "Faction Access: N/A";
+        }
+
+        return "Faction Access: "
+                + (gate.isFactionAccessEnabled()
+                ? "ON"
+                : "OFF");
     }
 
     private List<AccessEntry> getEntries(

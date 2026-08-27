@@ -43,6 +43,9 @@ public class GateAccessSyncPacket
             TileEntitySiegeGate
                     .DEFAULT_REQUIRED_ALIGNMENT;
 
+    private boolean factionAccessEnabled =
+            true;
+
     private List<UUID> editors =
             new ArrayList<UUID>();
 
@@ -86,6 +89,9 @@ public class GateAccessSyncPacket
 
         requiredAlignment =
                 gate.getRequiredAlignment();
+
+        factionAccessEnabled =
+                gate.isFactionAccessEnabled();
 
         editors.addAll(
                 gate.getEditorUuids()
@@ -177,6 +183,9 @@ public class GateAccessSyncPacket
         requiredAlignment =
                 buffer.readInt();
 
+        factionAccessEnabled =
+                buffer.readBoolean();
+
         editors =
                 readUuidList(
                         buffer
@@ -232,6 +241,10 @@ public class GateAccessSyncPacket
 
         buffer.writeInt(
                 requiredAlignment
+        );
+
+        buffer.writeBoolean(
+                factionAccessEnabled
         );
 
         writeUuidList(
@@ -290,6 +303,10 @@ public class GateAccessSyncPacket
 
     public int getRequiredAlignment() {
         return requiredAlignment;
+    }
+
+    public boolean isFactionAccessEnabled() {
+        return factionAccessEnabled;
     }
 
     public List<UUID> getEditors() {

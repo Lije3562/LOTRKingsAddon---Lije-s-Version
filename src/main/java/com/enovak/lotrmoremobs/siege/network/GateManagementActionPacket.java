@@ -37,12 +37,18 @@ public class GateManagementActionPacket
      *
      * value:
      *     0 = Access
-     *     1 = Editor
+     *     1 = Manager (legacy internal Editor role)
      */
     public static final int SET_PLAYER_ACCESS_LEVEL = 9;
 
     public static final int REMOVE_PLAYER_ACCESS = 10;
     public static final int SET_CONTROLLER_APPEARANCE = 11;
+
+    /*
+     * Separates the gate's LOTR faction identity from automatic alignment
+     * access. value: 0 = OFF, 1 = ON.
+     */
+    public static final int SET_FACTION_ACCESS = 12;
 
     public static final int ACCESS_LEVEL_ACCESS = 0;
     public static final int ACCESS_LEVEL_EDITOR = 1;
@@ -222,7 +228,9 @@ public class GateManagementActionPacket
                 || action
                 == REMOVE_PLAYER_ACCESS
                 || action
-                == SET_CONTROLLER_APPEARANCE;
+                == SET_CONTROLLER_APPEARANCE
+                || action
+                == SET_FACTION_ACCESS;
     }
 
     public static boolean isCoalescibleUpdate(
@@ -237,7 +245,9 @@ public class GateManagementActionPacket
                 || action
                 == SET_MAX_HEALTH
                 || action
-                == SET_CONTROLLER_APPEARANCE;
+                == SET_CONTROLLER_APPEARANCE
+                || action
+                == SET_FACTION_ACCESS;
     }
 
     private boolean hasValidShape() {
@@ -261,6 +271,14 @@ public class GateManagementActionPacket
                 != ACCESS_LEVEL_ACCESS
                 && value
                 != ACCESS_LEVEL_EDITOR) {
+
+            return false;
+        }
+
+        if (action
+                == SET_FACTION_ACCESS
+                && value != 0
+                && value != 1) {
 
             return false;
         }

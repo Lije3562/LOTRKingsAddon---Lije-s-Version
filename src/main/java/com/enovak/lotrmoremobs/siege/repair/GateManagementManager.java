@@ -311,6 +311,19 @@ public final class GateManagementManager {
             }
 
         } else if (request.action
+                == GateManagementActionPacket.SET_FACTION_ACCESS) {
+
+            if (!gate.setFactionAccessEnabled(
+                    player,
+                    request.value != 0
+            )) {
+                sendMessage(
+                        player,
+                        "Faction access could not be updated."
+                );
+            }
+
+        } else if (request.action
                 == GateManagementActionPacket
                 .SET_PLAYER_ACCESS_LEVEL) {
 
