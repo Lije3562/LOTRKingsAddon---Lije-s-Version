@@ -10,6 +10,7 @@ import net.minecraft.client.gui.GuiButton;
 import net.minecraft.client.gui.GuiScreen;
 import net.minecraft.client.gui.inventory.GuiContainerCreative;
 import net.minecraft.client.gui.inventory.GuiInventory;
+import net.minecraft.client.gui.inventory.GuiScreenHorseInventory;
 import net.minecraft.creativetab.CreativeTabs;
 import net.minecraftforge.client.event.GuiScreenEvent;
 import java.util.Iterator;
@@ -20,6 +21,10 @@ public class PickupFilterInventoryButtonHandler {
 
     private static final int PICKUP_FILTER_BUTTON_ID = 42001;
     private static final int BUTTON_GAP = 2;
+    private static final int MOUNT_BUTTON_GAP = 4;
+
+    private static final String NPC_MOUNT_GUI_CLASS =
+            "lotr.client.gui.LOTRGuiNPCMountInventory";
 
     private static final int SURVIVAL_GUI_WIDTH = 176;
     private static final int SURVIVAL_GUI_HEIGHT = 166;
@@ -175,6 +180,12 @@ public class PickupFilterInventoryButtonHandler {
             int guiTop = (gui.height - CREATIVE_GUI_HEIGHT) / 2;
             pickupFilterButton.xPosition = guiLeft + CREATIVE_POUCH_X;
             pickupFilterButton.yPosition = guiTop + CREATIVE_POUCH_Y;
+        } else if (isMountedInventory(gui)) {
+            int guiLeft = (gui.width - SURVIVAL_GUI_WIDTH) / 2;
+            int guiTop = (gui.height - SURVIVAL_GUI_HEIGHT) / 2;
+            pickupFilterButton.xPosition =
+                    guiLeft + SURVIVAL_GUI_WIDTH + MOUNT_BUTTON_GAP;
+            pickupFilterButton.yPosition = guiTop + 6;
         } else {
             int guiLeft = (gui.width - SURVIVAL_GUI_WIDTH) / 2;
             int guiTop = (gui.height - SURVIVAL_GUI_HEIGHT) / 2;
@@ -250,7 +261,14 @@ public class PickupFilterInventoryButtonHandler {
 
     private static boolean isSupportedInventory(GuiScreen gui) {
         return gui instanceof GuiInventory
-                || gui instanceof GuiContainerCreative;
+                || gui instanceof GuiContainerCreative
+                || isMountedInventory(gui);
+    }
+
+    private static boolean isMountedInventory(GuiScreen gui) {
+        return gui instanceof GuiScreenHorseInventory
+                || gui != null
+                && NPC_MOUNT_GUI_CLASS.equals(gui.getClass().getName());
     }
 
     /** Exposes GuiScreen's normal one-line Minecraft tooltip renderer. */
