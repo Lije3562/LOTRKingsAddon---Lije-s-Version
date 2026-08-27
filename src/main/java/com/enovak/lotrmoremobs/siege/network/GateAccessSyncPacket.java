@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.siege.network;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
+import com.enovak.lotrmoremobs.siege.gate.GateControlMode;
 import com.mojang.authlib.GameProfile;
 
 import cpw.mods.fml.common.network.ByteBufUtils;
@@ -45,6 +46,9 @@ public class GateAccessSyncPacket
 
     private boolean factionAccessEnabled =
             true;
+
+    private int gateControlMode =
+            GateControlMode.AUTOMATIC.getNetworkId();
 
     private List<UUID> editors =
             new ArrayList<UUID>();
@@ -92,6 +96,10 @@ public class GateAccessSyncPacket
 
         factionAccessEnabled =
                 gate.isFactionAccessEnabled();
+
+        gateControlMode =
+                gate.getGateControlMode()
+                        .getNetworkId();
 
         editors.addAll(
                 gate.getEditorUuids()
@@ -186,6 +194,9 @@ public class GateAccessSyncPacket
         factionAccessEnabled =
                 buffer.readBoolean();
 
+        gateControlMode =
+                buffer.readByte();
+
         editors =
                 readUuidList(
                         buffer
@@ -245,6 +256,10 @@ public class GateAccessSyncPacket
 
         buffer.writeBoolean(
                 factionAccessEnabled
+        );
+
+        buffer.writeByte(
+                gateControlMode
         );
 
         writeUuidList(
@@ -307,6 +322,10 @@ public class GateAccessSyncPacket
 
     public boolean isFactionAccessEnabled() {
         return factionAccessEnabled;
+    }
+
+    public int getGateControlMode() {
+        return gateControlMode;
     }
 
     public List<UUID> getEditors() {

@@ -35,11 +35,6 @@ public class GuiGatePlayerAccess
     private static final int ROWS_TOP_OFFSET =
             55;
 
-    private static final int BACK_TOP_OFFSET =
-            ROWS_TOP_OFFSET
-                    + VISIBLE_ROWS * ROW_SPACING
-                    + 8;
-
     private static final int BACK_BUTTON =
             1;
 
@@ -61,6 +56,11 @@ public class GuiGatePlayerAccess
     private final List<GuiTextField> fields =
             new ArrayList<GuiTextField>();
 
+    private GuiTextField alignmentField;
+
+    private int visibleRowCount =
+            2;
+
     private final UUID[] rowUuids =
             new UUID[VISIBLE_ROWS];
 
@@ -78,21 +78,16 @@ public class GuiGatePlayerAccess
     @Override
     public void initGui() {
         buttonList.clear();
-
         fields.clear();
+        alignmentField = null;
 
         for (int i = 0;
              i < VISIBLE_ROWS;
              ++i) {
 
-            rowUuids[i] =
-                    null;
-
-            rowEditors[i] =
-                    false;
-
-            rowOwners[i] =
-                    false;
+            rowUuids[i] = null;
+            rowEditors[i] = false;
+            rowOwners[i] = false;
         }
 
         observedAccessGeneration =
@@ -105,22 +100,14 @@ public class GuiGatePlayerAccess
         int centerX =
                 width / 2;
 
-        int panelWidth =
-                294;
-
-        int left =
-                centerX
-                        - panelWidth / 2;
-
-        int top =
-                Math.max(
-                        0,
-                        height / 2 - 133
-                );
-
         if (gate == null
                 || !GateManagementClientContext
                 .canManagePlayerAccess()) {
+
+            visibleRowCount = 1;
+
+            int top =
+                    getTop();
 
             buttonList.add(
                     new GuiButton(
@@ -136,12 +123,41 @@ public class GuiGatePlayerAccess
             return;
         }
 
+        List<AccessEntry> entries =
+                getEntries(
+                        gate
+                );
+
+        /*
+         * The list grows with the whitelist instead of reserving a wall of
+         * empty rows. Row 1 is the owner, and exactly one blank row remains
+         * after the last visible access entry for the next player.
+         */
+        visibleRowCount =
+                Math.min(
+                        VISIBLE_ROWS,
+                        Math.max(
+                                2,
+                                entries.size() + 1
+                        )
+                );
+
+        int top =
+                getTop();
+
+        int panelWidth =
+                294;
+
+        int left =
+                centerX
+                        - panelWidth / 2;
+
         GuiButton factionAccessButton =
                 new GuiButton(
                         FACTION_ACCESS_BUTTON,
-                        centerX - 85,
+                        left + 20,
                         top + 30,
-                        170,
+                        142,
                         20,
                         getFactionAccessButtonText(
                                 gate
@@ -157,21 +173,37 @@ public class GuiGatePlayerAccess
                 factionAccessButton
         );
 
-        List<AccessEntry> entries =
-                getEntries(
-                        gate
+        alignmentField =
+                new GuiTextField(
+                        fontRendererObj,
+                        left + 220,
+                        top + 30,
+                        54,
+                        20
                 );
 
-        /*
-         * Always leave room for at least two blank add rows on the final
-         * scroll page.
-         */
+        alignmentField.setMaxStringLength(
+                7
+        );
+
+        alignmentField.setText(
+                Integer.toString(
+                        gate.getRequiredAlignment()
+                )
+        );
+
+        alignmentField.setEnabled(
+                canEditAlignment(
+                        gate
+                )
+        );
+
         int maximumOffset =
                 Math.max(
                         0,
                         entries.size()
-                                + 2
-                                - VISIBLE_ROWS
+                                + 1
+                                - visibleRowCount
                 );
 
         scrollOffset =
@@ -202,8 +234,12 @@ public class GuiGatePlayerAccess
                         + actionWidth
                         + 4;
 
+        boolean ownerPinned =
+                !entries.isEmpty()
+                        && entries.get(0).owner;
+
         for (int row = 0;
-             row < VISIBLE_ROWS;
+             row < visibleRowCount;
              ++row) {
 
             int y =
@@ -224,15 +260,10 @@ public class GuiGatePlayerAccess
                     64
             );
 
-            boolean ownerPinned =
-                    !entries.isEmpty()
-                            && entries.get(0).owner;
-
             int entryIndex;
             if (ownerPinned
                     && row == 0) {
-                entryIndex =
-                        0;
+                entryIndex = 0;
             } else if (ownerPinned) {
                 entryIndex =
                         1
@@ -245,9 +276,7 @@ public class GuiGatePlayerAccess
                                 + row;
             }
 
-            if (entryIndex
-                    < entries.size()) {
-
+            if (entryIndex < entries.size()) {
                 AccessEntry entry =
                         entries.get(
                                 entryIndex
@@ -255,10 +284,8 @@ public class GuiGatePlayerAccess
 
                 rowUuids[row] =
                         entry.uuid;
-
                 rowEditors[row] =
                         entry.editor;
-
                 rowOwners[row] =
                         entry.owner;
 
@@ -266,10 +293,7 @@ public class GuiGatePlayerAccess
                         entry.displayName
                 );
 
-                /*
-                 * Existing names are identity labels.
-                 * Add/remove is explicit, avoiding accidental renames.
-                 */
+                /* Existing names are identity labels, never rename fields. */
                 field.setEnabled(
                         false
                 );
@@ -332,10 +356,7 @@ public class GuiGatePlayerAccess
                                 "Add"
                         );
 
-                /*
-                 * Keep blank rows visually clean. The Add button appears as
-                 * soon as the adjacent name field contains text.
-                 */
+                /* Blank rows stay clean until the player starts typing. */
                 addButton.visible =
                         false;
 
@@ -371,7 +392,7 @@ public class GuiGatePlayerAccess
                                     + 4,
                             top
                                     + ROWS_TOP_OFFSET
-                                    + (VISIBLE_ROWS - 1)
+                                    + (visibleRowCount - 1)
                                     * ROW_SPACING,
                             20,
                             ROW_HEIGHT,
@@ -395,7 +416,10 @@ public class GuiGatePlayerAccess
                 new GuiButton(
                         BACK_BUTTON,
                         centerX - 55,
-                        top + BACK_TOP_OFFSET,
+                        top
+                                + ROWS_TOP_OFFSET
+                                + visibleRowCount * ROW_SPACING
+                                + 8,
                         110,
                         20,
                         "Back"
@@ -415,14 +439,11 @@ public class GuiGatePlayerAccess
                 width / 2;
 
         int top =
-                Math.max(
-                        0,
-                        height / 2 - 133
-                );
+                getTop();
 
         drawCenteredString(
                 fontRendererObj,
-                "Player Access",
+                "Access & Roles",
                 centerX,
                 top,
                 0xFFFFFF
@@ -447,6 +468,16 @@ public class GuiGatePlayerAccess
                     top + 48,
                     0xFF7777
             );
+        } else if (alignmentField != null) {
+            drawString(
+                    fontRendererObj,
+                    "Alignment",
+                    centerX + 19,
+                    top + 36,
+                    canEditAlignment(gate)
+                            ? 0xBBBBBB
+                            : 0x666666
+            );
         }
 
         for (int row = 0;
@@ -466,8 +497,7 @@ public class GuiGatePlayerAccess
             int displayIndex;
             if (ownerPinned
                     && row == 0) {
-                displayIndex =
-                        1;
+                displayIndex = 1;
             } else if (ownerPinned) {
                 displayIndex =
                         scrollOffset
@@ -540,6 +570,10 @@ public class GuiGatePlayerAccess
                 mouseY,
                 partialTicks
         );
+
+        if (alignmentField != null) {
+            alignmentField.drawTextBox();
+        }
 
         for (GuiTextField field
                 : fields) {
@@ -686,6 +720,25 @@ public class GuiGatePlayerAccess
             int mouseY,
             int mouseButton
     ) {
+        boolean alignmentWasFocused =
+                alignmentField != null
+                        && alignmentField.isFocused();
+
+        if (alignmentField != null) {
+            TileEntitySiegeGate gate =
+                    getGate();
+
+            if (canEditAlignment(gate)) {
+                alignmentField.mouseClicked(
+                        mouseX,
+                        mouseY,
+                        mouseButton
+                );
+            } else {
+                alignmentField.setFocused(false);
+            }
+        }
+
         for (GuiTextField field
                 : fields) {
 
@@ -694,6 +747,12 @@ public class GuiGatePlayerAccess
                     mouseY,
                     mouseButton
             );
+        }
+
+        if (alignmentWasFocused
+                && alignmentField != null
+                && !alignmentField.isFocused()) {
+            commitAlignmentField();
         }
 
         super.mouseClicked(
@@ -723,6 +782,13 @@ public class GuiGatePlayerAccess
                         == Keyboard.KEY_NUMPADENTER;
 
         if (enterPressed) {
+            if (alignmentField != null
+                    && alignmentField.isFocused()) {
+                commitAlignmentField();
+                alignmentField.setFocused(false);
+                return;
+            }
+
             for (int row = 0;
                  row < fields.size();
                  ++row) {
@@ -757,6 +823,14 @@ public class GuiGatePlayerAccess
                     }
                 }
             }
+        }
+
+        if (alignmentField != null
+                && alignmentField.textboxKeyTyped(
+                typedChar,
+                keyCode
+        )) {
+            return;
         }
 
         for (GuiTextField field
@@ -796,6 +870,10 @@ public class GuiGatePlayerAccess
     public void updateScreen() {
         super.updateScreen();
 
+        if (alignmentField != null) {
+            alignmentField.updateCursorCounter();
+        }
+
         for (GuiTextField field
                 : fields) {
 
@@ -825,6 +903,8 @@ public class GuiGatePlayerAccess
     }
 
     private void returnToManagement() {
+        commitAlignmentField();
+
         mc.displayGuiScreen(
                 new GuiGateManagement(
                         false
@@ -833,6 +913,11 @@ public class GuiGatePlayerAccess
     }
 
     private boolean isAnyFieldFocused() {
+        if (alignmentField != null
+                && alignmentField.isFocused()) {
+            return true;
+        }
+
         for (GuiTextField field
                 : fields) {
 
@@ -842,6 +927,59 @@ public class GuiGatePlayerAccess
         }
 
         return false;
+    }
+
+    private boolean canEditAlignment(
+            TileEntitySiegeGate gate
+    ) {
+        return GateManagementClientContext
+                .canManage()
+                && gate != null
+                && gate.getGateFaction() != null
+                && gate.isFactionAccessEnabled();
+    }
+
+    private int getTop() {
+        int contentHeight =
+                ROWS_TOP_OFFSET
+                        + visibleRowCount * ROW_SPACING
+                        + 28;
+
+        return Math.max(
+                8,
+                height / 2
+                        - contentHeight / 2
+        );
+    }
+
+    private void commitAlignmentField() {
+        if (alignmentField == null
+                || !GateManagementClientContext
+                .canManage()) {
+            return;
+        }
+
+        TileEntitySiegeGate gate =
+                getGate();
+
+        if (!canEditAlignment(gate)) {
+            return;
+        }
+
+        int value =
+                parseInteger(
+                        alignmentField.getText()
+                );
+
+        if (value == gate.getRequiredAlignment()) {
+            return;
+        }
+
+        sendAction(
+                GateManagementActionPacket.SET_ALIGNMENT,
+                value,
+                ""
+        );
     }
 
     private String getFactionAccessButtonText(
@@ -1120,6 +1258,14 @@ public class GuiGatePlayerAccess
 
                 return;
             }
+        }
+    }
+
+    private static int parseInteger(String value) {
+        try {
+            return Integer.parseInt(value.trim());
+        } catch (NumberFormatException ignored) {
+            return 0;
         }
     }
 

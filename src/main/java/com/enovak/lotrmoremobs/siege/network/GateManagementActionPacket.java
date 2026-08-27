@@ -50,6 +50,9 @@ public class GateManagementActionPacket
      */
     public static final int SET_FACTION_ACCESS = 12;
 
+    /* value: 0 = Automatic, 1 = Locked Closed, 2 = Held Open. */
+    public static final int SET_GATE_CONTROL_MODE = 13;
+
     public static final int ACCESS_LEVEL_ACCESS = 0;
     public static final int ACCESS_LEVEL_EDITOR = 1;
 
@@ -230,7 +233,9 @@ public class GateManagementActionPacket
                 || action
                 == SET_CONTROLLER_APPEARANCE
                 || action
-                == SET_FACTION_ACCESS;
+                == SET_FACTION_ACCESS
+                || action
+                == SET_GATE_CONTROL_MODE;
     }
 
     public static boolean isCoalescibleUpdate(
@@ -247,7 +252,9 @@ public class GateManagementActionPacket
                 || action
                 == SET_CONTROLLER_APPEARANCE
                 || action
-                == SET_FACTION_ACCESS;
+                == SET_FACTION_ACCESS
+                || action
+                == SET_GATE_CONTROL_MODE;
     }
 
     private boolean hasValidShape() {
@@ -279,6 +286,13 @@ public class GateManagementActionPacket
                 == SET_FACTION_ACCESS
                 && value != 0
                 && value != 1) {
+
+            return false;
+        }
+
+        if (action
+                == SET_GATE_CONTROL_MODE
+                && (value < 0 || value > 2)) {
 
             return false;
         }

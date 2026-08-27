@@ -7,6 +7,7 @@ import com.enovak.lotrmoremobs.siege.client.GateEditClientContext;
 import com.enovak.lotrmoremobs.siege.edit.GateEditSelectionMode;
 import com.enovak.lotrmoremobs.siege.edit.GateEditDraftAction;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
+import com.enovak.lotrmoremobs.siege.gate.GateControlMode;
 import com.enovak.lotrmoremobs.siege.gate.GateLeaf;
 import com.enovak.lotrmoremobs.siege.management.FinalizedGateSnapshot;
 import com.enovak.lotrmoremobs.siege.network.GateManagementActionPacket;
@@ -58,6 +59,7 @@ public class GuiGateManagement extends GuiScreen {
     private static final int FACTION_NEXT_BUTTON = 41;
     private static final int PLAYER_ACCESS_BUTTON = 42;
     private static final int CONTROLLER_APPEARANCE_BUTTON = 43;
+    private static final int GATE_CONTROL_MODE_BUTTON = 44;
     private static final int BUILD_TIP_WIDGET_ID = -2000;
 
     private static final ResourceLocation COIN_TEXTURE =
@@ -69,7 +71,6 @@ public class GuiGateManagement extends GuiScreen {
     private final List<LOTRFaction> factions =
             new ArrayList<LOTRFaction>();
     private GuiTextField nameField;
-    private GuiTextField alignmentField;
     private GuiTextField maxHealthField;
     private String selectedFactionName = "";
     private boolean structurePage;
@@ -109,16 +110,17 @@ public class GuiGateManagement extends GuiScreen {
         int top =
                 Math.max(
                         8,
-                        height / 2 - 145
+                        height / 2 - 125
                 );
 
         /*
-         * Name
+         * Gate identity. Keep the editable name prominent without spending a
+         * full section of vertical space on it.
          */
         nameField =
                 createField(
                         centerX - 105,
-                        top + 43,
+                        top + 14,
                         210,
                         TileEntitySiegeGate
                                 .MAX_GATE_NAME_LENGTH,
@@ -128,8 +130,22 @@ public class GuiGateManagement extends GuiScreen {
                 );
 
         /*
-         * Faction
+         * One compact control-mode button communicates the current operating
+         * policy and cycles through the three supported modes.
          */
+        buttonList.add(
+                new GuiButton(
+                        GATE_CONTROL_MODE_BUTTON,
+                        centerX - 82,
+                        top + 69,
+                        164,
+                        20,
+                        gate == null
+                                ? GateControlMode.AUTOMATIC.getDisplayName()
+                                : gate.getGateControlMode().getDisplayName()
+                )
+        );
+
         selectedFactionName =
                 gate == null
                         || gate.getGateFaction() == null
@@ -149,7 +165,7 @@ public class GuiGateManagement extends GuiScreen {
                 new GuiGateFactionArrowButton(
                         FACTION_PREVIOUS_BUTTON,
                         factionX - 26,
-                        top + 86,
+                        top + 110,
                         true
                 )
         );
@@ -160,48 +176,58 @@ public class GuiGateManagement extends GuiScreen {
                         factionX
                                 + factionWidth
                                 + 6,
-                        top + 86,
+                        top + 110,
                         false
                 )
         );
 
         /*
-         * Player Access + Required Alignment share one row.
+         * Compact navigation row:
+         * [ appearance icon ] [ Access & Roles ] [ Edit Gate ]
          */
+        int actionRowX =
+                centerX - 123;
+
+        int actionRowY =
+                top + 148;
+
         buttonList.add(
-                new GuiButton(
-                        PLAYER_ACCESS_BUTTON,
-                        centerX - 112,
-                        top + 128,
-                        112,
-                        20,
-                        "Player Access"
+                new GuiGateAppearanceButton(
+                        CONTROLLER_APPEARANCE_BUTTON,
+                        actionRowX,
+                        actionRowY
                 )
         );
 
-        alignmentField =
-                createField(
-                        centerX + 20,
-                        top + 128,
-                        72,
-                        7,
-                        gate == null
-                                ? Integer.toString(
-                                TileEntitySiegeGate
-                                        .DEFAULT_REQUIRED_ALIGNMENT
-                        )
-                                : Integer.toString(
-                                gate.getRequiredAlignment()
-                        )
-                );
+        buttonList.add(
+                new GuiButton(
+                        PLAYER_ACCESS_BUTTON,
+                        actionRowX + 26,
+                        actionRowY,
+                        128,
+                        20,
+                        "Access & Roles"
+                )
+        );
+
+        buttonList.add(
+                new GuiButton(
+                        STRUCTURE_BUTTON,
+                        actionRowX + 160,
+                        actionRowY,
+                        86,
+                        20,
+                        "Edit Gate"
+                )
+        );
 
         /*
-         * Maintenance
+         * Maintenance stays on one line: label + max-health field + repair.
          */
         maxHealthField =
                 createField(
-                        centerX - 41,
-                        top + 178,
+                        centerX - 66,
+                        top + 181,
                         82,
                         7,
                         gate == null
@@ -217,55 +243,20 @@ public class GuiGateManagement extends GuiScreen {
         buttonList.add(
                 new GuiButton(
                         BEGIN_REPAIR_BUTTON,
-                        centerX - 58,
-                        top + 243,
-                        116,
+                        centerX + 20,
+                        top + 181,
+                        110,
                         20,
-                        "Begin Repair"
-                )
-        );
-
-        /*
-         * Center the complete bottom row as one unit:
-         *
-         * [ texture ]  [ Edit Gate ]  [ Close ]
-         *
-         * 20 + 8 + 104 + 8 + 68 = 208 px total.
-         */
-        int bottomRowWidth =
-                208;
-
-        int bottomRowX =
-                centerX - bottomRowWidth / 2;
-
-        int bottomRowY =
-                top + 287;
-
-        buttonList.add(
-                new GuiGateAppearanceButton(
-                        CONTROLLER_APPEARANCE_BUTTON,
-                        bottomRowX,
-                        bottomRowY
-                )
-        );
-
-        buttonList.add(
-                new GuiButton(
-                        STRUCTURE_BUTTON,
-                        bottomRowX + 28,
-                        bottomRowY,
-                        104,
-                        20,
-                        "Edit Gate"
+                        "Repair"
                 )
         );
 
         buttonList.add(
                 new GuiButton(
                         CLOSE_BUTTON,
-                        bottomRowX + 140,
-                        bottomRowY,
-                        68,
+                        centerX - 45,
+                        top + 229,
+                        90,
                         20,
                         "Close"
                 )
@@ -500,6 +491,24 @@ public class GuiGateManagement extends GuiScreen {
             }
 
         } else if (button.id
+                == GATE_CONTROL_MODE_BUTTON) {
+
+            TileEntitySiegeGate gate =
+                    getGate();
+
+            if (gate != null) {
+                GateControlMode nextMode =
+                        gate.getGateControlMode().next();
+
+                sendAction(
+                        GateManagementActionPacket
+                                .SET_GATE_CONTROL_MODE,
+                        nextMode.getNetworkId(),
+                        ""
+                );
+            }
+
+        } else if (button.id
                 == PLAYER_ACCESS_BUTTON) {
 
             leavingForPlayerAccess =
@@ -593,7 +602,7 @@ public class GuiGateManagement extends GuiScreen {
         int top =
                 Math.max(
                         8,
-                        height / 2 - 145
+                        height / 2 - 125
                 );
 
         if (gate == null
@@ -626,115 +635,76 @@ public class GuiGateManagement extends GuiScreen {
                         .capabilities
                         .isCreativeMode;
 
-        boolean neutralFaction =
-                selectedFactionName == null
-                        || selectedFactionName.isEmpty();
-
-        boolean factionAccessEnabled =
-                !neutralFaction
-                        && gate.isFactionAccessEnabled();
-
         /*
-         * Header
+         * Keep the overview dense but readable: identity, condition, control,
+         * faction, deep-management actions, maintenance, exit.
          */
         drawCenteredString(
                 fontRendererObj,
-                gate.getGateName(),
+                "Gate Name",
                 centerX,
                 top,
-                0xFFFFFF
+                0xBBBBBB
         );
 
         drawCenteredString(
                 fontRendererObj,
                 gate.getCurrentHealth()
                         + " / "
-                        + gate.getMaxHealth()
-                        + " HP   "
-                        + gate.getGateState().name(),
-                centerX,
-                top + 13,
+                        + gate.getMaxHealth(),
+                centerX - 55,
+                top + 42,
                 0xCCCCCC
         );
 
-        /*
-         * Name
-         */
         drawCenteredString(
                 fontRendererObj,
-                "Name",
+                gate.getGateState().name(),
+                centerX + 55,
+                top + 42,
+                0xCCCCCC
+        );
+
+        drawCenteredString(
+                fontRendererObj,
+                "Control",
                 centerX,
-                top + 31,
+                top + 57,
                 0xBBBBBB
         );
 
-        /*
-         * Faction
-         */
         drawCenteredString(
                 fontRendererObj,
                 "Faction",
                 centerX,
-                top + 74,
+                top + 98,
                 0xBBBBBB
         );
 
         drawFactionBox(
                 centerX,
-                top + 86
+                top + 110
         );
 
-        /*
-         * Alignment label belongs specifically to the right-hand field.
-         */
-        drawCenteredString(
-                fontRendererObj,
-                "Required Alignment",
-                centerX + 56,
-                top + 116,
-                factionAccessEnabled
-                        ? 0xBBBBBB
-                        : 0x777777
-        );
-
-        /*
-         * One divider between identity/access and maintenance.
-         */
         drawSectionDivider(
                 centerX,
-                top + 158
+                top + 138
         );
 
-        /*
-         * Maintenance
-         */
-        drawCenteredString(
+        drawString(
                 fontRendererObj,
-                "Max Health Override",
-                centerX,
-                top + 166,
+                "Max HP",
+                centerX - 116,
+                top + 187,
                 creative
                         ? 0xBBBBBB
                         : 0x666666
         );
 
-        drawCenteredString(
-                fontRendererObj,
-                "Repair",
-                centerX,
-                top + 211,
-                0xBBBBBB
-        );
-
         drawRepairSummary(
                 gate,
                 centerX,
-                top + 223
-        );
-
-        drawSectionDivider(
-                centerX,
-                top + 275
+                top + 210
         );
 
         List<String> selectableFactions =
@@ -763,6 +733,19 @@ public class GuiGateManagement extends GuiScreen {
                         .canManagePlayerAccess()
         );
 
+        GuiButton gateModeButton =
+                getButton(
+                        GATE_CONTROL_MODE_BUTTON
+                );
+
+        if (gateModeButton != null) {
+            gateModeButton.displayString =
+                    gate.getGateControlMode()
+                            .getDisplayName();
+            gateModeButton.enabled =
+                    canManage;
+        }
+
         setButtonEnabled(
                 STRUCTURE_BUTTON,
                 canManage
@@ -775,11 +758,6 @@ public class GuiGateManagement extends GuiScreen {
 
         nameField.setEnabled(
                 canManage
-        );
-
-        alignmentField.setEnabled(
-                canManage
-                        && factionAccessEnabled
         );
 
         maxHealthField.setEnabled(
@@ -796,36 +774,37 @@ public class GuiGateManagement extends GuiScreen {
                 partialTicks
         );
 
-
         nameField.drawTextBox();
-
-        alignmentField.drawTextBox();
 
         maxHealthField.drawTextBox();
 
-        /*
-         * Tooltip only over the black faction box itself.
-         */
+        /* Tooltip only over the black faction box itself. */
         drawFactionRequirementTooltip(
                 mouseX,
                 mouseY,
                 centerX,
-                top + 86
+                top + 110
         );
 
         if (!creative) {
             drawCreativeHealthTooltip(
                     mouseX,
                     mouseY,
-                    centerX,
-                    top + 178
+                    centerX - 25,
+                    top + 181
             );
         }
+
         drawControllerAppearanceTooltip(
                 mouseX,
                 mouseY
         );
 
+        drawGateControlModeTooltip(
+                mouseX,
+                mouseY,
+                gate
+        );
     }
 
     @Override
@@ -873,10 +852,6 @@ public class GuiGateManagement extends GuiScreen {
                     .updateCursorCounter();
         }
 
-        if (alignmentField != null) {
-            alignmentField
-                    .updateCursorCounter();
-        }
 
         if (maxHealthField != null) {
             maxHealthField
@@ -1008,17 +983,6 @@ public class GuiGateManagement extends GuiScreen {
                 return;
             }
 
-            if (alignmentField != null
-                    && alignmentField.isFocused()) {
-
-                commitAlignmentField();
-
-                alignmentField.setFocused(
-                        false
-                );
-
-                return;
-            }
 
             if (maxHealthField != null
                     && maxHealthField.isFocused()) {
@@ -1035,11 +999,6 @@ public class GuiGateManagement extends GuiScreen {
 
         if ((nameField != null
                 && nameField.textboxKeyTyped(
-                typedChar,
-                keyCode
-        ))
-                || (alignmentField != null
-                && alignmentField.textboxKeyTyped(
                 typedChar,
                 keyCode
         ))
@@ -1076,11 +1035,6 @@ public class GuiGateManagement extends GuiScreen {
 
         boolean nameWasFocused =
                 nameField.isFocused();
-
-        boolean alignmentWasFocused =
-                alignmentField
-                        .isFocused();
-
         boolean maxHealthWasFocused =
                 maxHealthField
                         .isFocused();
@@ -1090,13 +1044,6 @@ public class GuiGateManagement extends GuiScreen {
                 mouseY,
                 mouseButton
         );
-
-        alignmentField.mouseClicked(
-                mouseX,
-                mouseY,
-                mouseButton
-        );
-
         maxHealthField.mouseClicked(
                 mouseX,
                 mouseY,
@@ -1109,14 +1056,6 @@ public class GuiGateManagement extends GuiScreen {
 
             commitNameField();
         }
-
-        if (alignmentWasFocused
-                && !alignmentField
-                .isFocused()) {
-
-            commitAlignmentField();
-        }
-
         if (maxHealthWasFocused
                 && !maxHealthField
                 .isFocused()) {
@@ -1135,8 +1074,6 @@ public class GuiGateManagement extends GuiScreen {
     public void onGuiClosed() {
         if (!structurePage) {
             commitNameField();
-
-            commitAlignmentField();
 
             commitMaxHealthField();
         }
@@ -1477,8 +1414,6 @@ public class GuiGateManagement extends GuiScreen {
     private boolean isManagementTextFieldFocused() {
         return nameField != null
                 && nameField.isFocused()
-                || alignmentField != null
-                && alignmentField.isFocused()
                 || maxHealthField != null
                 && maxHealthField.isFocused();
     }
@@ -2232,34 +2167,6 @@ public class GuiGateManagement extends GuiScreen {
         );
     }
 
-    private void commitAlignmentField() {
-        if (alignmentField == null
-                || !GateManagementClientContext
-                .canManage()) {
-            return;
-        }
-
-        int value =
-                parseInteger(
-                        alignmentField.getText()
-                );
-
-        TileEntitySiegeGate gate =
-                getGate();
-
-        if (gate != null
-                && value
-                == gate.getRequiredAlignment()) {
-            return;
-        }
-
-        sendAction(
-                GateManagementActionPacket.SET_ALIGNMENT,
-                value,
-                ""
-        );
-    }
-
     private void commitMaxHealthField() {
         if (maxHealthField == null
                 || mc.thePlayer == null
@@ -2589,6 +2496,57 @@ public class GuiGateManagement extends GuiScreen {
         );
     }
 
+    private void drawGateControlModeTooltip(
+            int mouseX,
+            int mouseY,
+            TileEntitySiegeGate gate
+    ) {
+        GuiButton button =
+                getButton(
+                        GATE_CONTROL_MODE_BUTTON
+                );
+
+        if (button == null
+                || gate == null
+                || mouseX < button.xPosition
+                || mouseX >= button.xPosition + button.width
+                || mouseY < button.yPosition
+                || mouseY >= button.yPosition + button.height) {
+
+            return;
+        }
+
+        List<String> tooltip =
+                new ArrayList<String>();
+
+        if (gate.getGateControlMode()
+                == GateControlMode.AUTOMATIC) {
+            tooltip.add(
+                    "Automatic: opens normally and closes after the normal delay."
+            );
+        } else if (gate.getGateControlMode()
+                == GateControlMode.LOCKED_CLOSED) {
+            tooltip.add(
+                    "Locked Closed: stays shut until this mode is changed."
+            );
+        } else {
+            tooltip.add(
+                    "Held Open: opens normally and remains open indefinitely."
+            );
+        }
+
+        tooltip.add(
+                "A breached gate ignores this mode until it is repaired."
+        );
+
+        drawHoveringText(
+                tooltip,
+                mouseX,
+                mouseY,
+                fontRendererObj
+        );
+    }
+
     private void updateRepairButton(
             TileEntitySiegeGate gate
     ) {
@@ -2626,7 +2584,7 @@ public class GuiGateManagement extends GuiScreen {
         }
 
         repairButton.displayString =
-                "Begin Repair";
+                "Repair";
 
         repairButton.enabled =
                 true;

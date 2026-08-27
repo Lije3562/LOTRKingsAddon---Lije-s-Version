@@ -16,6 +16,7 @@ import com.enovak.lotrmoremobs.siege.gate.GatePartData;
 import com.enovak.lotrmoremobs.siege.gate.GatePrototype;
 import com.enovak.lotrmoremobs.siege.gate.GateRegistry;
 import com.enovak.lotrmoremobs.siege.gate.GateState;
+import com.enovak.lotrmoremobs.siege.gate.GateControlMode;
 import com.enovak.lotrmoremobs.siege.gate.GateStructureValidator;
 import com.enovak.lotrmoremobs.siege.gate.SiegeGateOwnershipData;
 import com.enovak.lotrmoremobs.siege.network.SiegeNetwork;
@@ -136,6 +137,7 @@ public class TileEntitySiegeGate extends TileEntity {
 
     private static final String NBT_GATE_UUID = "GateUUID";
     private static final String NBT_GATE_STATE = "GateState";
+    private static final String NBT_GATE_CONTROL_MODE = "GateControlMode";
     private static final String NBT_GATE_STATE_START_TICK =
             "GateStateStartTick";
     private static final String NBT_CURRENT_HEALTH = "CurrentHealth";
@@ -198,6 +200,7 @@ public class TileEntitySiegeGate extends TileEntity {
 
     private UUID gateUuid;
     private GateState gateState = GateState.CLOSED;
+    private GateControlMode gateControlMode = GateControlMode.AUTOMATIC;
     private long gateStateStartTick;
     private boolean gateStateTimingPresent;
     private int currentHealth = getConfiguredDefaultMaxHealth();
@@ -333,6 +336,7 @@ public class TileEntitySiegeGate extends TileEntity {
             nbt.setString(NBT_GATE_UUID, persistentUuid.toString());
         }
         nbt.setString(NBT_GATE_STATE, gateState.name());
+        nbt.setString(NBT_GATE_CONTROL_MODE, gateControlMode.name());
         nbt.setLong(NBT_GATE_STATE_START_TICK, gateStateStartTick);
         nbt.setInteger(NBT_CURRENT_HEALTH, currentHealth);
         nbt.setInteger(NBT_MAX_HEALTH, maxHealth);
@@ -352,6 +356,9 @@ public class TileEntitySiegeGate extends TileEntity {
         ensureGateUuid();
 
         gateState = GateState.fromSerializedName(nbt.getString(NBT_GATE_STATE));
+        gateControlMode = GateControlMode.fromSerializedName(
+                nbt.getString(NBT_GATE_CONTROL_MODE)
+        );
         gateStateTimingPresent = nbt.hasKey(
                 NBT_GATE_STATE_START_TICK,
                 TAG_LONG
@@ -371,6 +378,7 @@ public class TileEntitySiegeGate extends TileEntity {
     public Packet getDescriptionPacket() {
         NBTTagCompound syncData = new NBTTagCompound();
         syncData.setString(NBT_GATE_STATE, gateState.name());
+        syncData.setString(NBT_GATE_CONTROL_MODE, gateControlMode.name());
         syncData.setLong(NBT_GATE_STATE_START_TICK, gateStateStartTick);
         syncData.setInteger(NBT_CURRENT_HEALTH, currentHealth);
         syncData.setInteger(NBT_MAX_HEALTH, maxHealth);
@@ -398,6 +406,9 @@ public class TileEntitySiegeGate extends TileEntity {
         NBTTagCompound syncData = packet.func_148857_g();
         gateState = GateState.fromSerializedName(
                 syncData.getString(NBT_GATE_STATE)
+        );
+        gateControlMode = GateControlMode.fromSerializedName(
+                syncData.getString(NBT_GATE_CONTROL_MODE)
         );
         readSynchronizedStateTiming(syncData);
         readHealthFromNBT(syncData);
@@ -461,6 +472,52 @@ public class TileEntitySiegeGate extends TileEntity {
         return gateState;
     }
 
+    public GateControlMode getGateControlMode() {
+        return gateControlMode;
+    }
+
+    public boolean setGateControlMode(
+            EntityPlayerMP player,
+            GateControlMode requestedMode
+    ) {
+        if (requestedMode == null
+                || worldObj == null
+                || worldObj.isRemote
+                || gateStructureQuarantined
+                || persistentOwnershipSuspended
+                || isPersistentGateMutationLocked()
+                || !canManage(player)) {
+
+            return false;
+        }
+
+        if (gateControlMode == requestedMode) {
+            return true;
+        }
+
+        gateControlMode = requestedMode;
+
+        /*
+         * Switching back to Automatic while already open should begin a fresh
+         * normal hold period instead of immediately closing because the OPEN
+         * state's original timer may be minutes old.
+         */
+        if (requestedMode == GateControlMode.AUTOMATIC
+                && gateState == GateState.OPEN) {
+
+            gateStateStartTick = worldObj.getTotalWorldTime();
+            gateStateTimingPresent = true;
+            SiegeNetwork.syncGateState(this);
+        }
+
+        enforceGateControlMode();
+
+        markDirty();
+        SiegeNetwork.syncGateAccess(this);
+
+        return true;
+    }
+
     public long getGateStateStartTick() {
         return gateStateStartTick;
     }
@@ -522,6 +579,17 @@ public class TileEntitySiegeGate extends TileEntity {
                 || isPersistentGateMutationLocked()) {
             return false;
         }
+
+        if (gateState == GateState.CLOSED
+                && gateControlMode == GateControlMode.LOCKED_CLOSED) {
+            return false;
+        }
+
+        if (gateState == GateState.OPEN
+                && gateControlMode == GateControlMode.HELD_OPEN) {
+            return false;
+        }
+
         if (!hasCompleteHingeConfiguration()) {
             if (gateState == GateState.CLOSED) {
                 return setGateState(GateState.OPEN);
@@ -545,6 +613,27 @@ public class TileEntitySiegeGate extends TileEntity {
             GateAccess.deny(player, this);
             return false;
         }
+
+        if (gateState == GateState.CLOSED
+                && gateControlMode == GateControlMode.LOCKED_CLOSED) {
+            player.addChatMessage(
+                    new net.minecraft.util.ChatComponentText(
+                            "This Siege Gate is locked closed."
+                    )
+            );
+            return false;
+        }
+
+        if (gateState == GateState.OPEN
+                && gateControlMode == GateControlMode.HELD_OPEN) {
+            player.addChatMessage(
+                    new net.minecraft.util.ChatComponentText(
+                            "This Siege Gate is being held open."
+                    )
+            );
+            return false;
+        }
+
         return toggleOpenState();
     }
 
@@ -563,17 +652,27 @@ public class TileEntitySiegeGate extends TileEntity {
 
         updateRepairJob();
         updateRamReservation();
+
         if (!hasCompleteHingeConfiguration()) {
+            enforceGateControlMode();
             return;
         }
 
         long elapsed = getElapsedStateTicks(worldObj.getTotalWorldTime());
-        if (gateState == GateState.OPENING
+        if (gateState == GateState.CLOSED) {
+            if (gateControlMode == GateControlMode.HELD_OPEN) {
+                beginGateState(GateState.OPENING);
+            }
+        } else if (gateState == GateState.OPENING
                 && elapsed >= GateAnimation.OPENING_DURATION_TICKS) {
             beginGateState(GateState.OPEN);
-        } else if (gateState == GateState.OPEN
-                && elapsed >= GateAnimation.AUTO_CLOSE_DELAY_TICKS) {
-            beginGateState(GateState.CLOSING);
+        } else if (gateState == GateState.OPEN) {
+            if (gateControlMode == GateControlMode.LOCKED_CLOSED
+                    || (gateControlMode == GateControlMode.AUTOMATIC
+                    && elapsed >= GateAnimation.AUTO_CLOSE_DELAY_TICKS)) {
+
+                beginGateState(GateState.CLOSING);
+            }
         } else if (gateState == GateState.CLOSING
                 && elapsed >= GateAnimation.CLOSING_DURATION_TICKS) {
             relocateEntitiesBeforeClosing();
@@ -1938,6 +2037,7 @@ public class TileEntitySiegeGate extends TileEntity {
             String synchronizedFaction,
             int synchronizedRequiredAlignment,
             boolean synchronizedFactionAccessEnabled,
+            int synchronizedGateControlMode,
             Collection<UUID> synchronizedEditors,
             Collection<UUID> synchronizedOperators,
             Collection<UUID> synchronizedWhitelist
@@ -1960,6 +2060,15 @@ public class TileEntitySiegeGate extends TileEntity {
         );
         factionAccessEnabled =
                 synchronizedFactionAccessEnabled;
+
+        GateControlMode synchronizedMode =
+                GateControlMode.fromNetworkId(
+                        synchronizedGateControlMode
+                );
+        gateControlMode = synchronizedMode == null
+                ? GateControlMode.AUTOMATIC
+                : synchronizedMode;
+
         replaceUuidSet(editorUuids, synchronizedEditors);
         replaceUuidSet(operatorUuids, synchronizedOperators);
         replaceUuidSet(accessWhitelistUuids, synchronizedWhitelist);
@@ -3622,6 +3731,33 @@ public class TileEntitySiegeGate extends TileEntity {
                 maxY,
                 maxZ
         );
+    }
+
+    private void enforceGateControlMode() {
+        if (worldObj == null
+                || worldObj.isRemote
+                || gateState == GateState.BREACHED) {
+
+            return;
+        }
+
+        if (gateControlMode == GateControlMode.LOCKED_CLOSED) {
+            if (gateState == GateState.OPEN) {
+                if (hasCompleteHingeConfiguration()) {
+                    beginGateState(GateState.CLOSING);
+                } else {
+                    setGateState(GateState.CLOSED);
+                }
+            }
+        } else if (gateControlMode == GateControlMode.HELD_OPEN) {
+            if (gateState == GateState.CLOSED) {
+                if (hasCompleteHingeConfiguration()) {
+                    beginGateState(GateState.OPENING);
+                } else {
+                    setGateState(GateState.OPEN);
+                }
+            }
+        }
     }
 
     private boolean beginGateState(

@@ -43,6 +43,7 @@ public final class GateAccessClientPacketHandler {
                     packet.getFactionName(),
                     packet.getRequiredAlignment(),
                     packet.isFactionAccessEnabled(),
+                    packet.getGateControlMode(),
                     packet.getEditors(),
                     packet.getOperators(),
                     packet.getWhitelist()

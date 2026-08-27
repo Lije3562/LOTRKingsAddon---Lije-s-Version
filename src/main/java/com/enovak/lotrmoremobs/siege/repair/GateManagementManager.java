@@ -7,6 +7,7 @@ import com.enovak.lotrmoremobs.siege.network.GateManagementOpenPacket;
 import com.enovak.lotrmoremobs.siege.network.SiegeNetwork;
 import com.enovak.lotrmoremobs.siege.network.SiegeRequestLimiter;
 import com.enovak.lotrmoremobs.siege.management.GateInspectionSessionManager;
+import com.enovak.lotrmoremobs.siege.gate.GateControlMode;
 import com.enovak.lotrmoremobs.siege.edit.GateEditSession;
 import com.enovak.lotrmoremobs.siege.edit.GateEditSessionManager;
 import com.enovak.lotrmoremobs.siege.network.GateEditDraftSnapshotPacket;
@@ -320,6 +321,24 @@ public final class GateManagementManager {
                 sendMessage(
                         player,
                         "Faction access could not be updated."
+                );
+            }
+
+        } else if (request.action
+                == GateManagementActionPacket.SET_GATE_CONTROL_MODE) {
+
+            GateControlMode requestedMode =
+                    GateControlMode.fromNetworkId(
+                            request.value
+                    );
+
+            if (!gate.setGateControlMode(
+                    player,
+                    requestedMode
+            )) {
+                sendMessage(
+                        player,
+                        "Gate control mode could not be updated."
                 );
             }
 
