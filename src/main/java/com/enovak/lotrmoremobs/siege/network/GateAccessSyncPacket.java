@@ -102,6 +102,14 @@ public class GateAccessSyncPacket
         Set<UUID> allAccessEntries =
                 new LinkedHashSet<UUID>();
 
+        /*
+         * Include the owner in the display-name snapshot so the Player Access
+         * screen can pin the owner as its first, read-only row.
+         */
+        if (ownerUuid != null) {
+            allAccessEntries.add(ownerUuid);
+        }
+
         allAccessEntries.addAll(
                 editors
         );
@@ -455,7 +463,7 @@ public class GateAccessSyncPacket
 
         if (count
                 > TileEntitySiegeGate
-                .MAX_ACCESS_ENTRIES) {
+                .MAX_ACCESS_ENTRIES + 1) {
 
             throw new IllegalArgumentException(
                     "Too many access names"
@@ -510,7 +518,7 @@ public class GateAccessSyncPacket
             if (entry.getKey() != null
                     && valid.size()
                     < TileEntitySiegeGate
-                    .MAX_ACCESS_ENTRIES) {
+                    .MAX_ACCESS_ENTRIES + 1) {
 
                 valid.add(
                         entry

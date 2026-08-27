@@ -166,7 +166,7 @@ public class GuiGateManagement extends GuiScreen {
         );
 
         /*
-         * Whitelist + Required Alignment share one row.
+         * Player Access + Required Alignment share one row.
          */
         buttonList.add(
                 new GuiButton(
@@ -175,7 +175,7 @@ public class GuiGateManagement extends GuiScreen {
                         top + 128,
                         112,
                         20,
-                        "Whitelist"
+                        "Player Access"
                 )
         );
 
@@ -755,11 +755,17 @@ public class GuiGateManagement extends GuiScreen {
 
         setButtonEnabled(
                 PLAYER_ACCESS_BUTTON,
-                canManage
+                GateManagementClientContext
+                        .canManagePlayerAccess()
         );
 
         setButtonEnabled(
                 STRUCTURE_BUTTON,
+                canManage
+        );
+
+        setButtonEnabled(
+                CONTROLLER_APPEARANCE_BUTTON,
                 canManage
         );
 

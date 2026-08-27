@@ -1407,18 +1407,36 @@ public class TileEntitySiegeGate extends TileEntity {
         if (GateAccess.isAdministrativePlayer(player)) {
             return true;
         }
+
         UUID playerUuid = player.getUniqueID();
-        if (ownerUuid == null) {
+
+        /*
+         * Owner and Editor are trusted gate roles. Both may operate/repair the
+         * gate regardless of the selected faction alignment requirement.
+         */
+        if ((ownerUuid != null && ownerUuid.equals(playerUuid))
+                || editorUuids.contains(playerUuid)) {
             return true;
         }
-        if (ownerUuid.equals(playerUuid)
-                || editorUuids.contains(playerUuid)
-                || operatorUuids.contains(playerUuid)
-                || accessWhitelistUuids.contains(playerUuid)) {
+
+        /*
+         * Explicit Access is the player-specific override for operation.
+         * Legacy Operator entries are treated as Access so old saves keep the
+         * same intent without granting broader configuration authority.
+         */
+        if (accessWhitelistUuids.contains(playerUuid)
+                || operatorUuids.contains(playerUuid)) {
             return true;
         }
-        return gateFaction != null
-                && LOTRLevelData.getData(player).getAlignment(gateFaction)
+
+        /*
+         * A neutral gate has no faction restriction, so it is public.
+         */
+        if (gateFaction == null) {
+            return true;
+        }
+
+        return LOTRLevelData.getData(player).getAlignment(gateFaction)
                 >= requiredAlignment;
     }
 
@@ -1433,6 +1451,19 @@ public class TileEntitySiegeGate extends TileEntity {
         return ownerUuid != null
                 && (ownerUuid.equals(playerUuid)
                 || editorUuids.contains(playerUuid));
+    }
+
+    public boolean canManagePlayerAccess(EntityPlayerMP player) {
+        return canManage(player);
+    }
+
+    public boolean canManageEditors(EntityPlayerMP player) {
+        if (player == null) {
+            return false;
+        }
+        return GateAccess.isAdministrativePlayer(player)
+                || (ownerUuid != null
+                && ownerUuid.equals(player.getUniqueID()));
     }
 
     public boolean canDismantle(EntityPlayerMP player) {
@@ -1457,6 +1488,22 @@ public class TileEntitySiegeGate extends TileEntity {
             return false;
         }
         ownerUuid = creatorUuid;
+
+        /*
+         * New gates inherit the creator's active LOTR pledge as their default
+         * faction. Existing/explicit faction choices are never overwritten.
+         */
+        if (gateFaction == null) {
+            LOTRFaction pledgedFaction =
+                    LOTRLevelData.getData(creatorUuid).getPledgeFaction();
+            if (pledgedFaction != null
+                    && LOTRFaction.getPlayableAlignmentFactions().contains(
+                    pledgedFaction
+            )) {
+                gateFaction = pledgedFaction;
+            }
+        }
+
         onAccessStateChanged();
         return true;
     }
@@ -1550,6 +1597,9 @@ public class TileEntitySiegeGate extends TileEntity {
             EntityPlayerMP player,
             UUID targetUuid
     ) {
+        if (!canManageEditors(player)) {
+            return false;
+        }
         return toggleAccessEntry(player, targetUuid, editorUuids);
     }
 
@@ -1577,7 +1627,7 @@ public class TileEntitySiegeGate extends TileEntity {
             int accessLevel
     ) {
         if (isPersistentGateMutationLocked()
-                || !canManage(player)
+                || !canManagePlayerAccess(player)
                 || targetUuid == null
                 || targetUuid.equals(
                 ownerUuid
@@ -1587,6 +1637,16 @@ public class TileEntitySiegeGate extends TileEntity {
                 && accessLevel
                 != PLAYER_ACCESS_LEVEL_EDITOR)) {
 
+            return false;
+        }
+
+        /*
+         * Editors may manage ordinary Access entries, but only the Owner or a
+         * server administrator may create, remove, or demote Editors.
+         */
+        if ((accessLevel == PLAYER_ACCESS_LEVEL_EDITOR
+                || editorUuids.contains(targetUuid))
+                && !canManageEditors(player)) {
             return false;
         }
 
@@ -1667,12 +1727,17 @@ public class TileEntitySiegeGate extends TileEntity {
             UUID targetUuid
     ) {
         if (isPersistentGateMutationLocked()
-                || !canManage(player)
+                || !canManagePlayerAccess(player)
                 || targetUuid == null
                 || targetUuid.equals(
                 ownerUuid
         )) {
 
+            return false;
+        }
+
+        if (editorUuids.contains(targetUuid)
+                && !canManageEditors(player)) {
             return false;
         }
 
@@ -4143,7 +4208,7 @@ public class TileEntitySiegeGate extends TileEntity {
             UUID targetUuid,
             Set<UUID> entries
     ) {
-        if (isPersistentGateMutationLocked() || !canManage(player)
+        if (isPersistentGateMutationLocked() || !canManagePlayerAccess(player)
                 || targetUuid == null
                 || targetUuid.equals(ownerUuid)) {
             return false;

@@ -13,6 +13,7 @@ public class GateManagementOpenPacket implements IMessage {
     private int y;
     private int z;
     private boolean canManage;
+    private boolean canManagePlayerAccess;
     private boolean canAdminister;
 
     public GateManagementOpenPacket() {
@@ -24,6 +25,7 @@ public class GateManagementOpenPacket implements IMessage {
             int y,
             int z,
             boolean canManage,
+            boolean canManagePlayerAccess,
             boolean canAdminister
     ) {
         this.dimensionId = dimensionId;
@@ -31,6 +33,7 @@ public class GateManagementOpenPacket implements IMessage {
         this.y = y;
         this.z = z;
         this.canManage = canManage;
+        this.canManagePlayerAccess = canManagePlayerAccess;
         this.canAdminister = canAdminister;
     }
 
@@ -41,6 +44,7 @@ public class GateManagementOpenPacket implements IMessage {
         y = buffer.readInt();
         z = buffer.readInt();
         canManage = buffer.readBoolean();
+        canManagePlayerAccess = buffer.readBoolean();
         canAdminister = buffer.readBoolean();
     }
 
@@ -51,6 +55,7 @@ public class GateManagementOpenPacket implements IMessage {
         buffer.writeInt(y);
         buffer.writeInt(z);
         buffer.writeBoolean(canManage);
+        buffer.writeBoolean(canManagePlayerAccess);
         buffer.writeBoolean(canAdminister);
     }
 
@@ -72,6 +77,10 @@ public class GateManagementOpenPacket implements IMessage {
 
     public boolean canManage() {
         return canManage;
+    }
+
+    public boolean canManagePlayerAccess() {
+        return canManagePlayerAccess;
     }
 
     public boolean canAdminister() {

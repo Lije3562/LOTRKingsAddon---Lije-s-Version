@@ -18,6 +18,7 @@ public final class GateManagementClientContext {
     private static int controllerZ;
 
     private static boolean canManage;
+    private static boolean canManagePlayerAccess;
     private static boolean canAdminister;
 
     private static boolean active;
@@ -83,6 +84,9 @@ public final class GateManagementClientContext {
 
         canManage =
                 packet.canManage();
+
+        canManagePlayerAccess =
+                packet.canManagePlayerAccess();
 
         canAdminister =
                 packet.canAdminister();
@@ -213,6 +217,10 @@ public final class GateManagementClientContext {
 
     public static boolean canManage() {
         return canManage;
+    }
+
+    public static boolean canManagePlayerAccess() {
+        return canManagePlayerAccess;
     }
 
     public static boolean canAdminister() {

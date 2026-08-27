@@ -48,11 +48,11 @@ public final class GateManagementManager {
         if (!isNearbyFinalizedGate(player, controller)) {
             return;
         }
-        if (!controller.canRepair(player)
-                && !controller.canManage(player)) {
-            GateAccess.deny(player, controller);
-            return;
-        }
+        /*
+         * Gate Management is an inspection surface as well as a configuration
+         * surface. Any nearby player may open it; individual controls remain
+         * role-gated and every mutation is still revalidated server-side.
+         */
         SiegeNetwork.syncGateHealth(controller);
         SiegeNetwork.syncGateRepair(controller);
         SiegeNetwork.syncGateAccess(controller);
@@ -63,6 +63,7 @@ public final class GateManagementManager {
                         controller.yCoord,
                         controller.zCoord,
                         controller.canManage(player),
+                        controller.canManagePlayerAccess(player),
                         GateAccess.isAdministrativePlayer(player)
                 ),
                 player
@@ -387,6 +388,14 @@ public final class GateManagementManager {
             String target,
             int level
     ) {
+        if (!gate.canManagePlayerAccess(player)) {
+            sendMessage(
+                    player,
+                    "Only the gate owner, an Editor, or a server administrator can manage Player Access."
+            );
+            return;
+        }
+
         UUID targetUuid =
                 resolvePlayerUuid(
                         target
@@ -398,6 +407,16 @@ public final class GateManagementManager {
                     "Player not found."
             );
 
+            return;
+        }
+
+        if ((level == GateManagementActionPacket.ACCESS_LEVEL_EDITOR
+                || gate.getEditorUuids().contains(targetUuid))
+                && !gate.canManageEditors(player)) {
+            sendMessage(
+                    player,
+                    "Only the gate owner or a server administrator can change Editor roles."
+            );
             return;
         }
 
@@ -421,6 +440,14 @@ public final class GateManagementManager {
             TileEntitySiegeGate gate,
             String target
     ) {
+        if (!gate.canManagePlayerAccess(player)) {
+            sendMessage(
+                    player,
+                    "Only the gate owner, an Editor, or a server administrator can manage Player Access."
+            );
+            return;
+        }
+
         UUID targetUuid =
                 resolvePlayerUuid(
                         target
@@ -432,6 +459,15 @@ public final class GateManagementManager {
                     "Player not found."
             );
 
+            return;
+        }
+
+        if (gate.getEditorUuids().contains(targetUuid)
+                && !gate.canManageEditors(player)) {
+            sendMessage(
+                    player,
+                    "Only the gate owner or a server administrator can remove Editors."
+            );
             return;
         }
 

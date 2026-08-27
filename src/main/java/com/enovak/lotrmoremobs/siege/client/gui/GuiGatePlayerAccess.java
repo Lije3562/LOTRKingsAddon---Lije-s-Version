@@ -24,7 +24,21 @@ public class GuiGatePlayerAccess
         extends GuiScreen {
 
     private static final int VISIBLE_ROWS =
-            6;
+            10;
+
+    private static final int ROW_HEIGHT =
+            18;
+
+    private static final int ROW_SPACING =
+            19;
+
+    private static final int ROWS_TOP_OFFSET =
+            30;
+
+    private static final int BACK_TOP_OFFSET =
+            ROWS_TOP_OFFSET
+                    + VISIBLE_ROWS * ROW_SPACING
+                    + 8;
 
     private static final int BACK_BUTTON =
             1;
@@ -50,6 +64,9 @@ public class GuiGatePlayerAccess
     private final boolean[] rowEditors =
             new boolean[VISIBLE_ROWS];
 
+    private final boolean[] rowOwners =
+            new boolean[VISIBLE_ROWS];
+
     private int scrollOffset;
 
     private long observedAccessGeneration =
@@ -69,6 +86,9 @@ public class GuiGatePlayerAccess
                     null;
 
             rowEditors[i] =
+                    false;
+
+            rowOwners[i] =
                     false;
         }
 
@@ -91,13 +111,13 @@ public class GuiGatePlayerAccess
 
         int top =
                 Math.max(
-                        12,
-                        height / 2 - 105
+                        0,
+                        height / 2 - 120
                 );
 
         if (gate == null
                 || !GateManagementClientContext
-                .canManage()) {
+                .canManagePlayerAccess()) {
 
             buttonList.add(
                     new GuiButton(
@@ -164,8 +184,8 @@ public class GuiGatePlayerAccess
 
             int y =
                     top
-                            + 38
-                            + row * 25;
+                            + ROWS_TOP_OFFSET
+                            + row * ROW_SPACING;
 
             GuiTextField field =
                     new GuiTextField(
@@ -173,16 +193,33 @@ public class GuiGatePlayerAccess
                             fieldX,
                             y,
                             fieldWidth,
-                            20
+                            ROW_HEIGHT
                     );
 
             field.setMaxStringLength(
                     64
             );
 
-            int entryIndex =
-                    scrollOffset
-                            + row;
+            boolean ownerPinned =
+                    !entries.isEmpty()
+                            && entries.get(0).owner;
+
+            int entryIndex;
+            if (ownerPinned
+                    && row == 0) {
+                entryIndex =
+                        0;
+            } else if (ownerPinned) {
+                entryIndex =
+                        1
+                                + scrollOffset
+                                + row
+                                - 1;
+            } else {
+                entryIndex =
+                        scrollOffset
+                                + row;
+            }
 
             if (entryIndex
                     < entries.size()) {
@@ -198,6 +235,9 @@ public class GuiGatePlayerAccess
                 rowEditors[row] =
                         entry.editor;
 
+                rowOwners[row] =
+                        entry.owner;
+
                 field.setText(
                         entry.displayName
                 );
@@ -210,47 +250,73 @@ public class GuiGatePlayerAccess
                         false
                 );
 
-                buttonList.add(
-                        new GuiButton(
-                                ROW_ACTION_BASE
-                                        + row,
-                                actionX,
-                                y,
-                                actionWidth,
-                                20,
-                                entry.editor
-                                        ? "Editor"
-                                        : "Access"
-                        )
-                );
+                boolean canEditRoles =
+                        canManageEditors(
+                                gate
+                        );
 
-                buttonList.add(
-                        new GuiButton(
-                                ROW_REMOVE_BASE
-                                        + row,
-                                removeX,
-                                y,
-                                20,
-                                20,
-                                "X"
-                        )
-                );
+                if (!entry.owner
+                        && canEditRoles) {
+                    buttonList.add(
+                            new GuiButton(
+                                    ROW_ACTION_BASE
+                                            + row,
+                                    actionX,
+                                    y,
+                                    actionWidth,
+                                    ROW_HEIGHT,
+                                    entry.editor
+                                            ? "Editor"
+                                            : "Access"
+                            )
+                    );
+                }
+
+                /*
+                 * Editors may remove ordinary Access entries, but only the
+                 * Owner/Admin may remove or change Editor entries.
+                 */
+                if (!entry.owner
+                        && (canEditRoles
+                        || !entry.editor)) {
+                    buttonList.add(
+                            new GuiButton(
+                                    ROW_REMOVE_BASE
+                                            + row,
+                                    removeX,
+                                    y,
+                                    20,
+                                    ROW_HEIGHT,
+                                    "X"
+                            )
+                    );
+                }
 
             } else {
                 field.setText(
                         ""
                 );
 
-                buttonList.add(
+                GuiButton addButton =
                         new GuiButton(
                                 ROW_ACTION_BASE
                                         + row,
                                 actionX,
                                 y,
                                 actionWidth,
-                                20,
+                                ROW_HEIGHT,
                                 "Add"
-                        )
+                        );
+
+                /*
+                 * Keep blank rows visually clean. The Add button appears as
+                 * soon as the adjacent name field contains text.
+                 */
+                addButton.visible =
+                        false;
+
+                buttonList.add(
+                        addButton
                 );
             }
 
@@ -266,9 +332,9 @@ public class GuiGatePlayerAccess
                             left
                                     + panelWidth
                                     + 4,
-                            top + 38,
+                            top + ROWS_TOP_OFFSET,
                             20,
-                            20,
+                            ROW_HEIGHT,
                             "^"
                     )
             );
@@ -280,11 +346,11 @@ public class GuiGatePlayerAccess
                                     + panelWidth
                                     + 4,
                             top
-                                    + 38
+                                    + ROWS_TOP_OFFSET
                                     + (VISIBLE_ROWS - 1)
-                                    * 25,
+                                    * ROW_SPACING,
                             20,
-                            20,
+                            ROW_HEIGHT,
                             "v"
                     )
             );
@@ -305,7 +371,7 @@ public class GuiGatePlayerAccess
                 new GuiButton(
                         BACK_BUTTON,
                         centerX - 55,
-                        top + 198,
+                        top + BACK_TOP_OFFSET,
                         110,
                         20,
                         "Back"
@@ -326,13 +392,13 @@ public class GuiGatePlayerAccess
 
         int top =
                 Math.max(
-                        12,
-                        height / 2 - 105
+                        0,
+                        height / 2 - 120
                 );
 
         drawCenteredString(
                 fontRendererObj,
-                "Whitelist",
+                "Player Access",
                 centerX,
                 top,
                 0xFFFFFF
@@ -340,7 +406,7 @@ public class GuiGatePlayerAccess
 
         drawCenteredString(
                 fontRendererObj,
-                "Access = use    Editor = configure",
+                "Access = operate/repair    Editor = operate/configure",
                 centerX,
                 top + 15,
                 0xAAAAAA
@@ -365,15 +431,35 @@ public class GuiGatePlayerAccess
 
             int y =
                     top
-                            + 44
-                            + row * 25;
+                            + ROWS_TOP_OFFSET
+                            + 5
+                            + row * ROW_SPACING;
+
+            boolean ownerPinned =
+                    rowOwners.length > 0
+                            && rowOwners[0];
+
+            int displayIndex;
+            if (ownerPinned
+                    && row == 0) {
+                displayIndex =
+                        1;
+            } else if (ownerPinned) {
+                displayIndex =
+                        scrollOffset
+                                + row
+                                + 1;
+            } else {
+                displayIndex =
+                        scrollOffset
+                                + row
+                                + 1;
+            }
 
             drawString(
                     fontRendererObj,
                     Integer.toString(
-                            scrollOffset
-                                    + row
-                                    + 1
+                            displayIndex
                     )
                             + ".",
                     centerX
@@ -381,6 +467,48 @@ public class GuiGatePlayerAccess
                     y,
                     0xBBBBBB
             );
+        }
+
+        updateAddButtonVisibility();
+
+        int left =
+                centerX - 147;
+
+        int actionX =
+                left + 20 + 174 + 4;
+
+        boolean canEditRoles =
+                canManageEditors(
+                        gate
+                );
+
+        for (int row = 0;
+             row < fields.size();
+             ++row) {
+            if (rowUuids[row] == null) {
+                continue;
+            }
+            if (rowOwners[row]
+                    || !canEditRoles) {
+                String role =
+                        rowOwners[row]
+                                ? "Owner"
+                                : rowEditors[row]
+                                ? "Editor"
+                                : "Access";
+                int y =
+                        top
+                                + ROWS_TOP_OFFSET
+                                + 5
+                                + row * ROW_SPACING;
+                drawString(
+                        fontRendererObj,
+                        role,
+                        actionX + 8,
+                        y,
+                        0xBBBBBB
+                );
+            }
         }
 
         super.drawScreen(
@@ -626,6 +754,8 @@ public class GuiGatePlayerAccess
             field.updateCursorCounter();
         }
 
+        updateAddButtonVisibility();
+
         long generation =
                 GateManagementClientContext
                         .getAccessGeneration();
@@ -672,8 +802,29 @@ public class GuiGatePlayerAccess
         List<AccessEntry> result =
                 new ArrayList<AccessEntry>();
 
+        List<AccessEntry> nonOwners =
+                new ArrayList<AccessEntry>();
+
         Set<UUID> seen =
                 new HashSet<UUID>();
+
+        UUID ownerUuid =
+                gate.getOwnerUuid();
+
+        if (ownerUuid != null
+                && seen.add(ownerUuid)) {
+            result.add(
+                    new AccessEntry(
+                            ownerUuid,
+                            false,
+                            true,
+                            GateManagementClientContext
+                                    .getAccessDisplayName(
+                                            ownerUuid
+                                    )
+                    )
+            );
+        }
 
         for (UUID uuid
                 : gate.getEditorUuids()) {
@@ -683,10 +834,11 @@ public class GuiGatePlayerAccess
                     uuid
             )) {
 
-                result.add(
+                nonOwners.add(
                         new AccessEntry(
                                 uuid,
                                 true,
+                                false,
                                 GateManagementClientContext
                                         .getAccessDisplayName(
                                                 uuid
@@ -704,9 +856,10 @@ public class GuiGatePlayerAccess
                     uuid
             )) {
 
-                result.add(
+                nonOwners.add(
                         new AccessEntry(
                                 uuid,
+                                false,
                                 false,
                                 GateManagementClientContext
                                         .getAccessDisplayName(
@@ -726,9 +879,10 @@ public class GuiGatePlayerAccess
                     uuid
             )) {
 
-                result.add(
+                nonOwners.add(
                         new AccessEntry(
                                 uuid,
+                                false,
                                 false,
                                 GateManagementClientContext
                                         .getAccessDisplayName(
@@ -740,7 +894,7 @@ public class GuiGatePlayerAccess
         }
 
         Collections.sort(
-                result,
+                nonOwners,
                 new Comparator<AccessEntry>() {
 
                     @Override
@@ -770,6 +924,10 @@ public class GuiGatePlayerAccess
                                 );
                     }
                 }
+        );
+
+        result.addAll(
+                nonOwners
         );
 
         return result;
@@ -836,6 +994,53 @@ public class GuiGatePlayerAccess
                 );
     }
 
+    private boolean canManageEditors(
+            TileEntitySiegeGate gate
+    ) {
+        if (GateManagementClientContext
+                .canAdminister()) {
+            return true;
+        }
+        return gate != null
+                && mc.thePlayer != null
+                && gate.getOwnerUuid() != null
+                && gate.getOwnerUuid().equals(
+                mc.thePlayer.getUniqueID()
+        );
+    }
+
+    private void updateAddButtonVisibility() {
+        for (int row = 0;
+             row < fields.size();
+             ++row) {
+            if (rowUuids[row] != null) {
+                continue;
+            }
+            setButtonVisible(
+                    ROW_ACTION_BASE + row,
+                    !fields.get(row)
+                            .getText()
+                            .trim()
+                            .isEmpty()
+            );
+        }
+    }
+
+    private void setButtonVisible(
+            int id,
+            boolean visible
+    ) {
+        for (Object object
+                : buttonList) {
+            if (object instanceof GuiButton
+                    && ((GuiButton)object).id == id) {
+                ((GuiButton)object).visible =
+                        visible;
+                return;
+            }
+        }
+    }
+
     private void setButtonEnabled(
             int id,
             boolean enabled
@@ -859,11 +1064,13 @@ public class GuiGatePlayerAccess
 
         private final UUID uuid;
         private final boolean editor;
+        private final boolean owner;
         private final String displayName;
 
         private AccessEntry(
                 UUID uuid,
                 boolean editor,
+                boolean owner,
                 String displayName
         ) {
             this.uuid =
@@ -871,6 +1078,9 @@ public class GuiGatePlayerAccess
 
             this.editor =
                     editor;
+
+            this.owner =
+                    owner;
 
             this.displayName =
                     displayName == null
