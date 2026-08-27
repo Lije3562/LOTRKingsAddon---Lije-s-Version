@@ -1221,6 +1221,10 @@ public final class GateRenderBlockAccess
                 || sourceBlock == Blocks.trapped_chest) {
             RenderOnlyChestTileEntity chest =
                     new RenderOnlyChestTileEntity(
+                            this,
+                            part.getRelativeX(),
+                            part.getRelativeY(),
+                            part.getRelativeZ(),
                             sourceBlock,
                             part.getSourceMetadata()
                     );
@@ -1266,13 +1270,88 @@ public final class GateRenderBlockAccess
         }
     }
 
+    private TileEntityChest getAdjacentRenderChest(
+            int relativeX,
+            int relativeY,
+            int relativeZ,
+            Block expectedBlock
+    ) {
+        PositionKey key =
+                new PositionKey(
+                        relativeX,
+                        relativeY,
+                        relativeZ
+                );
+
+        GatePartData neighborPart =
+                parts.get(
+                        key
+                );
+
+        if (neighborPart == null
+                || neighborPart.getSourceBlock() != expectedBlock
+                || !neighborPart.hasSourceTileEntityNbt()) {
+            return null;
+        }
+
+        /*
+         * A closed double chest may legitimately straddle the two gate leaves,
+         * because both leaves still occupy their original shared plane. Once
+         * detached, never bind a chest to a neighbor on the other leaf: the
+         * halves can rotate apart and must render independently.
+         */
+        if (detached
+                && !neighborPart.getLeaf()
+                .contributesTo(leaf)) {
+            return null;
+        }
+
+        TileEntity tileEntity =
+                renderTileEntities.get(
+                        key
+                );
+
+        if (!(tileEntity instanceof RenderOnlyChestTileEntity)) {
+            tileEntity =
+                    createRenderTileEntity(
+                            neighborPart
+                    );
+
+            if (tileEntity instanceof RenderOnlyChestTileEntity) {
+                renderTileEntities.put(
+                        key,
+                        tileEntity
+                );
+            }
+        }
+
+        if (!(tileEntity instanceof RenderOnlyChestTileEntity)) {
+            return null;
+        }
+
+        RenderOnlyChestTileEntity chest =
+                (RenderOnlyChestTileEntity)tileEntity;
+
+        return chest.getBlockType() == expectedBlock
+                ? chest
+                : null;
+    }
+
     private static final class RenderOnlyChestTileEntity
             extends TileEntityChest {
 
+        private final GateRenderBlockAccess owner;
+        private final int relativeX;
+        private final int relativeY;
+        private final int relativeZ;
         private final Block visualBlock;
         private final int visualMetadata;
 
         private RenderOnlyChestTileEntity(
+                GateRenderBlockAccess owner,
+                int relativeX,
+                int relativeY,
+                int relativeZ,
                 Block visualBlock,
                 int visualMetadata
         ) {
@@ -1282,6 +1361,10 @@ public final class GateRenderBlockAccess
                             : 0
             );
 
+            this.owner = owner;
+            this.relativeX = relativeX;
+            this.relativeY = relativeY;
+            this.relativeZ = relativeZ;
             this.visualBlock = visualBlock;
             this.visualMetadata =
                     Math.max(
@@ -1301,6 +1384,46 @@ public final class GateRenderBlockAccess
         @Override
         public int getBlockMetadata() {
             return visualMetadata;
+        }
+
+        @Override
+        public void checkForAdjacentChests() {
+            /*
+             * The real world cells are Siege Gate Part blocks, so vanilla's
+             * TileEntityChest adjacency lookup cannot see another captured
+             * chest. Resolve neighbors from the gate's captured source map
+             * instead. Closed leaves may still form a native double chest;
+             * detached leaves deliberately ignore opposite-leaf neighbors.
+             */
+            this.adjacentChestChecked = true;
+            this.adjacentChestXNeg =
+                    owner.getAdjacentRenderChest(
+                            relativeX - 1,
+                            relativeY,
+                            relativeZ,
+                            visualBlock
+                    );
+            this.adjacentChestXPos =
+                    owner.getAdjacentRenderChest(
+                            relativeX + 1,
+                            relativeY,
+                            relativeZ,
+                            visualBlock
+                    );
+            this.adjacentChestZNeg =
+                    owner.getAdjacentRenderChest(
+                            relativeX,
+                            relativeY,
+                            relativeZ - 1,
+                            visualBlock
+                    );
+            this.adjacentChestZPos =
+                    owner.getAdjacentRenderChest(
+                            relativeX,
+                            relativeY,
+                            relativeZ + 1,
+                            visualBlock
+                    );
         }
     }
 

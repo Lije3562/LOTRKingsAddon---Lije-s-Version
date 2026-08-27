@@ -5271,9 +5271,22 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     GL11.GL_ENABLE_BIT
                             | GL11.GL_LIGHTING_BIT
                             | GL11.GL_COLOR_BUFFER_BIT
+                            | GL11.GL_POLYGON_BIT
             );
 
             try {
+                /*
+                 * Detached leaf effects use polygon offset to keep overlay
+                 * geometry from z-fighting. A native chest TESR is real model
+                 * geometry, not an overlay; inheriting that offset can expose
+                 * a dark hairline where the lid and body meet while the leaf
+                 * is moving. Render the chest with normal TESR depth state and
+                 * restore the enclosing leaf state afterwards.
+                 */
+                GL11.glDisable(
+                        GL11.GL_POLYGON_OFFSET_FILL
+                );
+
                 GL11.glEnable(
                         GL11.GL_LIGHTING
                 );
