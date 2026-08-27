@@ -1194,8 +1194,7 @@ public final class GateRenderBlockAccess
             GatePartData part
     ) {
         if (world == null
-                || part == null
-                || !part.hasSourceTileEntityNbt()) {
+                || part == null) {
             return null;
         }
 
@@ -1237,7 +1236,8 @@ public final class GateRenderBlockAccess
         }
 
         if (!(sourceBlock
-                instanceof LOTRBlockGateDwarvenIthildin)) {
+                instanceof LOTRBlockGateDwarvenIthildin)
+                || !part.hasSourceTileEntityNbt()) {
             return null;
         }
 
@@ -1289,8 +1289,7 @@ public final class GateRenderBlockAccess
                 );
 
         if (neighborPart == null
-                || neighborPart.getSourceBlock() != expectedBlock
-                || !neighborPart.hasSourceTileEntityNbt()) {
+                || neighborPart.getSourceBlock() != expectedBlock) {
             return null;
         }
 

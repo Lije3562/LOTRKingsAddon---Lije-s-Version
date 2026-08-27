@@ -33,6 +33,7 @@ import java.util.Map;
 import java.util.Set;
 import java.util.UUID;
 import lotr.common.LOTRLevelData;
+import lotr.common.block.LOTRBlockGateDwarvenIthildin;
 import lotr.common.fac.LOTRFaction;
 import net.minecraft.block.Block;
 import net.minecraft.entity.Entity;
@@ -344,7 +345,7 @@ public class TileEntitySiegeGate extends TileEntity {
         writeRepairStateToNBT(nbt);
         writeAccessStateToNBT(nbt);
         writeControllerAppearanceToNBT(nbt);
-        writeGateStructureToNBT(nbt, true);
+        writeGateStructureToNBT(nbt, true, true);
         writeBannerRenderAttachmentsToNBT(nbt);
         writeGateConfigurationToNBT(nbt);
     }
@@ -386,7 +387,7 @@ public class TileEntitySiegeGate extends TileEntity {
         writeRepairStateToNBT(syncData);
         writeAccessStateToNBT(syncData);
         writeControllerAppearanceToNBT(syncData);
-        writeGateStructureToNBT(syncData, true);
+        writeGateStructureToNBT(syncData, true, false);
         writeBannerRenderAttachmentsToNBT(syncData);
         writeGateConfigurationToNBT(syncData);
         return new S35PacketUpdateTileEntity(
@@ -3014,7 +3015,8 @@ public class TileEntitySiegeGate extends TileEntity {
 
     private void writeGateStructureToNBT(
             NBTTagCompound nbt,
-            boolean includeSourceAppearance
+            boolean includeSourceAppearance,
+            boolean includeFullSourceTileEntityNbt
     ) {
         nbt.setInteger(
                 NBT_STRUCTURE_REVISION,
@@ -3080,10 +3082,19 @@ public class TileEntitySiegeGate extends TileEntity {
                 );
 
                 if (part.hasSourceTileEntityNbt()) {
-                    partNbt.setTag(
-                            NBT_SOURCE_TILE_ENTITY,
-                            part.getSourceTileEntityNbt()
-                    );
+                    NBTTagCompound sourceTileEntityNbt =
+                            includeFullSourceTileEntityNbt
+                                    ? part.getSourceTileEntityNbt()
+                                    : getClientRenderSourceTileEntityNbt(
+                                            part
+                                    );
+
+                    if (sourceTileEntityNbt != null) {
+                        partNbt.setTag(
+                                NBT_SOURCE_TILE_ENTITY,
+                                sourceTileEntityNbt
+                        );
+                    }
                 }
             }
 
@@ -3096,6 +3107,24 @@ public class TileEntitySiegeGate extends TileEntity {
                 NBT_GATE_PARTS,
                 partList
         );
+    }
+
+    /**
+     * Client structure sync deliberately excludes arbitrary captured
+     * TileEntity restoration NBT. The server-side persistent snapshot remains
+     * complete, while the client receives TE state only for explicitly
+     * approved visuals that require it.
+     */
+    private NBTTagCompound getClientRenderSourceTileEntityNbt(
+            GatePartData part
+    ) {
+        if (part == null
+                || !(part.getSourceBlock()
+                instanceof LOTRBlockGateDwarvenIthildin)) {
+            return null;
+        }
+
+        return part.getSourceTileEntityNbt();
     }
 
     private void readGateDataFromNBT(
