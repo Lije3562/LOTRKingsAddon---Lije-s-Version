@@ -57,9 +57,27 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
      */
     private static final double ATTACK_BACKUP_PREFERRED_DISTANCE = 4.0D;
     private static final double ATTACK_BACKUP_MIN_DISTANCE = 1.0D;
+    /*
+     * Charge strength is intentionally tiered rather than continuous. A full
+     * retreat normally ends about 3.65-4.0 blocks from the gate because of
+     * ATTACK_RETREAT_ARRIVAL_TOLERANCE, so 3.5 blocks cleanly represents the
+     * authored full run while still tolerating normal movement rounding.
+     */
+    private static final double ATTACK_FULL_CHARGE_DISTANCE = 3.5D;
+    private static final double ATTACK_MEDIUM_CHARGE_DISTANCE = 2.25D;
+    private static final double ATTACK_MEDIUM_DAMAGE_MULTIPLIER = 0.70D;
+    private static final double ATTACK_SHORT_DAMAGE_MULTIPLIER = 0.40D;
     private static final double ATTACK_RETREAT_ARRIVAL_TOLERANCE = 0.35D;
     private static final double ATTACK_CHARGE_ARRIVAL_TOLERANCE = 0.06D;
     private static final double ATTACK_CENTERLINE_TOLERANCE = 0.55D;
+
+    /*
+     * Gate attack movement bypasses PathNavigate for the final alignment and
+     * physical retreat/charge. Give only that narrow movement path enough
+     * step height to traverse ordinary one-block uphill terrain. Two-block
+     * walls and normal collision remain blocking obstacles.
+     */
+    private static final float ATTACK_TERRAIN_STEP_HEIGHT = 1.0F;
 
     /*
      * The authored ram extends about three blocks forward from the entity
@@ -134,6 +152,16 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     private static final int ATTACK_ALIGNMENT_FAILURE_TICKS = 15;
     public static final double PATH_PROGRESS_EPSILON = 0.25D;
     private static final double PATH_TRAVEL_EPSILON = 0.35D;
+
+    /*
+     * Adjacent gate columns are usually the same physical approach for the
+     * ram. After one lane genuinely fails, require the next candidate to be
+     * at least two gate columns away from every failed lane. This makes an
+     * alternate attempt a meaningfully different corridor instead of burning
+     * through neighboring columns until the target is abandoned.
+     */
+    private static final int ATTACK_ALTERNATE_LANE_MIN_SEPARATION = 2;
+    private static final int ATTACK_MAX_DISTINCT_LANES_PER_FACE = 3;
     private static final int NO_ATTACK_LANE = Integer.MIN_VALUE;
     public static final int MAX_TARGET_QUEUE_SIZE = 64;
 
@@ -1867,9 +1895,8 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
          * gate. Entity.moveEntity keeps normal collision/step/fall handling;
          * this is authoritative movement, not a render translation.
          */
-        moveEntity(
+        moveAttackHorizontally(
                 dx / distance * step,
-                0.0D,
                 dz / distance * step
         );
 
@@ -1884,6 +1911,42 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         );
     }
 
+    private void moveAttackHorizontally(
+            double deltaX,
+            double deltaZ
+    ) {
+        float previousStepHeight = stepHeight;
+
+        if (stepHeight < ATTACK_TERRAIN_STEP_HEIGHT) {
+            stepHeight = ATTACK_TERRAIN_STEP_HEIGHT;
+        }
+
+        try {
+            moveEntity(
+                    deltaX,
+                    0.0D,
+                    deltaZ
+            );
+        } finally {
+            /*
+             * Do not change the ram's ordinary follow/pathing capabilities.
+             * The extra step height belongs only to the deterministic gate
+             * attack movement that otherwise cannot use JumpHelper.
+             */
+            stepHeight = previousStepHeight;
+        }
+    }
+
+    private double getChargeDamageMultiplier() {
+        if (attackChargeStartDistance >= ATTACK_FULL_CHARGE_DISTANCE) {
+            return 1.0D;
+        }
+        if (attackChargeStartDistance >= ATTACK_MEDIUM_CHARGE_DISTANCE) {
+            return ATTACK_MEDIUM_DAMAGE_MULTIPLIER;
+        }
+        return ATTACK_SHORT_DAMAGE_MULTIPLIER;
+    }
+
     private void applyPhysicalRamImpact(
             TileEntitySiegeGate gate,
             AttackPoint point
@@ -1893,6 +1956,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         int effectiveSiegeDamage = (int)Math.round(
                 MumakilConfig.ramSiegeDamage
                         * getCrewSpeedMultiplier()
+                        * getChargeDamageMultiplier()
         );
         boolean damageApplied =
                 gate.applySiegeDamage(effectiveSiegeDamage);
@@ -2318,9 +2382,9 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
             }
 
             /*
-             * Exhaust every usable column on the chosen face before trying
-             * the opposite face. Ordinary navigation no longer changes this
-             * choice merely because the ram crossed the gate plane.
+             * Exhaust the meaningfully distinct attack corridors on the
+             * chosen face before trying the opposite face. Adjacent columns
+             * around a failed corridor are deliberately skipped below.
              */
             triedOppositeSide = true;
             attackSideSign = -attackSideSign;
@@ -2348,16 +2412,30 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         double centerCoordinate = orientation == GateOrientation.WIDTH_X
                 ? (minX + maxX + 1) * 0.5D
                 : (minZ + maxZ + 1) * 0.5D;
+        boolean selectingAlternate =
+                !failedAttackLaneCoordinates.isEmpty();
+
+        if (failedAttackLaneCoordinates.size()
+                >= ATTACK_MAX_DISTINCT_LANES_PER_FACE) {
+            return NO_ATTACK_LANE;
+        }
 
         /*
          * Prefer bottom-row columns on the selected outer face. If an
          * irregular/thick gate has no bottom block on that face, preserve the
          * old source-block fallback by considering bottom-row columns from
          * the remaining thickness before giving up on the face entirely.
+         *
+         * The initial lane remains center-first. After a real lane failure,
+         * however, adjacent columns are not useful alternatives for a machine
+         * this large. Only meaningfully separated candidates are eligible,
+         * and the candidate farthest from the nearest failed lane is preferred
+         * before center distance is used as a tie-breaker.
          */
         for (int pass = 0; pass < 2; ++pass) {
             boolean requireOuterFace = pass == 0;
             int bestCoordinate = NO_ATTACK_LANE;
+            int bestFailedLaneSeparation = -1;
             double bestCenterDistance = Double.MAX_VALUE;
 
             for (GatePartData part : parts) {
@@ -2382,14 +2460,37 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                     continue;
                 }
 
+                int failedLaneSeparation =
+                        getMinimumFailedLaneSeparation(coordinate);
+                if (selectingAlternate
+                        && failedLaneSeparation
+                        < ATTACK_ALTERNATE_LANE_MIN_SEPARATION) {
+                    continue;
+                }
+
                 double centerDistance = Math.abs(
                         coordinate + 0.5D - centerCoordinate
                 );
-                if (centerDistance < bestCenterDistance
-                        || (Math.abs(centerDistance - bestCenterDistance)
-                        < 1.0E-9D
-                        && (bestCoordinate == NO_ATTACK_LANE
-                        || coordinate < bestCoordinate))) {
+
+                boolean betterCandidate;
+                if (bestCoordinate == NO_ATTACK_LANE) {
+                    betterCandidate = true;
+                } else if (selectingAlternate
+                        && failedLaneSeparation
+                        != bestFailedLaneSeparation) {
+                    betterCandidate = failedLaneSeparation
+                            > bestFailedLaneSeparation;
+                } else if (Math.abs(
+                        centerDistance - bestCenterDistance
+                ) >= 1.0E-9D) {
+                    betterCandidate = centerDistance
+                            < bestCenterDistance;
+                } else {
+                    betterCandidate = coordinate < bestCoordinate;
+                }
+
+                if (betterCandidate) {
+                    bestFailedLaneSeparation = failedLaneSeparation;
                     bestCenterDistance = centerDistance;
                     bestCoordinate = coordinate;
                 }
@@ -2401,6 +2502,24 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         }
 
         return NO_ATTACK_LANE;
+    }
+
+    private int getMinimumFailedLaneSeparation(int coordinate) {
+        if (failedAttackLaneCoordinates.isEmpty()) {
+            return Integer.MAX_VALUE;
+        }
+
+        int minimumSeparation = Integer.MAX_VALUE;
+        for (Integer failedCoordinate : failedAttackLaneCoordinates) {
+            if (failedCoordinate == null) {
+                continue;
+            }
+            minimumSeparation = Math.min(
+                    minimumSeparation,
+                    Math.abs(coordinate - failedCoordinate.intValue())
+            );
+        }
+        return minimumSeparation;
     }
 
     private AttackPoint createAttackPointForLane(
@@ -2555,9 +2674,8 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 distance
         );
 
-        moveEntity(
+        moveAttackHorizontally(
                 dx / distance * step,
-                0.0D,
                 dz / distance * step
         );
 
