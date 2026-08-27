@@ -1890,10 +1890,12 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     ) {
         markPhysicalRamImpact();
 
+        int effectiveSiegeDamage = (int)Math.round(
+                MumakilConfig.ramSiegeDamage
+                        * getCrewSpeedMultiplier()
+        );
         boolean damageApplied =
-                gate.applySiegeDamage(
-                        MumakilConfig.ramSiegeDamage
-                );
+                gate.applySiegeDamage(effectiveSiegeDamage);
 
         if (damageApplied) {
             boolean breached =
