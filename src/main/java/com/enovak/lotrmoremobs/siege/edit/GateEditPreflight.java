@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.siege.edit;
 
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.creation.GateSourceBlockValidator;
 import com.enovak.lotrmoremobs.siege.gate.*;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
@@ -55,6 +56,9 @@ public final class GateEditPreflight {
             if(gateState!=GateState.CLOSED) issues.add(GateEditPreflightIssueCode.GATE_NOT_CLOSED);
             if(repair) issues.add(GateEditPreflightIssueCode.REPAIR_ACTIVE);
             if(ram) issues.add(GateEditPreflightIssueCode.RAM_RESERVED);
+            if (!isBannerEditCompatible(world, session, conversion, delta)) {
+                issues.add(GateEditPreflightIssueCode.BANNER_ATTACHMENT_CONFLICT);
+            }
             checkPhysical(world,session,delta,issues);
         }
         GateEditPreflightState state; GateEditPreflightIssueCode primary;
@@ -136,6 +140,50 @@ public final class GateEditPreflight {
         return new Conversion(
                 parts,
                 originalParts
+        );
+    }
+
+    private static boolean isBannerEditCompatible(
+            World world,
+            GateEditSession session,
+            Conversion conversion,
+            Delta delta
+    ) {
+        if (world == null || session == null || conversion == null || delta == null) {
+            return false;
+        }
+
+        Map<GateEditCoordinate, GatePartData> targetByCoordinate =
+                new HashMap<GateEditCoordinate, GatePartData>();
+        for (GatePartData part : conversion.parts) {
+            if (part != null) {
+                targetByCoordinate.put(
+                        new GateEditCoordinate(
+                                part.getRelativeX(),
+                                part.getRelativeY(),
+                                part.getRelativeZ()
+                        ),
+                        part
+                );
+            }
+        }
+
+        List<GatePartData> addedParts = new ArrayList<GatePartData>();
+        for (GateEditCoordinate coordinate : delta.adds) {
+            GatePartData part = targetByCoordinate.get(coordinate);
+            if (part != null) {
+                addedParts.add(part);
+            }
+        }
+
+        return SiegeGateBannerAttachmentData.isEditTargetCompatible(
+                world,
+                session.getGateUuid(),
+                session.getControllerX(),
+                session.getControllerY(),
+                session.getControllerZ(),
+                conversion.parts,
+                addedParts
         );
     }
 

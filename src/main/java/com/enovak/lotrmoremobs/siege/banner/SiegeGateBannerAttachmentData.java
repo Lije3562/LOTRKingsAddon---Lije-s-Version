@@ -164,7 +164,7 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
         }
     }
 
-    /** Conservative edit guard until structural edits are attachment-aware. */
+    /** Read-only presence query used by removal and recovery guards. */
     public static boolean hasAttachments(World world, UUID gateUuid) {
         if (gateUuid == null) {
             return false;
@@ -180,6 +180,99 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
             GateRecord record = data.recordsByGateUuid.get(gateUuid);
             return record != null && !record.attachments.isEmpty();
         }
+    }
+
+    public static boolean hasAttachmentAtSupport(
+            World world,
+            UUID gateUuid,
+            int relativeX,
+            int relativeY,
+            int relativeZ
+    ) {
+        if (gateUuid == null) {
+            return false;
+        }
+        SiegeGateBannerAttachmentData data = get(world, false);
+        if (data == null) {
+            return false;
+        }
+        synchronized (data) {
+            if (data.readOnlyDueToInvalidData) {
+                return true;
+            }
+            GateRecord record = data.recordsByGateUuid.get(gateUuid);
+            if (record == null) {
+                return false;
+            }
+            for (Attachment attachment : record.attachments) {
+                if (attachment.relativeSupportX == relativeX
+                        && attachment.relativeSupportY == relativeY
+                        && attachment.relativeSupportZ == relativeZ) {
+                    return true;
+                }
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Read-only edit admission check. Existing attachments may keep their
+     * support, change between LEFT/RIGHT, or be detached by removing their
+     * support part. A support may not become SPLIT_CENTER, and an edit may not
+     * absorb a new source block that currently supports a live native LOTR
+     * banner; move/remove that banner first so it cannot remain as a live
+     * protection entity while the block becomes part of the moving gate.
+     */
+    public static boolean isEditTargetCompatible(
+            World world,
+            UUID gateUuid,
+            int controllerX,
+            int controllerY,
+            int controllerZ,
+            Collection<GatePartData> targetParts,
+            Collection<GatePartData> addedParts
+    ) {
+        if (world == null || world.isRemote || gateUuid == null
+                || targetParts == null || addedParts == null) {
+            return false;
+        }
+
+        SiegeGateBannerAttachmentData data = get(world, false);
+        if (data != null) {
+            synchronized (data) {
+                if (data.readOnlyDueToInvalidData) {
+                    return false;
+                }
+                GateRecord record = data.recordsByGateUuid.get(gateUuid);
+                if (record != null) {
+                    if (record.state != RecordState.ATTACHED) {
+                        return false;
+                    }
+                    Map<SupportPosition, GateLeaf> targetLeaves =
+                            buildRelativeLeafMap(targetParts);
+                    for (Attachment attachment : record.attachments) {
+                        GateLeaf targetLeaf = targetLeaves.get(
+                                new SupportPosition(
+                                        attachment.relativeSupportX,
+                                        attachment.relativeSupportY,
+                                        attachment.relativeSupportZ
+                                )
+                        );
+                        if (targetLeaf != null && targetLeaf.isSplitCenter()) {
+                            return false;
+                        }
+                    }
+                }
+            }
+        }
+
+        return !hasLiveBannerOnAddedSupport(
+                world,
+                controllerX,
+                controllerY,
+                controllerZ,
+                addedParts
+        );
     }
 
     /** Called after the ordinary Siege Gate block journal each server tick. */
@@ -594,7 +687,18 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
             }
 
             if (record.state == RecordState.ATTACHED) {
-                syncRenderAttachments(world, record);
+                int used = reconcileAttachedRecord(
+                        world,
+                        record,
+                        remainingRestores
+                );
+                remainingRestores -= used;
+                if (recordsByGateUuid.get(record.gateUuid) == record) {
+                    syncRenderAttachments(world, record);
+                }
+                if (remainingRestores <= 0) {
+                    break;
+                }
                 continue;
             }
 
@@ -612,6 +716,232 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
                 break;
             }
         }
+    }
+
+    /**
+     * Reconciles durable banner attachments against the controller revision
+     * after the existing edit journal has run for this tick. Leaf-only edits
+     * update the inert attachment in place. Removing the exact support part
+     * detaches the banner and restores the native entity once the edit journal
+     * has restored that support block.
+     */
+    private int reconcileAttachedRecord(
+            World world,
+            GateRecord record,
+            int restoreBudget
+    ) {
+        if (world == null || record == null || restoreBudget < 0
+                || !world.blockExists(
+                        record.controllerX,
+                        record.controllerY,
+                        record.controllerZ
+                )) {
+            return 0;
+        }
+
+        TileEntity tileEntity = world.getTileEntity(
+                record.controllerX,
+                record.controllerY,
+                record.controllerZ
+        );
+        if (!(tileEntity instanceof TileEntitySiegeGate)) {
+            return 0;
+        }
+
+        TileEntitySiegeGate controller = (TileEntitySiegeGate)tileEntity;
+        if (!record.gateUuid.equals(controller.getExistingGateUuid())
+                || !controller.isFinalized()) {
+            return 0;
+        }
+
+        Map<SupportPosition, GateLeaf> liveLeaves =
+                buildRelativeLeafMap(controller.getGateParts());
+        int used = 0;
+        boolean changed = false;
+
+        for (int i = record.attachments.size() - 1; i >= 0; --i) {
+            Attachment attachment = record.attachments.get(i);
+            SupportPosition support = new SupportPosition(
+                    attachment.relativeSupportX,
+                    attachment.relativeSupportY,
+                    attachment.relativeSupportZ
+            );
+            GateLeaf liveLeaf = liveLeaves.get(support);
+
+            if (liveLeaf != null) {
+                if (liveLeaf.isSplitCenter()) {
+                    /* Admission forbids this; preserve the prior leaf fail-safe. */
+                    FMLLog.severe(
+                            "[LOTRMoreMobs] Siege Gate %s banner support at "
+                                    + "%d,%d,%d became SPLIT_CENTER unexpectedly; "
+                                    + "the prior banner leaf was preserved.",
+                            record.gateUuid,
+                            record.controllerX + attachment.relativeSupportX,
+                            record.controllerY + attachment.relativeSupportY,
+                            record.controllerZ + attachment.relativeSupportZ
+                    );
+                    continue;
+                }
+                if (attachment.leaf != liveLeaf) {
+                    attachment.leaf = liveLeaf;
+                    changed = true;
+                }
+                continue;
+            }
+
+            if (used >= restoreBudget) {
+                continue;
+            }
+
+            RestoreResult result = restoreAttachment(
+                    world,
+                    record,
+                    attachment
+            );
+            if (result == RestoreResult.WAIT) {
+                continue;
+            }
+
+            ++used;
+            record.attachments.remove(i);
+            changed = true;
+        }
+
+        if (changed) {
+            record.renderSnapshots = null;
+            markDirty();
+        }
+
+        if (record.attachments.isEmpty()) {
+            controller.setBannerRenderAttachments(
+                    Collections.<RenderAttachmentSnapshot>emptyList()
+            );
+            recordsByGateUuid.remove(record.gateUuid);
+            markDirty();
+        }
+
+        return used;
+    }
+
+    private static Map<SupportPosition, GateLeaf> buildRelativeLeafMap(
+            Collection<GatePartData> parts
+    ) {
+        Map<SupportPosition, GateLeaf> leaves =
+                new HashMap<SupportPosition, GateLeaf>();
+        if (parts == null) {
+            return leaves;
+        }
+        for (GatePartData part : parts) {
+            if (part != null && part.getLeaf() != null) {
+                leaves.put(
+                        new SupportPosition(
+                                part.getRelativeX(),
+                                part.getRelativeY(),
+                                part.getRelativeZ()
+                        ),
+                        part.getLeaf()
+                );
+            }
+        }
+        return leaves;
+    }
+
+    private static boolean hasLiveBannerOnAddedSupport(
+            World world,
+            int controllerX,
+            int controllerY,
+            int controllerZ,
+            Collection<GatePartData> addedParts
+    ) {
+        if (addedParts == null || addedParts.isEmpty()) {
+            return false;
+        }
+
+        Map<SupportPosition, Boolean> supports =
+                new HashMap<SupportPosition, Boolean>();
+        int minX = Integer.MAX_VALUE;
+        int minY = Integer.MAX_VALUE;
+        int minZ = Integer.MAX_VALUE;
+        int maxX = Integer.MIN_VALUE;
+        int maxY = Integer.MIN_VALUE;
+        int maxZ = Integer.MIN_VALUE;
+
+        for (GatePartData part : addedParts) {
+            if (part == null) {
+                continue;
+            }
+            int x = controllerX + part.getRelativeX();
+            int y = controllerY + part.getRelativeY();
+            int z = controllerZ + part.getRelativeZ();
+            supports.put(new SupportPosition(x, y, z), Boolean.TRUE);
+            minX = Math.min(minX, x);
+            minY = Math.min(minY, y);
+            minZ = Math.min(minZ, z);
+            maxX = Math.max(maxX, x);
+            maxY = Math.max(maxY, y);
+            maxZ = Math.max(maxZ, z);
+        }
+        if (supports.isEmpty()) {
+            return false;
+        }
+
+        AxisAlignedBB bounds = AxisAlignedBB.getBoundingBox(
+                minX - 2.0D,
+                minY - 2.0D,
+                minZ - 2.0D,
+                maxX + 3.0D,
+                maxY + 5.0D,
+                maxZ + 3.0D
+        );
+
+        @SuppressWarnings("unchecked")
+        List<LOTREntityBanner> standing = world.getEntitiesWithinAABB(
+                LOTREntityBanner.class,
+                bounds
+        );
+        for (LOTREntityBanner banner : standing) {
+            if (banner == null || banner.isDead) {
+                continue;
+            }
+            SupportPosition support = new SupportPosition(
+                    MathHelper.floor_double(banner.posX),
+                    MathHelper.floor_double(banner.boundingBox.minY) - 1,
+                    MathHelper.floor_double(banner.posZ)
+            );
+            if (supports.containsKey(support)) {
+                return true;
+            }
+        }
+
+        @SuppressWarnings("unchecked")
+        List<LOTREntityBannerWall> wall = world.getEntitiesWithinAABB(
+                LOTREntityBannerWall.class,
+                bounds
+        );
+        for (LOTREntityBannerWall banner : wall) {
+            if (banner == null || banner.isDead) {
+                continue;
+            }
+            try {
+                NBTTagCompound nbt = new NBTTagCompound();
+                banner.writeToNBT(nbt);
+                if (nbt.hasKey("TileX", TAG_INT)
+                        && nbt.hasKey("TileY", TAG_INT)
+                        && nbt.hasKey("TileZ", TAG_INT)
+                        && supports.containsKey(new SupportPosition(
+                                nbt.getInteger("TileX"),
+                                nbt.getInteger("TileY"),
+                                nbt.getInteger("TileZ")
+                        ))) {
+                    return true;
+                }
+            } catch (RuntimeException exception) {
+                /* Fail closed if a nearby wall banner cannot be inspected. */
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /**
@@ -1428,7 +1758,7 @@ public final class SiegeGateBannerAttachmentData extends WorldSavedData {
         private final int relativeSupportX;
         private final int relativeSupportY;
         private final int relativeSupportZ;
-        private final GateLeaf leaf;
+        private GateLeaf leaf;
         private final UUID entityUuid;
         private final NBTTagCompound entityNbt;
         private boolean restored;

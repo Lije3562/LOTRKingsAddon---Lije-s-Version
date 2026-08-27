@@ -1927,6 +1927,7 @@ public class GuiGateManagement extends GuiScreen {
             case NO_PERMISSION: return "You no longer can manage this gate";
             case ORIGINAL_MISMATCH: return "Live gate no longer matches the edit origin";
             case OWNERSHIP_MISMATCH: return "Durable ownership no longer matches";
+            case BANNER_ATTACHMENT_CONFLICT: return "A LOTR banner conflicts with this edit";
             default: return code.name().replace('_', ' ').toLowerCase();
         }
     }

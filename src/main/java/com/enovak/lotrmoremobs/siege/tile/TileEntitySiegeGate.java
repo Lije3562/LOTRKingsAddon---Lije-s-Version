@@ -2118,10 +2118,6 @@ public class TileEntitySiegeGate extends TileEntity {
                 || repairActive
                 || reservedRamUuid != null
                 || structureRevision == Integer.MAX_VALUE
-                || SiegeGateBannerAttachmentData.hasAttachments(
-                        worldObj,
-                        getExistingGateUuid()
-                )
                 || worldObj.getBlock(partX, partY, partZ)
                 != SiegeRegistry.gatePart) {
             return false;
@@ -2135,7 +2131,14 @@ public class TileEntitySiegeGate extends TileEntity {
                 relativeY,
                 relativeZ
         );
-        if (part == null) {
+        if (part == null
+                || SiegeGateBannerAttachmentData.hasAttachmentAtSupport(
+                        worldObj,
+                        getExistingGateUuid(),
+                        relativeX,
+                        relativeY,
+                        relativeZ
+                )) {
             return false;
         }
 
