@@ -3,6 +3,7 @@ package com.fuzs.aquaacrobatics;
 import org.apache.logging.log4j.LogManager;
 import org.apache.logging.log4j.Logger;
 
+import com.enovak.lotrmoremobs.Main;
 import com.fuzs.aquaacrobatics.proxy.CommonProxy;
 
 import cpw.mods.fml.common.Mod;
@@ -34,6 +35,14 @@ public class AquaAcrobatics {
 
     @Mod.EventHandler
     public void onPreInit(final FMLPreInitializationEvent evt) {
+        if (evt.getModMetadata() != null) {
+            /*
+             * Aqua Acrobatics is bundled as an internal KOME component. Mark
+             * it as a child mod so Forge keeps it out of the top-level Mods
+             * list while preserving its normal loading and config file.
+             */
+            evt.getModMetadata().parent = Main.MODID;
+        }
         proxy.onPreInit(evt);
     }
 
