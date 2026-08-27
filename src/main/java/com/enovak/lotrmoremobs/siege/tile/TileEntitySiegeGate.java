@@ -19,6 +19,7 @@ import com.enovak.lotrmoremobs.siege.gate.GateState;
 import com.enovak.lotrmoremobs.siege.gate.GateControlMode;
 import com.enovak.lotrmoremobs.siege.gate.GateStructureValidator;
 import com.enovak.lotrmoremobs.siege.gate.SiegeGateOwnershipData;
+import com.enovak.lotrmoremobs.siege.gate.SiegeGateBreachRallyManager;
 import com.enovak.lotrmoremobs.siege.network.SiegeNetwork;
 import com.enovak.lotrmoremobs.siege.repair.GateRepairStartResult;
 import com.enovak.lotrmoremobs.siege.repair.SiegeCurrency;
@@ -1106,6 +1107,7 @@ public class TileEntitySiegeGate extends TileEntity {
         }
         if (newlyBreached) {
             sendBreachFeedback();
+            SiegeGateBreachRallyManager.beginRally(this);
         }
         return currentHealth != previousHealth || newlyBreached;
     }

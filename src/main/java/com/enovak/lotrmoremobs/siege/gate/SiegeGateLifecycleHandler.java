@@ -242,6 +242,7 @@ public final class SiegeGateLifecycleHandler {
         if (data != null) {
             data.clearTransientQueue();
         }
+        SiegeGateBreachRallyManager.clearWorld(event.world);
         GateRegistry.clearWorld(event.world);
     }
 
@@ -264,6 +265,13 @@ public final class SiegeGateLifecycleHandler {
          * native entity never respawns before its support block is back.
          */
         SiegeGateBannerAttachmentData.process(event.world);
+
+        /*
+         * Breach rally movement is intentionally transient. It only reinforces
+         * a short navigator destination while an enrolled NPC is still idle;
+         * normal LOTR combat targeting immediately takes priority.
+         */
+        SiegeGateBreachRallyManager.process(event.world);
     }
 
     private static void sendMessage(EntityPlayer player, String message) {
