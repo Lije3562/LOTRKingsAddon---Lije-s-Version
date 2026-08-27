@@ -1,7 +1,6 @@
 package com.enovak.lotrmoremobs.siege.gate;
 
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockFalling;
 import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
 
@@ -72,6 +71,59 @@ public final class GatePartData {
             int sourceMetadata,
             NBTTagCompound sourceTileEntityNbt
     ) {
+        this(
+                relativeX,
+                relativeY,
+                relativeZ,
+                leaf,
+                sourceBlockName,
+                sourceMetadata,
+                sourceTileEntityNbt,
+                false,
+                null
+        );
+    }
+
+    /**
+     * Rehydrates source state that was already accepted and persisted by a
+     * compatible gate version. Durable decoding is intentionally separate
+     * from live source admission: changing what NEW gates may absorb must not
+     * make an existing saved gate unreadable or unrestorable.
+     */
+    public static GatePartData fromPersistedSourceSnapshot(
+            int relativeX,
+            int relativeY,
+            int relativeZ,
+            GateLeaf leaf,
+            String sourceBlockName,
+            int sourceMetadata,
+            NBTTagCompound sourceTileEntityNbt,
+            boolean sourceRestorable
+    ) {
+        return new GatePartData(
+                relativeX,
+                relativeY,
+                relativeZ,
+                leaf,
+                sourceBlockName,
+                sourceMetadata,
+                sourceTileEntityNbt,
+                true,
+                Boolean.valueOf(sourceRestorable)
+        );
+    }
+
+    private GatePartData(
+            int relativeX,
+            int relativeY,
+            int relativeZ,
+            GateLeaf leaf,
+            String sourceBlockName,
+            int sourceMetadata,
+            NBTTagCompound sourceTileEntityNbt,
+            boolean persistedSnapshot,
+            Boolean persistedRestorable
+    ) {
         if (leaf == null) {
             throw new IllegalArgumentException(
                     "Gate leaf cannot be null"
@@ -101,7 +153,11 @@ public final class GatePartData {
          * preserve their source definition for rendering.
          */
         this.hasStoredSourceAppearance =
-                isSafeStoredSourceAppearance(
+                persistedSnapshot
+                        ? isSafePersistedSourceAppearance(
+                        sourceBlock
+                )
+                        : isSafeStoredSourceAppearance(
                         sourceBlock
                 );
 
@@ -138,13 +194,32 @@ public final class GatePartData {
          * - either it does not require a TileEntity,
          *   or its TileEntity NBT was captured.
          */
-        this.hasStoredSourceBlock =
+        boolean restorableByDefinition =
                 hasStoredSourceAppearance
-                        && isSafeRestorableSource(
+                        && (persistedSnapshot
+                        ? isSafePersistedRestorableSource(
                         sourceBlock,
                         sanitizedMetadata,
                         this.sourceTileEntityNbt
-                );
+                )
+                        : isSafeRestorableSource(
+                        sourceBlock,
+                        sanitizedMetadata,
+                        this.sourceTileEntityNbt
+                ));
+
+        /*
+         * SourceRestorable is part of the durable record. A persisted false
+         * remains false even if today's live rules would allow restoration;
+         * a persisted true is honored only when the saved definition is still
+         * structurally reconstructible (registered block, and TE NBT when the
+         * block requires a TileEntity).
+         */
+        this.hasStoredSourceBlock =
+                persistedRestorable == null
+                        ? restorableByDefinition
+                        : persistedRestorable.booleanValue()
+                        && restorableByDefinition;
     }
 
     public int getRelativeX() {
@@ -392,10 +467,7 @@ public final class GatePartData {
     ) {
         try {
             if (sourceBlock == null
-                    || sourceBlock == Blocks.air
-                    || sourceBlock == Blocks.tnt
-                    || sourceBlock
-                    instanceof BlockFalling) {
+                    || sourceBlock == Blocks.air) {
                 return false;
             }
 
@@ -413,6 +485,56 @@ public final class GatePartData {
                     .equals(
                             registeredName
                     );
+
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isSafePersistedSourceAppearance(
+            Block sourceBlock
+    ) {
+        try {
+            if (sourceBlock == null
+                    || sourceBlock == Blocks.air) {
+                return false;
+            }
+
+            String registeredName =
+                    Block.blockRegistry.getNameForObject(
+                            sourceBlock
+                    );
+
+            return registeredName != null
+                    && !"lotrmoremobs:siege_gate_controller"
+                    .equals(registeredName)
+                    && !"lotrmoremobs:siege_gate_part"
+                    .equals(registeredName);
+
+        } catch (RuntimeException ignored) {
+            return false;
+        }
+    }
+
+    private static boolean isSafePersistedRestorableSource(
+            Block sourceBlock,
+            int metadata,
+            NBTTagCompound sourceTileEntityNbt
+    ) {
+        try {
+            if (!isSafePersistedSourceAppearance(
+                    sourceBlock
+            )) {
+                return false;
+            }
+
+            if (!sourceBlock.hasTileEntity(
+                    sanitizeMetadata(metadata)
+            )) {
+                return true;
+            }
+
+            return sourceTileEntityNbt != null;
 
         } catch (RuntimeException ignored) {
             return false;

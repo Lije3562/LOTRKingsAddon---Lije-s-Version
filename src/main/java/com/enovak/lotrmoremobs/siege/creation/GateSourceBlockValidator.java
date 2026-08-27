@@ -1,10 +1,7 @@
 package com.enovak.lotrmoremobs.siege.creation;
 
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
-import lotr.common.block.LOTRBlockGateDwarvenIthildin;
-import lotr.common.tileentity.LOTRTileEntityDwarvenDoor;
 import net.minecraft.block.Block;
-import net.minecraft.block.BlockFalling;
 import net.minecraft.init.Blocks;
 import net.minecraft.tileentity.TileEntity;
 import net.minecraft.world.World;
@@ -23,7 +20,7 @@ public final class GateSourceBlockValidator {
         int metadata = world.getBlockMetadata(x, y, z);
 
         return isValidDefinition(world, x, y, z, block, metadata)
-                && hasSupportedNewSourceTileEntity(
+                && hasCapturableSourceTileEntity(
                 world,
                 x,
                 y,
@@ -72,10 +69,8 @@ public final class GateSourceBlockValidator {
         if (world == null
                 || block == null
                 || block == Blocks.air
-                || block == Blocks.tnt
                 || block == SiegeRegistry.gateController
-                || block == SiegeRegistry.gatePart
-                || block instanceof BlockFalling) {
+                || block == SiegeRegistry.gatePart) {
             return false;
         }
 
@@ -83,9 +78,9 @@ public final class GateSourceBlockValidator {
             /*
              * TileEntity admission is deliberately NOT decided here. This
              * definition check is also used by durable restoration/recovery
-             * for legacy saved gates, so tightening it would make old worlds
-             * unrecoverable. New source selection is restricted separately by
-             * hasSupportedNewSourceTileEntity().
+             * for saved gates, so it only validates the stable block identity.
+             * New source selection separately requires any live TileEntity to
+             * be present and capturable before conversion.
              */
 
             /*
@@ -95,10 +90,6 @@ public final class GateSourceBlockValidator {
              * and other gameplay behavior will not survive conversion to GateParts,
              * so those properties are not reasons to reject them here.
              */
-            if (block.getBlockHardness(world, x, y, z) < 0.0F) {
-                return false;
-            }
-
             /*
              * Deliberately do NOT require:
              *
@@ -123,13 +114,17 @@ public final class GateSourceBlockValidator {
     }
 
     /**
-     * New gate selections reject generic TileEntities. The sole exception is
-     * LOTR's Ithildin dwarven-door block paired with its exact visual TE.
+     * TileEntity-backed source blocks are allowed when their live TileEntity
+     * exists at selection/finalization time. Gate finalization/edit commit
+     * snapshots the complete TE NBT before replacing the source with an inert
+     * GatePart, and the existing restoration path reapplies that snapshot when
+     * the source block is restored.
      *
-     * This is intentionally separate from isValidDefinition(), which remains
-     * compatible with server-side restoration of legacy saved gate sources.
+     * We intentionally do not instantiate arbitrary captured TileEntities
+     * while the block belongs to a moving Siege Gate. Their NBT remains inert
+     * stored data until restoration.
      */
-    private static boolean hasSupportedNewSourceTileEntity(
+    private static boolean hasCapturableSourceTileEntity(
             World world,
             int x,
             int y,
@@ -145,12 +140,12 @@ public final class GateSourceBlockValidator {
                 return true;
             }
 
-            if (!(block instanceof LOTRBlockGateDwarvenIthildin)) {
-                return false;
-            }
-
-            return declaresTileEntity
-                    && tileEntity instanceof LOTRTileEntityDwarvenDoor;
+            /*
+             * If either the block definition or the live world says this
+             * source carries TileEntity state, require the real TE to be
+             * present so finalization/edit capture cannot silently lose it.
+             */
+            return tileEntity != null;
 
         } catch (RuntimeException ignored) {
             return false;

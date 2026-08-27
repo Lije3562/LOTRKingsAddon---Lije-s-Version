@@ -540,7 +540,9 @@ public final class GateEditSessionManager {
                 > GateStructureValidator.MAX_GATE_PARTS) {
             sendFillMessage(
                     player,
-                    "That fill would exceed the 1600-block gate limit."
+                    "That fill would exceed the "
+                            + GateStructureValidator.MAX_GATE_PARTS
+                            + "-block gate limit."
             );
             return GateEditStatus.ACTION_ACCEPTED;
         }
@@ -551,7 +553,11 @@ public final class GateEditSessionManager {
         )) {
             sendFillMessage(
                     player,
-                    "That fill would exceed the gate's 20 x 40 x 2 size limit."
+                    "That fill would exceed the gate's "
+                            + GateStructureValidator.MAX_GATE_WIDTH + " x "
+                            + GateStructureValidator.MAX_GATE_HEIGHT + " x "
+                            + GateStructureValidator.MAX_GATE_THICKNESS
+                            + " size limit."
             );
             return GateEditStatus.ACTION_ACCEPTED;
         }

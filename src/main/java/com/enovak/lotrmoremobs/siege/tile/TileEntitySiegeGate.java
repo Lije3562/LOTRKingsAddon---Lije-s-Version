@@ -3008,9 +3008,20 @@ public class TileEntitySiegeGate extends TileEntity {
                     )
                             : null;
 
+            /*
+             * GateParts here are persisted controller state, not a request to
+             * admit a new source block. Decode their already-accepted source
+             * definition through the persisted compatibility path so a future
+             * live source-policy change cannot make an otherwise healthy
+             * controller disagree with its durable ownership record.
+             *
+             * Persisted controller GateParts only write source appearance for
+             * exact source snapshots. Legacy fallback parts omit SourceBlock /
+             * SourceMeta entirely and continue through the constructor below.
+             */
             GatePartData part =
                     hasSourceName
-                            ? new GatePartData(
+                            ? GatePartData.fromPersistedSourceSnapshot(
                             partNbt.getInteger(
                                     NBT_RELATIVE_X
                             ),
@@ -3025,7 +3036,8 @@ public class TileEntitySiegeGate extends TileEntity {
                             partNbt.getInteger(
                                     NBT_SOURCE_META
                             ),
-                            sourceTileEntityNbt
+                            sourceTileEntityNbt,
+                            true
                     )
                             : new GatePartData(
                             partNbt.getInteger(

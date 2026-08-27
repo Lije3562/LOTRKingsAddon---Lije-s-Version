@@ -240,6 +240,7 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
     private int totalJobEntries;
     private int totalEditCommitOperations;
     private boolean readOnlyDueToInvalidData;
+    private String lastLoadValidationError;
     private boolean capacityWarningLogged;
     private int boundDimension = Integer.MIN_VALUE;
 
@@ -1435,6 +1436,7 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
     @Override
     public synchronized void readFromNBT(NBTTagCompound nbt) {
         clearAllRecords();
+        lastLoadValidationError = null;
         if (!nbt.hasKey(NBT_FORMAT_VERSION, TAG_INT)) {
             rejectLoadedData("unsupported or missing FormatVersion");
             return;
@@ -1463,14 +1465,44 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
             ControllerRecord record = readControllerRecord(
                     controllerList.getCompoundTagAt(i)
             );
-            if (record == null
-                    || controllersByUuid.containsKey(record.gateUuid)
-                    || controllersByPosition.containsKey(
-                            record.controllerPosition()
-                    )
-                    || totalOwnershipParts + record.parts.size()
+            if (record == null) {
+                rejectLoadedData(
+                        "invalid controller record at index "
+                                + i
+                                + loadValidationSuffix()
+                );
+                return;
+            }
+            if (controllersByUuid.containsKey(record.gateUuid)) {
+                rejectLoadedData(
+                        "duplicate controller UUID at index "
+                                + i
+                                + ": "
+                                + record.gateUuid
+                );
+                return;
+            }
+            if (controllersByPosition.containsKey(
+                    record.controllerPosition()
+            )) {
+                rejectLoadedData(
+                        "duplicate controller position at index "
+                                + i
+                                + ": "
+                                + record.controllerX
+                                + ","
+                                + record.controllerY
+                                + ","
+                                + record.controllerZ
+                );
+                return;
+            }
+            if (totalOwnershipParts + record.parts.size()
                     > MAX_TOTAL_OWNERSHIP_PARTS) {
-                rejectLoadedData("invalid or duplicate controller record");
+                rejectLoadedData(
+                        "controller ownership-part capacity exceeded at index "
+                                + i
+                );
                 return;
             }
             controllersByUuid.put(record.gateUuid, record);
@@ -3991,9 +4023,10 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
         } else if (!hasExactRemoveAuthority(job, operation)) {
             return OperationWorldState.UNEXPECTED;
         }
-        if (matchesEditCommitWorld(world, operation,
-                operation.getExpectedAfterBlock(),
-                operation.getExpectedAfterMetadata())) {
+        if (matchesEditCommitWorldAfterOperation(
+                world,
+                operation
+        )) {
             return OperationWorldState.EXPECTED_AFTER;
         }
         if (!matchesEditCommitWorld(world, operation,
@@ -4050,22 +4083,28 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                     );
 
                 } else {
-                    if (!operation.isSourceRestorable()
-                            || !operation
-                            .getExpectedAfterBlock()
-                            .equals(
-                                    operation.getSourceBlock()
-                            )
-                            || !GateSourceBlockValidator
-                            .isValidDefinition(
-                                    world,
-                                    operation.getX(),
-                                    operation.getY(),
-                                    operation.getZ(),
-                                    after,
+                    GatePartData originalPart =
+                            findOriginalEditCommitPart(
+                                    job,
                                     operation
-                                            .getExpectedAfterMetadata()
-                            )) {
+                            );
+
+                    if (originalPart == null
+                            || !operation.isSourceRestorable()
+                            || !originalPart.hasStoredSourceBlock()
+                            || !operation.getSourceBlock().equals(
+                            originalPart.getSourceBlockName()
+                    )
+                            || operation.getSourceMetadata()
+                            != originalPart.getSourceMetadata()
+                            || !isPersistedRestorationDefinitionUsable(
+                            originalPart.getSourceBlockName(),
+                            originalPart.getSourceMetadata(),
+                            originalPart.getSourceTileEntityNbt(),
+                            true,
+                            operation.getExpectedAfterBlock(),
+                            operation.getExpectedAfterMetadata()
+                    )) {
                         return false;
                     }
 
@@ -4090,11 +4129,9 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
             return false;
         }
 
-        if (!matchesEditCommitWorld(
+        if (!matchesEditCommitWorldAfterOperation(
                 world,
-                operation,
-                operation.getExpectedAfterBlock(),
-                operation.getExpectedAfterMetadata()
+                operation
         )) {
             return false;
         }
@@ -4197,7 +4234,11 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
              * Populate that fresh TE with the saved source state.
              */
             if (restored != null) {
-                restored.readFromNBT(snapshot);
+                GateSourceTileEntitySnapshot
+                        .applyForRestoration(
+                                restored,
+                                snapshot
+                        );
                 restored.markDirty();
 
                 world.markBlockForUpdate(
@@ -4214,9 +4255,10 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
              * Reconstruct it directly from its registered TE id.
              */
             restored =
-                    TileEntity.createAndLoadEntity(
-                            snapshot
-                    );
+                    GateSourceTileEntitySnapshot
+                            .createForRestoration(
+                                    snapshot
+                            );
 
             if (restored == null) {
                 return false;
@@ -4562,6 +4604,34 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                         operation.getZ()) == metadata;
     }
 
+    private boolean matchesEditCommitWorldAfterOperation(
+            World world,
+            EditCommitJob.PhysicalOperation operation
+    ) {
+        if (operation == null) {
+            return false;
+        }
+
+        if (operation.getKind()
+                != EditCommitJob.OperationKind.REMOVE) {
+            return matchesEditCommitWorld(
+                    world,
+                    operation,
+                    operation.getExpectedAfterBlock(),
+                    operation.getExpectedAfterMetadata()
+            );
+        }
+
+        return GateSourceRestorationAdapter.matchesRestoredBlock(
+                world,
+                operation.getX(),
+                operation.getY(),
+                operation.getZ(),
+                operation.getExpectedAfterBlock(),
+                operation.getExpectedAfterMetadata()
+        );
+    }
+
     private void conflictEditCommit(UUID jobUuid,
             EditCommitJob.FailureCode failureCode, int x, int y, int z,
             long currentTick) {
@@ -4769,11 +4839,9 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
          * durable job still says PENDING. In that case, re-apply the TE snapshot
          * before acknowledging the operation.
          */
-        if (matchesWorld(
+        if (matchesRestoredMutationWorld(
                 world,
-                entry,
-                entry.intendedBlockName,
-                entry.intendedMetadata
+                entry
         )) {
             if (!restoreSourceTileEntityIfNeeded(
                     world,
@@ -4826,19 +4894,14 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
         }
 
         if (intended != Blocks.air
-                && (!entry.sourceRestorable
-                || !entry.intendedBlockName.equals(
-                entry.sourceBlockName
-        )
-                || !GateSourceBlockValidator
-                .isValidDefinition(
-                        world,
-                        entry.targetX,
-                        entry.targetY,
-                        entry.targetZ,
-                        intended,
+                && !isPersistedRestorationDefinitionUsable(
+                        entry.sourceBlockName,
+                        entry.sourceMetadata,
+                        entry.sourceTileEntityNbt,
+                        entry.sourceRestorable,
+                        entry.intendedBlockName,
                         entry.intendedMetadata
-                ))) {
+                )) {
             markEntryConflict(
                     world,
                     job,
@@ -4887,11 +4950,9 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
             return;
         }
 
-        if (!matchesWorld(
+        if (!matchesRestoredMutationWorld(
                 world,
-                entry,
-                entry.intendedBlockName,
-                entry.intendedMetadata
+                entry
         )) {
             markEntryConflict(
                     world,
@@ -4919,6 +4980,40 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 job,
                 entry
         );
+    }
+
+    private static boolean isPersistedRestorationDefinitionUsable(
+            String sourceBlockName,
+            int sourceMetadata,
+            NBTTagCompound sourceTileEntityNbt,
+            boolean sourceRestorable,
+            String intendedBlockName,
+            int intendedMetadata
+    ) {
+        if (!sourceRestorable
+                || sourceBlockName == null
+                || intendedBlockName == null
+                || !sourceBlockName.equals(intendedBlockName)
+                || sourceMetadata != intendedMetadata) {
+            return false;
+        }
+
+        GatePartData sourceDefinition =
+                GatePartData.fromPersistedSourceSnapshot(
+                        0,
+                        0,
+                        0,
+                        GateLeaf.LEFT,
+                        sourceBlockName,
+                        sourceMetadata,
+                        sourceTileEntityNbt,
+                        true
+                );
+
+        return sourceDefinition != null
+                && sourceDefinition.hasStoredSourceAppearance()
+                && sourceDefinition.hasStoredSourceBlock()
+                && sourceDefinition.getSourceBlockForRestoration() != null;
     }
 
     private boolean restoreSourceTileEntityIfNeeded(
@@ -4965,7 +5060,11 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                     );
 
             if (restored != null) {
-                restored.readFromNBT(snapshot);
+                GateSourceTileEntitySnapshot
+                        .applyForRestoration(
+                                restored,
+                                snapshot
+                        );
                 restored.markDirty();
 
                 world.markBlockForUpdate(
@@ -4978,9 +5077,10 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
             }
 
             restored =
-                    TileEntity.createAndLoadEntity(
-                            snapshot
-                    );
+                    GateSourceTileEntitySnapshot
+                            .createForRestoration(
+                                    snapshot
+                            );
 
             if (restored == null) {
                 return false;
@@ -5112,6 +5212,24 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
             removeController(controller);
         }
         markDirty();
+    }
+
+    private boolean matchesRestoredMutationWorld(
+            World world,
+            MutationEntry entry
+    ) {
+        if (entry == null) {
+            return false;
+        }
+
+        return GateSourceRestorationAdapter.matchesRestoredBlock(
+                world,
+                entry.targetX,
+                entry.targetY,
+                entry.targetZ,
+                entry.intendedBlockName,
+                entry.intendedMetadata
+        );
     }
 
     private boolean matchesWorld(
@@ -5458,6 +5576,14 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 || partList.tagCount() != partCount
                 || (partCount > 0
                 && partList.func_150303_d() != TAG_COMPOUND)) {
+            setLoadValidationError(
+                    "controller fields invalid"
+                            + " uuid=" + nbt.getString(NBT_GATE_UUID)
+                            + " pos=" + controllerX + ","
+                            + controllerY + "," + controllerZ
+                            + " revision=" + revision
+                            + " partCount=" + partCount
+            );
             return null;
         }
 
@@ -5473,18 +5599,50 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                     controllerZ,
                     revision
             );
-            if (part == null || !positions.add(part.absolutePosition())) {
+            if (part == null) {
+                if (lastLoadValidationError == null) {
+                    setLoadValidationError(
+                            "controller " + gateUuid
+                                    + " part[" + i + "] invalid"
+                    );
+                } else {
+                    setLoadValidationError(
+                            "controller " + gateUuid
+                                    + " part[" + i + "]: "
+                                    + lastLoadValidationError
+                    );
+                }
+                return null;
+            }
+            if (!positions.add(part.absolutePosition())) {
+                setLoadValidationError(
+                        "controller " + gateUuid
+                                + " has duplicate part position "
+                                + part.absoluteX + ","
+                                + part.absoluteY + ","
+                                + part.absoluteZ
+                );
                 return null;
             }
             parts.add(part);
             validationParts.add(part.toGatePartData());
         }
-        if (!GateStructureValidator.validateStructure(
-                validationParts,
-                controllerX,
-                controllerY,
-                controllerZ
-        ).isValid()) {
+        GateStructureValidator.ValidationResult structureValidation =
+                GateStructureValidator.validateStructure(
+                        validationParts,
+                        controllerX,
+                        controllerY,
+                        controllerZ
+                );
+        if (!structureValidation.isValid()) {
+            setLoadValidationError(
+                    "controller " + gateUuid
+                            + " structure invalid: "
+                            + structureValidation.getFailure()
+                            + (structureValidation.getMessage() == null
+                            ? ""
+                            : " (" + structureValidation.getMessage() + ")")
+            );
             return null;
         }
         return new ControllerRecord(
@@ -5543,14 +5701,15 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
          * captured source TileEntity snapshot.
          */
         GatePartData part =
-                new GatePartData(
+                GatePartData.fromPersistedSourceSnapshot(
                         relativeX,
                         relativeY,
                         relativeZ,
                         leaf,
                         sourceBlock,
                         sourceMeta,
-                        sourceTileEntityNbt
+                        sourceTileEntityNbt,
+                        sourceRestorable
                 );
 
         boolean actualRestorable =
@@ -5678,6 +5837,17 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 || absoluteY >= 256L
                 || absoluteZ < -30000000L
                 || absoluteZ >= 30000000L) {
+            setLoadValidationError(
+                    "part definition invalid"
+                            + " rel=" + relativeX + ","
+                            + relativeY + "," + relativeZ
+                            + " source=" + sourceBlock + ":"
+                            + sourceMeta
+                            + " savedRestorable=" + sourceRestorable
+                            + " expected=" + expectedBlock + ":"
+                            + expectedMeta
+                            + " revision=" + revision
+            );
             return null;
         }
 
@@ -5857,14 +6027,15 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 );
 
         GatePartData sourceDefinition =
-                new GatePartData(
+                GatePartData.fromPersistedSourceSnapshot(
                         0,
                         0,
                         0,
                         GateLeaf.LEFT,
                         source,
                         sourceMeta,
-                        sourceTileEntityNbt
+                        sourceTileEntityNbt,
+                        sourceRestorable
                 );
 
         boolean validIntendedAfter =
@@ -6134,6 +6305,20 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 && nbt.hasKey(NBT_LAST_GATE_STATE, TAG_STRING)
                 && nbt.hasKey(NBT_PART_COUNT, TAG_INT)
                 && nbt.hasKey(NBT_PARTS, TAG_LIST);
+    }
+
+    private void setLoadValidationError(String reason) {
+        lastLoadValidationError = bounded(
+                reason,
+                MAX_REASON_LENGTH
+        );
+    }
+
+    private String loadValidationSuffix() {
+        return lastLoadValidationError == null
+                || lastLoadValidationError.isEmpty()
+                ? ""
+                : ": " + lastLoadValidationError;
     }
 
     private void rejectLoadedData(String reason) {
@@ -6757,14 +6942,15 @@ public final class SiegeGateOwnershipData extends WorldSavedData {
                 );
             }
 
-            return new GatePartData(
+            return GatePartData.fromPersistedSourceSnapshot(
                     relativeX,
                     relativeY,
                     relativeZ,
                     leaf,
                     sourceBlockName,
                     sourceMetadata,
-                    sourceTileEntityNbt
+                    sourceTileEntityNbt,
+                    sourceRestorable
             );
         }
 

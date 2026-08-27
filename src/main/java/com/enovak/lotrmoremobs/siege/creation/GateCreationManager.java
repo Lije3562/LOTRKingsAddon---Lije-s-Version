@@ -544,7 +544,8 @@ public final class GateCreationManager {
 
         if (session.getSelectionCount()
                 >= GateCreationFinalizer.MAX_GATE_PARTS) {
-            sendMessage(player, "A gate may contain at most 1600 blocks.");
+            sendMessage(player, "A gate may contain at most "
+                    + GateCreationFinalizer.MAX_GATE_PARTS + " blocks.");
             return;
         }
 
@@ -716,7 +717,9 @@ public final class GateCreationManager {
                 > GateCreationFinalizer.MAX_GATE_PARTS) {
             sendMessage(
                     player,
-                    "That fill would exceed the 1600-block gate limit."
+                    "That fill would exceed the "
+                            + GateCreationFinalizer.MAX_GATE_PARTS
+                            + "-block gate limit."
             );
             return;
         }

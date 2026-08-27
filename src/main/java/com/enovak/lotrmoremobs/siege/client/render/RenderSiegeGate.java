@@ -25,12 +25,14 @@ import net.minecraft.client.renderer.RenderBlocks;
 import net.minecraft.client.renderer.Tessellator;
 import net.minecraft.client.renderer.texture.TextureMap;
 import net.minecraft.client.renderer.tileentity.TileEntitySpecialRenderer;
+import net.minecraft.client.renderer.tileentity.TileEntityRendererDispatcher;
 import net.minecraft.client.resources.IResourceManager;
 import net.minecraft.client.resources.IResourceManagerReloadListener;
 import net.minecraft.client.resources.IReloadableResourceManager;
 import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.tileentity.TileEntityChest;
 import net.minecraft.util.IIcon;
 import net.minecraft.util.ResourceLocation;
 import net.minecraft.world.World;
@@ -501,6 +503,20 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                 );
 
                 renderIthildinVisuals(
+                        controller,
+                        GateLeaf.RIGHT,
+                        cache.rightBlockAccess,
+                        partialTicks
+                );
+
+                renderChestVisuals(
+                        controller,
+                        GateLeaf.LEFT,
+                        cache.leftBlockAccess,
+                        partialTicks
+                );
+
+                renderChestVisuals(
                         controller,
                         GateLeaf.RIGHT,
                         cache.rightBlockAccess,
@@ -1314,6 +1330,18 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     false
             );
 
+            return;
+        }
+
+        /*
+         * Vanilla chests are drawn by renderChestVisuals() through their native
+         * TileEntitySpecialRenderer. RenderBlocks has no chest model and would
+         * otherwise fall through to the generic cuboid/plank placeholder.
+         * SPLIT_CENTER keeps the conservative old fallback because one chest
+         * TESR cannot be safely clipped between two independently moving leaves.
+         */
+        if (isVanillaChestSource(sourceBlock)
+                && !part.getLeaf().isSplitCenter()) {
             return;
         }
 
@@ -3027,6 +3055,13 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
                     partialTicks
             );
 
+            renderChestVisuals(
+                    controller,
+                    leaf,
+                    blockAccess,
+                    partialTicks
+            );
+
         } finally {
             GL11.glPopAttrib();
             GL11.glPopMatrix();
@@ -3086,6 +3121,14 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
 
                 if (sourceBlock == null
                         || sourceBlock == Blocks.air) {
+                    continue;
+                }
+
+                /*
+                 * Chest geometry is supplied by its TESR. Never synthesize a
+                 * moving boundary face from BlockChest's plank placeholder.
+                 */
+                if (isVanillaChestSource(sourceBlock)) {
                     continue;
                 }
 
@@ -4977,6 +5020,131 @@ public class RenderSiegeGate extends TileEntitySpecialRenderer
         return door.getGlowBrightness(
                 partialTicks
         );
+    }
+
+    private static boolean isVanillaChestSource(
+            Block sourceBlock
+    ) {
+        return sourceBlock == Blocks.chest
+                || sourceBlock == Blocks.trapped_chest;
+    }
+
+    private void renderChestVisuals(
+            TileEntitySiegeGate controller,
+            GateLeaf leaf,
+            GateRenderBlockAccess blockAccess,
+            float partialTicks
+    ) {
+        if (controller == null
+                || leaf == null
+                || blockAccess == null) {
+            return;
+        }
+
+        for (GatePartData part
+                : controller.getRenderableGatePartsForLeaf(leaf)) {
+
+            if (part == null
+                    || part.getLeaf().isSplitCenter()) {
+                continue;
+            }
+
+            Block sourceBlock =
+                    part.getSourceBlock();
+
+            if (!isVanillaChestSource(sourceBlock)) {
+                continue;
+            }
+
+            TileEntity sourceTileEntity =
+                    blockAccess.getTileEntity(
+                            part.getRelativeX(),
+                            part.getRelativeY(),
+                            part.getRelativeZ()
+                    );
+
+            if (!(sourceTileEntity instanceof TileEntityChest)) {
+                continue;
+            }
+
+            double renderX = part.getRelativeX();
+            double renderY = part.getRelativeY();
+            double renderZ = part.getRelativeZ();
+
+            int packedBrightness =
+                    blockAccess.getLightBrightnessForSkyBlocks(
+                            part.getRelativeX(),
+                            part.getRelativeY(),
+                            part.getRelativeZ(),
+                            0
+                    );
+
+            float previousBrightnessX =
+                    OpenGlHelper.lastBrightnessX;
+
+            float previousBrightnessY =
+                    OpenGlHelper.lastBrightnessY;
+
+            GL11.glPushMatrix();
+            GL11.glPushAttrib(
+                    GL11.GL_ENABLE_BIT
+                            | GL11.GL_LIGHTING_BIT
+                            | GL11.GL_COLOR_BUFFER_BIT
+            );
+
+            try {
+                GL11.glEnable(
+                        GL11.GL_LIGHTING
+                );
+
+                GL11.glColor4f(
+                        1.0F,
+                        1.0F,
+                        1.0F,
+                        1.0F
+                );
+
+                OpenGlHelper.setLightmapTextureCoords(
+                        OpenGlHelper.lightmapTexUnit,
+                        packedBrightness & 65535,
+                        packedBrightness >> 16
+                );
+
+                TileEntityRendererDispatcher.instance
+                        .renderTileEntityAt(
+                                sourceTileEntity,
+                                renderX,
+                                renderY,
+                                renderZ,
+                                partialTicks
+                        );
+
+            } catch (RuntimeException ignored) {
+                /*
+                 * Source visuals must never be able to crash the gate TESR.
+                 */
+            } finally {
+                OpenGlHelper.setLightmapTextureCoords(
+                        OpenGlHelper.lightmapTexUnit,
+                        previousBrightnessX,
+                        previousBrightnessY
+                );
+
+                GL11.glPopAttrib();
+                GL11.glPopMatrix();
+
+                bindTexture(
+                        TextureMap.locationBlocksTexture
+                );
+
+                GL11.glColor4f(
+                        1.0F,
+                        1.0F,
+                        1.0F,
+                        1.0F
+                );
+            }
+        }
     }
 
     private void renderIthildinVisuals(

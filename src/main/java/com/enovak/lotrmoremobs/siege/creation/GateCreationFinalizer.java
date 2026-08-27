@@ -5,6 +5,7 @@ import com.enovak.lotrmoremobs.siege.gate.GateHinge;
 import com.enovak.lotrmoremobs.siege.gate.GateLeaf;
 import com.enovak.lotrmoremobs.siege.gate.GatePartData;
 import com.enovak.lotrmoremobs.siege.gate.GateRegistry;
+import com.enovak.lotrmoremobs.siege.gate.GateSourceTileEntitySnapshot;
 import com.enovak.lotrmoremobs.siege.gate.GateStructureValidator;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
 
@@ -242,7 +243,7 @@ final class GateCreationFinalizer {
         if (selections.isEmpty()
                 || selections.size()
                 > MAX_GATE_PARTS) {
-            return "Select between 1 and 1600 "
+            return "Select between 1 and " + MAX_GATE_PARTS + " "
                     + "total gate blocks.";
         }
 
@@ -490,9 +491,11 @@ final class GateCreationFinalizer {
                     );
 
             if (restored != null) {
-                restored.readFromNBT(
-                        snapshot
-                );
+                GateSourceTileEntitySnapshot
+                        .applyForRestoration(
+                                restored,
+                                snapshot
+                        );
 
                 restored.markDirty();
 
@@ -511,8 +514,8 @@ final class GateCreationFinalizer {
              * TE id when necessary.
              */
             restored =
-                    TileEntity
-                            .createAndLoadEntity(
+                    GateSourceTileEntitySnapshot
+                            .createForRestoration(
                                     snapshot
                             );
 

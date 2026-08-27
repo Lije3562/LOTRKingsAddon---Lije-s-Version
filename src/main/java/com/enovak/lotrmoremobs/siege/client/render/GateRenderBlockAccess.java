@@ -16,6 +16,7 @@ import net.minecraft.block.BlockStairs;
 import net.minecraft.init.Blocks;
 import net.minecraft.nbt.NBTTagCompound;
 import net.minecraft.tileentity.TileEntity;
+import net.minecraft.tileentity.TileEntityChest;
 import net.minecraft.world.IBlockAccess;
 import net.minecraft.world.World;
 import net.minecraft.world.biome.BiomeGenBase;
@@ -1194,8 +1195,44 @@ public final class GateRenderBlockAccess
     ) {
         if (world == null
                 || part == null
-                || !part.hasSourceTileEntityNbt()
-                || !(part.getSourceBlock()
+                || !part.hasSourceTileEntityNbt()) {
+            return null;
+        }
+
+        Block sourceBlock =
+                part.getSourceBlock();
+
+        int absoluteX = part.getAbsoluteX(controller.xCoord);
+        int absoluteY = part.getAbsoluteY(controller.yCoord);
+        int absoluteZ = part.getAbsoluteZ(controller.zCoord);
+
+        /*
+         * Vanilla chests are TESR-only blocks. RenderBlocks intentionally has
+         * no real chest model and exposes a plank-like placeholder icon, which
+         * is why a captured chest otherwise appears as an oak-plank cube while
+         * it belongs to a Siege Gate.
+         *
+         * Create only a visual chest TE. It never receives inventory NBT and is
+         * never inserted into the real World TE list. The overridden visual
+         * block/metadata let vanilla's chest TESR retain the captured facing
+         * even though the real world cell contains a GatePart.
+         */
+        if (sourceBlock == Blocks.chest
+                || sourceBlock == Blocks.trapped_chest) {
+            RenderOnlyChestTileEntity chest =
+                    new RenderOnlyChestTileEntity(
+                            sourceBlock,
+                            part.getSourceMetadata()
+                    );
+
+            chest.setWorldObj(world);
+            chest.xCoord = absoluteX;
+            chest.yCoord = absoluteY;
+            chest.zCoord = absoluteZ;
+            return chest;
+        }
+
+        if (!(sourceBlock
                 instanceof LOTRBlockGateDwarvenIthildin)) {
             return null;
         }
@@ -1205,10 +1242,6 @@ public final class GateRenderBlockAccess
             return null;
         }
 
-        int absoluteX = part.getAbsoluteX(controller.xCoord);
-        int absoluteY = part.getAbsoluteY(controller.yCoord);
-        int absoluteZ = part.getAbsoluteZ(controller.zCoord);
-
         snapshot.setInteger("x", absoluteX);
         snapshot.setInteger("y", absoluteY);
         snapshot.setInteger("z", absoluteZ);
@@ -1216,8 +1249,8 @@ public final class GateRenderBlockAccess
         try {
             /*
              * Never instantiate arbitrary captured TileEntities on the client.
-             * Ithildin is the one explicit visual exception required by the
-             * working rune/glow renderer.
+             * Ithildin remains the other explicit visual exception required by
+             * the working rune/glow renderer.
              */
             LOTRTileEntityDwarvenDoor tileEntity =
                     new LOTRTileEntityDwarvenDoor();
@@ -1230,6 +1263,44 @@ public final class GateRenderBlockAccess
 
         } catch (RuntimeException ignored) {
             return null;
+        }
+    }
+
+    private static final class RenderOnlyChestTileEntity
+            extends TileEntityChest {
+
+        private final Block visualBlock;
+        private final int visualMetadata;
+
+        private RenderOnlyChestTileEntity(
+                Block visualBlock,
+                int visualMetadata
+        ) {
+            super(
+                    visualBlock == Blocks.trapped_chest
+                            ? 1
+                            : 0
+            );
+
+            this.visualBlock = visualBlock;
+            this.visualMetadata =
+                    Math.max(
+                            0,
+                            Math.min(
+                                    visualMetadata,
+                                    15
+                            )
+                    );
+        }
+
+        @Override
+        public Block getBlockType() {
+            return visualBlock;
+        }
+
+        @Override
+        public int getBlockMetadata() {
+            return visualMetadata;
         }
     }
 
