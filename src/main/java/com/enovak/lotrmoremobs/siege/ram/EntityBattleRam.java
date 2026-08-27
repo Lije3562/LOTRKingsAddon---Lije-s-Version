@@ -107,8 +107,10 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     private static final float CREW_ATTACK_IMPACT_RECOVER_END_TICK = 38.0F;
     private static final float CREW_ATTACK_LATE_RECOVER_DISTANCE = 0.08F;
     public static final int PATH_RETRY_INTERVAL_TICKS = 20;
-    public static final int PATH_PROGRESS_CHECK_TICKS = 60;
-    public static final int OPPOSITE_SIDE_RETRY_TICKS = 120;
+    private static final int FAILED_PATH_RETRY_INTERVAL_TICKS = 5;
+    private static final int MAX_CONSECUTIVE_PATH_REQUEST_FAILURES = 2;
+    public static final int PATH_PROGRESS_CHECK_TICKS = 20;
+    public static final int OPPOSITE_SIDE_RETRY_TICKS = 40;
     public static final int TARGET_FAILURE_TIMEOUT_TICKS = 200;
     public static final double ATTACK_STANDOFF_DISTANCE =
             RAM_TIP_REACH_DISTANCE + RAM_TIP_CONTACT_CLEARANCE;
@@ -128,7 +130,11 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     public static final double ATTACK_ALIGNMENT_START_DISTANCE = 1.25D;
     public static final double ATTACK_ALIGNMENT_POSITION_TOLERANCE = 0.08D;
     public static final double ATTACK_ALIGNMENT_STEP = 0.10D;
-    public static final double PATH_PROGRESS_EPSILON = 0.05D;
+    private static final double ATTACK_ALIGNMENT_MIN_PROGRESS = 0.01D;
+    private static final int ATTACK_ALIGNMENT_FAILURE_TICKS = 15;
+    public static final double PATH_PROGRESS_EPSILON = 0.25D;
+    private static final double PATH_TRAVEL_EPSILON = 0.35D;
+    private static final int NO_ATTACK_LANE = Integer.MIN_VALUE;
     public static final int MAX_TARGET_QUEUE_SIZE = 64;
 
     public static final int CREW_REASSOCIATION_GRACE_TICKS = 100;
@@ -231,10 +237,17 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     private int pathProgressCheckTicks;
     private int pathRequestCooldownTicks;
     private double lastPathDistance = Double.MAX_VALUE;
+    private double lastPathProgressX = Double.NaN;
+    private double lastPathProgressZ = Double.NaN;
     private boolean lastPathRequestSucceeded;
     private boolean pathRequestFailedSinceProgressCheck;
+    private int consecutivePathRequestFailures;
     private boolean triedOppositeSide;
     private int attackSideSign;
+    private int attackLaneCoordinate = NO_ATTACK_LANE;
+    private final List<Integer> failedAttackLaneCoordinates =
+            new ArrayList<Integer>();
+    private int attackAlignmentFailureTicks;
     private final AnimationFactory animationFactory =
             new AnimationFactory(this);
     private boolean hirePreview;
@@ -1149,6 +1162,41 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 && ramFaction == gateFaction;
     }
 
+    private boolean isAlliedFactionGate(
+            TileEntitySiegeGate gate
+    ) {
+        if (gate == null) {
+            return false;
+        }
+
+        LOTRFaction ramFaction = getRamFaction();
+        LOTRFaction gateFaction = gate.getGateFaction();
+        return ramFaction != null
+                && gateFaction != null
+                && ramFaction != gateFaction
+                && ramFaction.isAlly(gateFaction);
+    }
+
+    private boolean shouldRefuseAlliedGate(
+            TileEntitySiegeGate gate
+    ) {
+        if (!isAlliedFactionGate(gate)) {
+            return false;
+        }
+
+        /*
+         * Match RamControlManager's intentional administrative override while
+         * continuously enforcing ordinary faction diplomacy. The override is
+         * only meaningful while an administrative commander is actually
+         * present; otherwise an allied gate is treated as friendly.
+         */
+        EntityPlayer commander = getCommander();
+        return !(commander instanceof EntityPlayerMP)
+                || !GateAccess.isAdministrativePlayer(
+                (EntityPlayerMP)commander
+        );
+    }
+
     /**
      * Marks this detached client-side instance as LOTR's unit-hire preview.
      * The larger logical size is preview-only and lets the native hire GUI
@@ -1300,6 +1348,18 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     }
 
     private void refreshAssignedGateReservation() {
+        /*
+         * A paused or currently unmanned ram is not actively prosecuting its
+         * siege assignment. Do not keep renewing its reservations forever;
+         * TileEntitySiegeGate's existing bounded reservation timeout will
+         * release them naturally. A quick pause can therefore resume without
+         * disruption, while a long-idle ram cannot monopolize a gate.
+         */
+        if (getRamState() == BattleRamState.PAUSED
+                || getLivingCrewCount() <= 0) {
+            return;
+        }
+
         if (targetQueue.isEmpty()) {
             if (hasGateTarget()) {
                 targetQueue.add(new QueuedGateTarget(
@@ -1338,6 +1398,12 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 );
                 return;
             }
+            if (shouldRefuseAlliedGate(gate)) {
+                abandonTarget(
+                        "Friendly or allied Siege Gates cannot be targeted."
+                );
+                return;
+            }
             if (!gate.refreshRamReservation(getUniqueID())
                     && !gate.tryReserveForRam(getUniqueID())) {
                 abandonTarget(
@@ -1371,6 +1437,16 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 sendCommanderMessage(
                         "Your units refuse to attack their own faction. "
                                 + "That queued gate was removed."
+                );
+                continue;
+            }
+
+            if (shouldRefuseAlliedGate(gate)) {
+                clearReservationForEntry(queued);
+                targetQueue.remove(i);
+                RamControlManager.syncTargetQueueToCommander(this);
+                sendCommanderMessage(
+                        "A friendly or allied queued Siege Gate was removed."
                 );
                 continue;
             }
@@ -1424,8 +1500,8 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
             /*
              * PathNavigate is intentionally only responsible for the coarse
              * approach. The final short alignment is deterministic so every
-             * strike begins on the gate's true centerline and perpendicular
-             * to its plane.
+             * strike begins on the selected gate lane and perpendicular to
+             * its plane.
              */
             if (alignExactlyForAttack(point)) {
                 attackTicks = 0;
@@ -1448,13 +1524,34 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                     point.approachZ,
                     speedMultiplier
             );
-            pathRequestCooldownTicks = PATH_RETRY_INTERVAL_TICKS;
-            if (!lastPathRequestSucceeded) {
+            if (lastPathRequestSucceeded) {
+                consecutivePathRequestFailures = 0;
+                pathRequestCooldownTicks = PATH_RETRY_INTERVAL_TICKS;
+            } else {
                 pathRequestFailedSinceProgressCheck = true;
+                ++consecutivePathRequestFailures;
                 getNavigator().clearPathEntity();
+
+                /*
+                 * A direct PathNavigate rejection is much stronger evidence
+                 * than ordinary slow/no progress. Do not make a newly
+                 * assigned ram stare at an unreachable center lane for the
+                 * full multi-second progress timeout before trying the next
+                 * real gate column. Give the request one short retry in case
+                 * navigation state was transient, then reject this lane.
+                 */
+                if (consecutivePathRequestFailures
+                        >= MAX_CONSECUTIVE_PATH_REQUEST_FAILURES) {
+                    failCurrentAttackLane();
+                    resetPathProgressForNewLane();
+                    return;
+                } else {
+                    pathRequestCooldownTicks =
+                            FAILED_PATH_RETRY_INTERVAL_TICKS;
+                }
             }
         }
-        updatePathProgress(horizontalDistance);
+        updatePathProgress(gate, horizontalDistance);
     }
 
     private void updateAttackGate() {
@@ -1638,6 +1735,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                  */
                 beginPhysicalAttackBrace(point);
             } else {
+                failCurrentAttackLane();
                 resetPhysicalAttackRun();
                 prepareForGateRepath();
                 setRamState(BattleRamState.MOVE_TO_GATE);
@@ -1650,6 +1748,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
             if (backedDistance >= ATTACK_BACKUP_MIN_DISTANCE) {
                 beginPhysicalAttackBrace(point);
             } else {
+                failCurrentAttackLane();
                 resetPhysicalAttackRun();
                 prepareForGateRepath();
                 setRamState(BattleRamState.MOVE_TO_GATE);
@@ -1703,6 +1802,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         if (distance <= ATTACK_CHARGE_ARRIVAL_TOLERANCE) {
             if (Math.abs(posY - point.approachY)
                     > ATTACK_POSITION_VERTICAL_TOLERANCE) {
+                failCurrentAttackLane();
                 resetPhysicalAttackRun();
                 prepareForGateRepath();
                 setRamState(BattleRamState.MOVE_TO_GATE);
@@ -1733,6 +1833,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 >= ATTACK_BLOCKED_TICKS_BEFORE_SHORT_CHARGE
                 || attackPhysicalPhaseTicks >= ATTACK_PHASE_FAILURE_TICKS) {
 
+            failCurrentAttackLane();
             resetPhysicalAttackRun();
             prepareForGateRepath();
             setRamState(BattleRamState.MOVE_TO_GATE);
@@ -1958,39 +2059,79 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         clearAttackCycleStart();
     }
 
-    private void updatePathProgress(double horizontalDistance) {
+    private void updatePathProgress(
+            TileEntitySiegeGate gate,
+            double horizontalDistance
+    ) {
         if (lastPathDistance == Double.MAX_VALUE) {
             lastPathDistance = horizontalDistance;
+        }
+        if (Double.isNaN(lastPathProgressX)
+                || Double.isNaN(lastPathProgressZ)) {
+            lastPathProgressX = posX;
+            lastPathProgressZ = posZ;
         }
         ++pathProgressCheckTicks;
         if (pathProgressCheckTicks >= PATH_PROGRESS_CHECK_TICKS) {
             int evaluatedTicks = pathProgressCheckTicks;
             double improvement = lastPathDistance - horizontalDistance;
-            if (improvement >= PATH_PROGRESS_EPSILON) {
+            double traveledX = posX - lastPathProgressX;
+            double traveledZ = posZ - lastPathProgressZ;
+            double horizontalTravel = Math.sqrt(
+                    traveledX * traveledX + traveledZ * traveledZ
+            );
+            double crewMovementScale = Math.max(
+                    0.10D,
+                    getCrewSpeedMultiplier()
+            );
+            double requiredImprovement =
+                    PATH_PROGRESS_EPSILON * crewMovementScale;
+            double requiredTravel =
+                    PATH_TRAVEL_EPSILON * crewMovementScale;
+
+            /*
+             * Re-evaluate a genuinely stalled lane quickly. Meaningful
+             * approach progress fully clears the failure timer. Horizontal
+             * travel that is not yet closing on the lane receives extra
+             * detour grace, but still accumulates failure slowly so circling
+             * cannot preserve a bad lane forever. Scale the thresholds with
+             * living crew so partially crewed rams are not mistaken for
+             * stalled simply because their intended movement is slower.
+             */
+            if (improvement >= requiredImprovement) {
                 pathFailureTicks = 0;
             } else if (lastPathRequestSucceeded
                     || pathRequestFailedSinceProgressCheck
                     || getNavigator().noPath()) {
-                pathFailureTicks += evaluatedTicks;
+                pathFailureTicks += horizontalTravel >= requiredTravel
+                        ? Math.max(1, evaluatedTicks / 2)
+                        : evaluatedTicks;
             }
             lastPathDistance = horizontalDistance;
+            lastPathProgressX = posX;
+            lastPathProgressZ = posZ;
             pathProgressCheckTicks = 0;
             pathRequestFailedSinceProgressCheck = false;
-            if (!triedOppositeSide
-                    && pathFailureTicks >= OPPOSITE_SIDE_RETRY_TICKS) {
-                triedOppositeSide = true;
-                attackSideSign = -attackSideSign;
-                pathFailureTicks = 0;
-                lastPathDistance = Double.MAX_VALUE;
-                pathRequestCooldownTicks = 0;
-                lastPathRequestSucceeded = false;
-                pathRequestFailedSinceProgressCheck = false;
+
+            /*
+             * A failed route invalidates only the current lane. The next
+             * calculateAttackPoint() call prefers another lane on this face;
+             * the opposite face is considered only after every lane here is
+             * exhausted.
+             */
+            if (pathFailureTicks >= OPPOSITE_SIDE_RETRY_TICKS) {
+                failCurrentAttackLane();
+                resetPathProgressForNewLane();
                 getNavigator().clearPathEntity();
-                return;
-            }
-            if (triedOppositeSide
-                    && pathFailureTicks >= TARGET_FAILURE_TIMEOUT_TICKS) {
-                abandonTarget("The assigned gate could not be reached.");
+
+                /*
+                 * Resolve the next lane immediately enough to detect a gate
+                 * whose current and opposite faces have both been exhausted,
+                 * but do not issue a PathNavigate search here.
+                 */
+                if (calculateAttackPoint(gate) == null) {
+                    abandonTarget("The assigned gate could not be reached.");
+                }
             }
         }
     }
@@ -2106,141 +2247,233 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                     : GateOrientation.WIDTH_Z;
         }
 
-        /*
-         * Use the geometric center of the complete gate span, not the center
-         * of whichever bottom block happened to be closest. For thick or
-         * uneven gates this is what makes the ram line up visually with the
-         * actual gate midline.
-         */
         double centerX =
                 gate.xCoord + (minX + maxX + 1) * 0.5D;
         double centerZ =
                 gate.zCoord + (minZ + maxZ + 1) * 0.5D;
 
-        int nearestSideSign = orientation == GateOrientation.WIDTH_X
-                ? (posZ < centerZ ? -1 : 1)
-                : (posX < centerX ? -1 : 1);
-
         if (attackSideSign == 0) {
-            attackSideSign = nearestSideSign;
-        } else if (getRamState() == BattleRamState.MOVE_TO_GATE
-                && !triedOppositeSide
-                && attackSideSign != nearestSideSign) {
+            attackSideSign = orientation == GateOrientation.WIDTH_X
+                    ? (posZ < centerZ ? -1 : 1)
+                    : (posX < centerX ? -1 : 1);
+            resetAttackLaneSelectionForFace();
+        }
+
+        for (int faceAttempt = 0; faceAttempt < 2; ++faceAttempt) {
+            if (attackLaneCoordinate != NO_ATTACK_LANE
+                    && !isAttackLaneFailed(attackLaneCoordinate)) {
+                AttackPoint current = createAttackPointForLane(
+                        gate,
+                        parts,
+                        orientation,
+                        minX,
+                        maxX,
+                        minZ,
+                        maxZ,
+                        minY,
+                        attackSideSign,
+                        attackLaneCoordinate
+                );
+                if (current != null) {
+                    return current;
+                }
+
+                /* Gate geometry changed while this target was active. */
+                attackLaneCoordinate = NO_ATTACK_LANE;
+                attackAlignmentFailureTicks = 0;
+            }
+
+            int candidate = findBestAvailableAttackLaneCoordinate(
+                    parts,
+                    orientation,
+                    minX,
+                    maxX,
+                    minZ,
+                    maxZ,
+                    minY,
+                    attackSideSign
+            );
+
+            if (candidate != NO_ATTACK_LANE) {
+                attackLaneCoordinate = candidate;
+                attackAlignmentFailureTicks = 0;
+                return createAttackPointForLane(
+                        gate,
+                        parts,
+                        orientation,
+                        minX,
+                        maxX,
+                        minZ,
+                        maxZ,
+                        minY,
+                        attackSideSign,
+                        candidate
+                );
+            }
+
+            if (triedOppositeSide) {
+                return null;
+            }
+
             /*
-             * While making the normal approach, keep the ram assigned to the
-             * gate face nearest its current position. This lets a ram that
-             * starts or moves around the opposite side approach that side
-             * directly instead of remaining locked to the first face chosen.
-             *
-             * Once pathfinding deliberately flips to the opposite side as a
-             * recovery attempt, triedOppositeSide stays true and preserves
-             * that fallback choice rather than immediately undoing it here.
+             * Exhaust every usable column on the chosen face before trying
+             * the opposite face. Ordinary navigation no longer changes this
+             * choice merely because the ram crossed the gate plane.
              */
-            attackSideSign = nearestSideSign;
-            pathFailureTicks = 0;
-            pathProgressCheckTicks = 0;
-            pathRequestCooldownTicks = 0;
-            lastPathDistance = Double.MAX_VALUE;
-            lastPathRequestSucceeded = false;
-            pathRequestFailedSinceProgressCheck = false;
+            triedOppositeSide = true;
+            attackSideSign = -attackSideSign;
+            resetAttackLaneSelectionForFace();
+            resetPathProgressForNewLane();
             getNavigator().clearPathEntity();
         }
 
-        double normalX = orientation == GateOrientation.WIDTH_Z
-                ? attackSideSign
-                : 0.0D;
-        double normalZ = orientation == GateOrientation.WIDTH_X
-                ? attackSideSign
-                : 0.0D;
+        return null;
+    }
+
+    private int findBestAvailableAttackLaneCoordinate(
+            List<GatePartData> parts,
+            GateOrientation orientation,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ,
+            int minY,
+            int sideSign
+    ) {
+        int faceCoordinate = orientation == GateOrientation.WIDTH_X
+                ? (sideSign < 0 ? minZ : maxZ)
+                : (sideSign < 0 ? minX : maxX);
+        double centerCoordinate = orientation == GateOrientation.WIDTH_X
+                ? (minX + maxX + 1) * 0.5D
+                : (minZ + maxZ + 1) * 0.5D;
 
         /*
-         * Aim at the outer face of the gate on the ram's chosen attack side.
-         * This keeps the standoff measured from the visible gate surface
-         * rather than from the center of a thickness-one/two source block.
+         * Prefer bottom-row columns on the selected outer face. If an
+         * irregular/thick gate has no bottom block on that face, preserve the
+         * old source-block fallback by considering bottom-row columns from
+         * the remaining thickness before giving up on the face entirely.
          */
-        double impactX;
-        double impactZ;
-        int faceRelativeX = Integer.MIN_VALUE;
-        int faceRelativeZ = Integer.MIN_VALUE;
+        for (int pass = 0; pass < 2; ++pass) {
+            boolean requireOuterFace = pass == 0;
+            int bestCoordinate = NO_ATTACK_LANE;
+            double bestCenterDistance = Double.MAX_VALUE;
 
-        if (orientation == GateOrientation.WIDTH_X) {
-            impactX = centerX;
-            if (attackSideSign < 0) {
-                impactZ = gate.zCoord + minZ;
-                faceRelativeZ = minZ;
-            } else {
-                impactZ = gate.zCoord + maxZ + 1.0D;
-                faceRelativeZ = maxZ;
+            for (GatePartData part : parts) {
+                if (part.getRelativeY() != minY) {
+                    continue;
+                }
+                if (requireOuterFace
+                        && orientation == GateOrientation.WIDTH_X
+                        && part.getRelativeZ() != faceCoordinate) {
+                    continue;
+                }
+                if (requireOuterFace
+                        && orientation == GateOrientation.WIDTH_Z
+                        && part.getRelativeX() != faceCoordinate) {
+                    continue;
+                }
+
+                int coordinate = orientation == GateOrientation.WIDTH_X
+                        ? part.getRelativeX()
+                        : part.getRelativeZ();
+                if (isAttackLaneFailed(coordinate)) {
+                    continue;
+                }
+
+                double centerDistance = Math.abs(
+                        coordinate + 0.5D - centerCoordinate
+                );
+                if (centerDistance < bestCenterDistance
+                        || (Math.abs(centerDistance - bestCenterDistance)
+                        < 1.0E-9D
+                        && (bestCoordinate == NO_ATTACK_LANE
+                        || coordinate < bestCoordinate))) {
+                    bestCenterDistance = centerDistance;
+                    bestCoordinate = coordinate;
+                }
             }
-        } else {
-            impactZ = centerZ;
-            if (attackSideSign < 0) {
-                impactX = gate.xCoord + minX;
-                faceRelativeX = minX;
-            } else {
-                impactX = gate.xCoord + maxX + 1.0D;
-                faceRelativeX = maxX;
+
+            if (bestCoordinate != NO_ATTACK_LANE) {
+                return bestCoordinate;
             }
         }
 
-        GatePartData impactPart = null;
-        double bestDistanceSq = Double.MAX_VALUE;
+        return NO_ATTACK_LANE;
+    }
 
+    private AttackPoint createAttackPointForLane(
+            TileEntitySiegeGate gate,
+            List<GatePartData> parts,
+            GateOrientation orientation,
+            int minX,
+            int maxX,
+            int minZ,
+            int maxZ,
+            int minY,
+            int sideSign,
+            int laneCoordinate
+    ) {
+        int faceCoordinate = orientation == GateOrientation.WIDTH_X
+                ? (sideSign < 0 ? minZ : maxZ)
+                : (sideSign < 0 ? minX : maxX);
+
+        GatePartData impactPart = null;
         for (GatePartData part : parts) {
             if (part.getRelativeY() != minY) {
                 continue;
             }
-            if (orientation == GateOrientation.WIDTH_X
-                    && part.getRelativeZ() != faceRelativeZ) {
+            if (orientation == GateOrientation.WIDTH_X) {
+                if (part.getRelativeZ() != faceCoordinate
+                        || part.getRelativeX() != laneCoordinate) {
+                    continue;
+                }
+            } else if (part.getRelativeX() != faceCoordinate
+                    || part.getRelativeZ() != laneCoordinate) {
                 continue;
             }
-            if (orientation == GateOrientation.WIDTH_Z
-                    && part.getRelativeX() != faceRelativeX) {
-                continue;
-            }
-
-            double partCenterX =
-                    part.getAbsoluteX(gate.xCoord) + 0.5D;
-            double partCenterZ =
-                    part.getAbsoluteZ(gate.zCoord) + 0.5D;
-            double dx = partCenterX - impactX;
-            double dz = partCenterZ - impactZ;
-            double distanceSq = dx * dx + dz * dz;
-
-            if (distanceSq < bestDistanceSq) {
-                bestDistanceSq = distanceSq;
-                impactPart = part;
-            }
+            impactPart = part;
+            break;
         }
 
-        /*
-         * Irregular gates can theoretically have no bottom block on the
-         * chosen outer thickness face. Keep a safe source-block fallback for
-         * debris particles while preserving the exact geometric impact point.
-         */
         if (impactPart == null) {
             for (GatePartData part : parts) {
                 if (part.getRelativeY() != minY) {
                     continue;
                 }
-
-                double partCenterX =
-                        part.getAbsoluteX(gate.xCoord) + 0.5D;
-                double partCenterZ =
-                        part.getAbsoluteZ(gate.zCoord) + 0.5D;
-                double dx = partCenterX - impactX;
-                double dz = partCenterZ - impactZ;
-                double distanceSq = dx * dx + dz * dz;
-
-                if (distanceSq < bestDistanceSq) {
-                    bestDistanceSq = distanceSq;
+                int coordinate = orientation == GateOrientation.WIDTH_X
+                        ? part.getRelativeX()
+                        : part.getRelativeZ();
+                if (coordinate == laneCoordinate) {
                     impactPart = part;
+                    break;
                 }
             }
         }
 
         if (impactPart == null) {
             return null;
+        }
+
+        double normalX = orientation == GateOrientation.WIDTH_Z
+                ? sideSign
+                : 0.0D;
+        double normalZ = orientation == GateOrientation.WIDTH_X
+                ? sideSign
+                : 0.0D;
+
+        double impactX;
+        double impactZ;
+
+        if (orientation == GateOrientation.WIDTH_X) {
+            impactX = gate.xCoord + laneCoordinate + 0.5D;
+            impactZ = sideSign < 0
+                    ? gate.zCoord + minZ
+                    : gate.zCoord + maxZ + 1.0D;
+        } else {
+            impactX = sideSign < 0
+                    ? gate.xCoord + minX
+                    : gate.xCoord + maxX + 1.0D;
+            impactZ = gate.zCoord + laneCoordinate + 0.5D;
         }
 
         double approachY = gate.yCoord + minY;
@@ -2255,6 +2488,41 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 impactZ,
                 impactPart
         );
+    }
+
+    private boolean isAttackLaneFailed(int coordinate) {
+        return failedAttackLaneCoordinates.contains(
+                Integer.valueOf(coordinate)
+        );
+    }
+
+    private void failCurrentAttackLane() {
+        if (attackLaneCoordinate != NO_ATTACK_LANE
+                && !isAttackLaneFailed(attackLaneCoordinate)) {
+            failedAttackLaneCoordinates.add(
+                    Integer.valueOf(attackLaneCoordinate)
+            );
+        }
+        attackLaneCoordinate = NO_ATTACK_LANE;
+        attackAlignmentFailureTicks = 0;
+    }
+
+    private void resetAttackLaneSelectionForFace() {
+        attackLaneCoordinate = NO_ATTACK_LANE;
+        failedAttackLaneCoordinates.clear();
+        attackAlignmentFailureTicks = 0;
+    }
+
+    private void resetPathProgressForNewLane() {
+        pathFailureTicks = 0;
+        pathProgressCheckTicks = 0;
+        pathRequestCooldownTicks = 0;
+        lastPathDistance = Double.MAX_VALUE;
+        lastPathProgressX = Double.NaN;
+        lastPathProgressZ = Double.NaN;
+        lastPathRequestSucceeded = false;
+        pathRequestFailedSinceProgressCheck = false;
+        consecutivePathRequestFailures = 0;
     }
 
     private boolean alignExactlyForAttack(AttackPoint point) {
@@ -2276,6 +2544,7 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         if (distance <= ATTACK_ALIGNMENT_POSITION_TOLERANCE) {
             motionX = 0.0D;
             motionZ = 0.0D;
+            attackAlignmentFailureTicks = 0;
             return true;
         }
 
@@ -2283,9 +2552,6 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
                 ATTACK_ALIGNMENT_STEP,
                 distance
         );
-
-        double beforeX = posX;
-        double beforeZ = posZ;
 
         moveEntity(
                 dx / distance * step,
@@ -2305,17 +2571,23 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         );
 
         /*
-         * If collision prevents even the small alignment nudge, let normal
-         * pathing retry instead of silently attacking from an offset.
+         * Final alignment deliberately bypasses PathNavigate. Count repeated
+         * collision/sliding failures here so a blocked endpoint cannot trap
+         * the ram forever inside this branch.
          */
-        double movedX = posX - beforeX;
-        double movedZ = posZ - beforeZ;
-        if (movedX * movedX + movedZ * movedZ < 1.0E-6D
+        double progress = distance - remaining;
+        if (progress < ATTACK_ALIGNMENT_MIN_PROGRESS
                 && remaining > ATTACK_ALIGNMENT_POSITION_TOLERANCE) {
-            prepareForGateRepath();
+            ++attackAlignmentFailureTicks;
+            if (attackAlignmentFailureTicks
+                    >= ATTACK_ALIGNMENT_FAILURE_TICKS) {
+                failCurrentAttackLane();
+                prepareForGateRepath();
+            }
             return false;
         }
 
+        attackAlignmentFailureTicks = 0;
         return remaining <= ATTACK_ALIGNMENT_POSITION_TOLERANCE;
     }
 
@@ -2551,14 +2823,10 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
     }
 
     private void resetTargetProgress() {
-        pathFailureTicks = 0;
-        pathProgressCheckTicks = 0;
-        pathRequestCooldownTicks = 0;
-        lastPathDistance = Double.MAX_VALUE;
-        lastPathRequestSucceeded = false;
-        pathRequestFailedSinceProgressCheck = false;
+        resetPathProgressForNewLane();
         triedOppositeSide = false;
         attackSideSign = 0;
+        resetAttackLaneSelectionForFace();
     }
 
     private void resetNoProgressWhileWaitingForCrew() {
@@ -2566,16 +2834,22 @@ public class EntityBattleRam extends net.minecraft.entity.EntityCreature
         pathProgressCheckTicks = 0;
         pathRequestCooldownTicks = 0;
         lastPathDistance = Double.MAX_VALUE;
+        lastPathProgressX = Double.NaN;
+        lastPathProgressZ = Double.NaN;
         lastPathRequestSucceeded = false;
         pathRequestFailedSinceProgressCheck = false;
+        consecutivePathRequestFailures = 0;
     }
 
     private void prepareForGateRepath() {
         pathProgressCheckTicks = 0;
         pathRequestCooldownTicks = 0;
         lastPathDistance = Double.MAX_VALUE;
+        lastPathProgressX = Double.NaN;
+        lastPathProgressZ = Double.NaN;
         lastPathRequestSucceeded = false;
         pathRequestFailedSinceProgressCheck = false;
+        consecutivePathRequestFailures = 0;
         getNavigator().clearPathEntity();
     }
 

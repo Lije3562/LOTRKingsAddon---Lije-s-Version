@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.siege.ram;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.siege.access.GateAccess;
+import com.enovak.lotrmoremobs.siege.gate.GatePartData;
 import com.enovak.lotrmoremobs.siege.gate.GateState;
 import com.enovak.lotrmoremobs.siege.network.RamControlOpenPacket;
 import com.enovak.lotrmoremobs.siege.network.RamTargetModePacket;
@@ -23,7 +24,7 @@ import net.minecraft.util.ChatComponentText;
 public final class RamControlManager {
 
     public static final double MAX_CONTROL_DISTANCE = 16.0D;
-    public static final double TARGET_COMMAND_RANGE = 64.0D;
+    public static final double TARGET_COMMAND_RANGE = 128.0D;
     public static final int DISBAND = 0;
     public static final int ENTER_TARGET_MODE = 1;
     public static final int ENTER_TARGET_MODE_REMOTE = 2;
@@ -32,6 +33,8 @@ public final class RamControlManager {
 
     private static final double MAX_CONTROL_DISTANCE_SQ =
             MAX_CONTROL_DISTANCE * MAX_CONTROL_DISTANCE;
+    private static final double TARGET_COMMAND_RANGE_SQ =
+            TARGET_COMMAND_RANGE * TARGET_COMMAND_RANGE;
     private static final int MAX_PENDING_ACTIONS = 128;
     private static final int MAX_PENDING_TARGETS = 128;
     private static final int MAX_PENDING_PER_PLAYER = 8;
@@ -74,9 +77,9 @@ public final class RamControlManager {
                 || !isKnownAction(action)
                 || entityId <= 0
                 || !SiegeRequestLimiter.tryAcquire(
-                        player.getUniqueID(),
-                        SiegeRequestLimiter.RateClass.RAM_CONTROL
-                )) {
+                player.getUniqueID(),
+                SiegeRequestLimiter.RateClass.RAM_CONTROL
+        )) {
             return;
         }
         PendingAction request = new PendingAction(
@@ -103,14 +106,14 @@ public final class RamControlManager {
         if (player == null
                 || ramEntityId <= 0
                 || !SiegeRequestLimiter.isSaneBlockPosition(
-                        controllerX,
-                        controllerY,
-                        controllerZ
-                )
+                controllerX,
+                controllerY,
+                controllerZ
+        )
                 || !SiegeRequestLimiter.tryAcquire(
-                        player.getUniqueID(),
-                        SiegeRequestLimiter.RateClass.RAM_TARGET
-                )) {
+                player.getUniqueID(),
+                SiegeRequestLimiter.RateClass.RAM_TARGET
+        )) {
             return;
         }
         PendingTargetSelection request = new PendingTargetSelection(
@@ -128,8 +131,8 @@ public final class RamControlManager {
 
     public static void processQueuedActions() {
         for (int processed = 0;
-                processed < ACTION_PROCESSING_BUDGET_PER_TICK;
-                ++processed) {
+             processed < ACTION_PROCESSING_BUDGET_PER_TICK;
+             ++processed) {
             PendingAction request = pollAction();
             if (request == null) {
                 break;
@@ -137,8 +140,8 @@ public final class RamControlManager {
             processAction(request);
         }
         for (int processed = 0;
-                processed < TARGET_PROCESSING_BUDGET_PER_TICK;
-                ++processed) {
+             processed < TARGET_PROCESSING_BUDGET_PER_TICK;
+             ++processed) {
             PendingTargetSelection selection = pollTarget();
             if (selection == null) {
                 break;
@@ -367,6 +370,11 @@ public final class RamControlManager {
                 || gate.getGateState() == GateState.BREACHED) {
             return "That Siege Gate is not a valid target.";
         }
+        if (!isWithinTargetCommandRange(ram, gate)) {
+            return "That Siege Gate is more than "
+                    + (int)TARGET_COMMAND_RANGE
+                    + " blocks from the Battle Ram.";
+        }
         LOTRFaction ramFaction =
                 ram.getRamFaction();
 
@@ -399,6 +407,41 @@ public final class RamControlManager {
             return "Friendly or allied Siege Gates cannot be targeted.";
         }
         return null;
+    }
+
+    private static boolean isWithinTargetCommandRange(
+            EntityBattleRam ram,
+            TileEntitySiegeGate gate
+    ) {
+        if (ram == null
+                || gate == null
+                || gate.getWorldObj() != ram.worldObj) {
+            return false;
+        }
+
+        for (GatePartData part : gate.getGateParts()) {
+            if (part == null) {
+                continue;
+            }
+            double gateX = gate.xCoord + part.getRelativeX() + 0.5D;
+            double gateY = gate.yCoord + part.getRelativeY() + 0.5D;
+            double gateZ = gate.zCoord + part.getRelativeZ() + 0.5D;
+            if (ram.getDistanceSq(gateX, gateY, gateZ)
+                    <= TARGET_COMMAND_RANGE_SQ) {
+                return true;
+            }
+        }
+
+        /*
+         * A finalized gate should always have part data, but keep the
+         * controller itself as a conservative fallback for legacy/corrupt
+         * snapshots instead of making those gates impossible to command.
+         */
+        return ram.getDistanceSq(
+                gate.xCoord + 0.5D,
+                gate.yCoord + 0.5D,
+                gate.zCoord + 0.5D
+        ) <= TARGET_COMMAND_RANGE_SQ;
     }
 
     private static EntityBattleRam getRam(
