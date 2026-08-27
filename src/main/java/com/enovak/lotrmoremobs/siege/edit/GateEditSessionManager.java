@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.siege.edit;
 
 import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.creation.GateSourceBlockValidator;
 import com.enovak.lotrmoremobs.siege.gate.GateEnclosedAreaFill;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
@@ -55,6 +56,19 @@ public final class GateEditSessionManager {
         UUID leaseOwner = LEASE_OWNER_BY_GATE.get(inspection.getGateUuid());
         if (leaseOwner != null && !leaseOwner.equals(player.getUniqueID())) return Result.refused(GateEditStatus.EDIT_LEASED);
         TileEntitySiegeGate gate = getExactGate(player, inspection);
+        if (gate == null) {
+            return Result.refused(GateEditStatus.GATE_UNAVAILABLE);
+        }
+        if (SiegeGateBannerAttachmentData.hasAttachments(
+                player.worldObj,
+                gate.getExistingGateUuid()
+        )) {
+            player.addChatMessage(new ChatComponentText(
+                    "Gate structural editing is temporarily disabled while "
+                            + "LOTR banner attachments are present."
+            ));
+            return Result.refused(GateEditStatus.GATE_UNAVAILABLE);
+        }
         try {
             GateEditSession session = new GateEditSession(player.getUniqueID(), UUID.randomUUID(), GateEditOriginalSnapshot.fromController(gate), expiry());
             if (!session.getDraft().matchesOriginal(session.getOriginal())) return Result.refused(GateEditStatus.GATE_UNAVAILABLE);

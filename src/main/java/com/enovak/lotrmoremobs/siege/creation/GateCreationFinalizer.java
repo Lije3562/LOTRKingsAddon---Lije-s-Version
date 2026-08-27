@@ -1,6 +1,7 @@
 package com.enovak.lotrmoremobs.siege.creation;
 
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
 import com.enovak.lotrmoremobs.siege.gate.GateLeaf;
 import com.enovak.lotrmoremobs.siege.gate.GatePartData;
@@ -136,6 +137,22 @@ final class GateCreationFinalizer {
                     + "or identity validation failed.";
         }
 
+        /*
+         * LOTR banners are entities, not source blocks. Capture them into a
+         * separate durable sidecar before their support blocks disappear so
+         * native banner drop/protection behavior cannot run during movement.
+         */
+        SiegeGateBannerAttachmentData.PrepareResult bannerPrepare =
+                SiegeGateBannerAttachmentData.prepareFinalization(
+                        world,
+                        controller,
+                        gateParts
+                );
+        if (!bannerPrepare.isSuccessful()) {
+            return bannerPrepare.getError();
+        }
+        java.util.UUID bannerGateUuid = controller.getExistingGateUuid();
+
         List<GateSelectionData> converted =
                 new ArrayList<GateSelectionData>();
 
@@ -164,6 +181,10 @@ final class GateCreationFinalizer {
                         world,
                         converted
                 );
+                SiegeGateBannerAttachmentData.rollbackFinalization(
+                        world,
+                        bannerGateUuid
+                );
 
                 return "Gate conversion failed; "
                         + "all converted blocks were restored.";
@@ -178,6 +199,10 @@ final class GateCreationFinalizer {
                 rollback(
                         world,
                         converted
+                );
+                SiegeGateBannerAttachmentData.rollbackFinalization(
+                        world,
+                        bannerGateUuid
                 );
 
                 return "Gate conversion failed; "
@@ -197,10 +222,19 @@ final class GateCreationFinalizer {
                     world,
                     converted
             );
+            SiegeGateBannerAttachmentData.rollbackFinalization(
+                    world,
+                    bannerGateUuid
+            );
 
             return "The controller rejected "
                     + "the finalized structure.";
         }
+
+        SiegeGateBannerAttachmentData.commitFinalization(
+                world,
+                bannerGateUuid
+        );
 
         controller.setOwnerOnFinalization(
                 session.getCreatorUuid()

@@ -2,6 +2,7 @@ package com.enovak.lotrmoremobs.siege.gate;
 
 import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.creation.GateCreationManager;
 import com.enovak.lotrmoremobs.siege.repair.GateManagementManager;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
@@ -228,6 +229,7 @@ public final class SiegeGateLifecycleHandler {
     public void onWorldLoad(WorldEvent.Load event) {
         if (event.world != null && !event.world.isRemote) {
             SiegeGateOwnershipData.get(event.world, false);
+            SiegeGateBannerAttachmentData.get(event.world, false);
         }
     }
 
@@ -256,6 +258,12 @@ public final class SiegeGateLifecycleHandler {
             data.processReconciliation(event.world);
             data.processEditCommitReconciliation(event.world);
         }
+
+        /*
+         * Banner restoration must run after the ordinary gate journal so a
+         * native entity never respawns before its support block is back.
+         */
+        SiegeGateBannerAttachmentData.process(event.world);
     }
 
     private static void sendMessage(EntityPlayer player, String message) {

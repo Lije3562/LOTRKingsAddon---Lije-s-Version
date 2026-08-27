@@ -4,6 +4,7 @@ import com.enovak.lotrmoremobs.Main;
 import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.siege.access.GateAccess;
 import com.enovak.lotrmoremobs.siege.SiegeRegistry;
+import com.enovak.lotrmoremobs.siege.banner.SiegeGateBannerAttachmentData;
 import com.enovak.lotrmoremobs.siege.gate.GateAnimation;
 import com.enovak.lotrmoremobs.siege.gate.GateConfigurationValidator;
 import com.enovak.lotrmoremobs.siege.gate.GateHinge;
@@ -2061,6 +2062,10 @@ public class TileEntitySiegeGate extends TileEntity {
                 || repairActive
                 || reservedRamUuid != null
                 || structureRevision == Integer.MAX_VALUE
+                || SiegeGateBannerAttachmentData.hasAttachments(
+                        worldObj,
+                        getExistingGateUuid()
+                )
                 || worldObj.getBlock(partX, partY, partZ)
                 != SiegeRegistry.gatePart) {
             return false;
@@ -2402,10 +2407,23 @@ public class TileEntitySiegeGate extends TileEntity {
         }
         SiegeGateOwnershipData ownership =
                 SiegeGateOwnershipData.get(worldObj, true);
-        return ownership != null && ownership.prepareRemoval(
+        if (ownership == null || !ownership.prepareRemoval(
                 this,
                 SiegeGateOwnershipData.TransactionType.CONTROLLER_REMOVAL
-        );
+        )) {
+            return false;
+        }
+        if (!SiegeGateBannerAttachmentData.beginRestoration(
+                worldObj,
+                getGateUuid()
+        )) {
+            ownership.abortPreparedRemoval(
+                    getGateUuid(),
+                    structureRevision
+            );
+            return false;
+        }
+        return true;
     }
 
     public void abortPreparedControllerRemovalTransaction() {
@@ -2420,6 +2438,10 @@ public class TileEntitySiegeGate extends TileEntity {
                     structureRevision
             );
         }
+        SiegeGateBannerAttachmentData.abortRestoration(
+                worldObj,
+                getExistingGateUuid()
+        );
     }
 
     public boolean dismantleGateParts() {
@@ -2453,6 +2475,16 @@ public class TileEntitySiegeGate extends TileEntity {
                         zCoord
                 );
             }
+            return false;
+        }
+        if (!SiegeGateBannerAttachmentData.beginRestoration(
+                worldObj,
+                getGateUuid()
+        )) {
+            ownership.abortPreparedRemoval(
+                    getGateUuid(),
+                    structureRevision
+            );
             return false;
         }
         ownership.activateRemoval(
