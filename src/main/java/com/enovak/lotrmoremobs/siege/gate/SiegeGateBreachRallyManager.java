@@ -1,5 +1,6 @@
 package com.enovak.lotrmoremobs.siege.gate;
 
+import com.enovak.lotrmoremobs.config.MumakilConfig;
 import com.enovak.lotrmoremobs.siege.ram.EntityBattleRam;
 import com.enovak.lotrmoremobs.siege.tile.TileEntitySiegeGate;
 import java.lang.ref.WeakReference;
@@ -43,6 +44,10 @@ public final class SiegeGateBreachRallyManager {
     }
 
     public static void beginRally(TileEntitySiegeGate gate) {
+        if (!MumakilConfig.enableSiegeGateBreachNpcRally) {
+            return;
+        }
+
         if (gate == null
                 || gate.getWorldObj() == null
                 || gate.getWorldObj().isRemote
@@ -141,6 +146,11 @@ public final class SiegeGateBreachRallyManager {
 
     public static void process(World world) {
         if (world == null || world.isRemote) {
+            return;
+        }
+
+        if (!MumakilConfig.enableSiegeGateBreachNpcRally) {
+            clearWorld(world);
             return;
         }
 

@@ -44,12 +44,11 @@ public final class MumakilConfigGui extends GuiScreen {
                 "config.lotrmoremobs.category.mortalGandalf"
         ));
         categories.add(new CategoryEntry(
-                MumakilConfig.CATEGORY_SIEGE_GATES,
-                "config.lotrmoremobs.category.siegeGates"
-        ));
-        categories.add(new CategoryEntry(
-                MumakilConfig.CATEGORY_BATTLE_RAMS,
-                "config.lotrmoremobs.category.battleRams"
+                new String[] {
+                        MumakilConfig.CATEGORY_SIEGE_GATES,
+                        MumakilConfig.CATEGORY_BATTLE_RAMS
+                },
+                "config.lotrmoremobs.category.siege"
         ));
         categories.add(new CategoryEntry(
                 MumakilConfig.CATEGORY_PLAYER_ANIMATIONS,
@@ -108,7 +107,7 @@ public final class MumakilConfigGui extends GuiScreen {
             CategoryEntry entry = categories.get(button.id);
             mc.displayGuiScreen(new MumakilConfigCategoryGui(
                     this,
-                    entry.categoryName,
+                    entry.categoryNames,
                     StatCollector.translateToLocal(entry.languageKey)
             ));
         }
@@ -136,11 +135,15 @@ public final class MumakilConfigGui extends GuiScreen {
 
 
     private static final class CategoryEntry {
-        private final String categoryName;
+        private final String[] categoryNames;
         private final String languageKey;
 
         private CategoryEntry(String categoryName, String languageKey) {
-            this.categoryName = categoryName;
+            this(new String[] { categoryName }, languageKey);
+        }
+
+        private CategoryEntry(String[] categoryNames, String languageKey) {
+            this.categoryNames = categoryNames;
             this.languageKey = languageKey;
         }
     }

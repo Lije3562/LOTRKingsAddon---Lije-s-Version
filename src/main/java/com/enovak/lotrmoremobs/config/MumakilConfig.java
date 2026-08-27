@@ -49,6 +49,8 @@ public final class MumakilConfig {
     private static final boolean DEFAULT_MORTAL_GANDALF = false;
     private static final boolean DEFAULT_ENABLE_SIEGE_GATES = true;
     private static final int DEFAULT_GATE_HEALTH = 1000;
+    private static final boolean DEFAULT_ENABLE_SIEGE_GATE_BREACH_NPC_RALLY =
+            true;
     private static final boolean DEFAULT_ENABLE_BATTLE_RAMS = true;
     private static final int DEFAULT_RAM_SIEGE_DAMAGE = 100;
     private static final int DEFAULT_RAM_CARRIER_RESPAWN_DELAY_SECONDS = 30;
@@ -123,6 +125,8 @@ public final class MumakilConfig {
     public static volatile boolean enableSiegeGates =
             DEFAULT_ENABLE_SIEGE_GATES;
     public static volatile int defaultGateHealth = DEFAULT_GATE_HEALTH;
+    public static volatile boolean enableSiegeGateBreachNpcRally =
+            DEFAULT_ENABLE_SIEGE_GATE_BREACH_NPC_RALLY;
     public static volatile boolean enableBattleRams =
             DEFAULT_ENABLE_BATTLE_RAMS;
     public static volatile int ramSiegeDamage = DEFAULT_RAM_SIEGE_DAMAGE;
@@ -545,7 +549,8 @@ public final class MumakilConfig {
                 CATEGORY_SIEGE_GATES,
                 Arrays.asList(
                         "enableSiegeGates",
-                        "defaultGateHealth"
+                        "defaultGateHealth",
+                        "enableBreachNpcRally"
                 )
         );
         enableSiegeGates = configuration.getBoolean(
@@ -568,13 +573,24 @@ public final class MumakilConfig {
                         + "Restart required: No.",
                 "config.lotrmoremobs.defaultGateHealth"
         );
+        enableSiegeGateBreachNpcRally = configuration.getBoolean(
+                "enableBreachNpcRally",
+                CATEGORY_SIEGE_GATES,
+                DEFAULT_ENABLE_SIEGE_GATE_BREACH_NPC_RALLY,
+                "When enabled, nearby allied defenders and hostile attackers "
+                        + "temporarily rush toward a Siege Gate when it is newly "
+                        + "breached. Normal LOTR combat AI still takes priority. "
+                        + "Restart required: No.",
+                "config.lotrmoremobs.enableBreachNpcRally"
+        );
         markPropertiesRestartRequired(
                 CATEGORY_SIEGE_GATES,
                 "enableSiegeGates"
         );
         markPropertiesRuntimeEditable(
                 CATEGORY_SIEGE_GATES,
-                "defaultGateHealth"
+                "defaultGateHealth",
+                "enableBreachNpcRally"
         );
     }
 
