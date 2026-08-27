@@ -18,6 +18,8 @@ import net.minecraft.util.MovementInput;
 import net.minecraft.world.World;
 import net.minecraftforge.common.util.ForgeDirection;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.config.ConfigHandler;
 import com.fuzs.aquaacrobatics.entity.Pose;
 import com.fuzs.aquaacrobatics.entity.player.AquaMovementLogic;
@@ -32,6 +34,8 @@ public final class AquaClientPlayerMovementPolicy {
     private AquaClientPlayerMovementPolicy() {}
 
     public static void captureLivingUpdateHead(EntityPlayerSP player, MovementInputStorage storage) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return;
+
         int sprintTimer = readTimer(player, "sprintToggleTimer", "field_71156_d");
         int flyTimer = readTimer(player, "flyToggleTimer", "field_71101_bC");
 
@@ -92,12 +96,15 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static void handleWaterSneaking(EntityPlayerSP player) {
 
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return;
         if (player.isInWater() && player.movementInput.sneak && !player.capabilities.isFlying) {
             player.motionY -= 0.03999999910593033 * player.getEntityAttribute(movementSpeed).getAttributeValue();
         }
     }
 
     public static void applyLivingUpdateTail(EntityPlayerSP player, MovementInputStorage storage) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return;
+
         boolean betterSprintingLoaded = cpw.mods.fml.common.Loader.isModLoaded("bettersprinting");
         LivingUpdateTailDecision decision = getLivingUpdateTailDecision(player, storage,
             betterSprintingLoaded, player.isInWater());
@@ -131,6 +138,7 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static boolean isForcedDown(EntityPlayerSP player) {
 
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return false;
         IPlayerResizeable resizeable = (IPlayerResizeable) player;
         return resizeable.isResizingAllowed() && !player.capabilities.isFlying
             && (resizeable.getPose() == Pose.CROUCHING || resizeable.isVisuallySwimming());
@@ -138,11 +146,13 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static boolean isUsingSwimmingAnimation(EntityPlayerSP player) {
 
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return false;
         return isUsingSwimmingAnimation(player, player.movementInput.moveForward, player.movementInput.moveStrafe);
     }
 
     public static boolean isUsingSwimmingAnimation(EntityPlayerSP player, float moveForward, float moveStrafe) {
 
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return false;
         if (canSwim(player)) {
             return isMovingForward(moveForward, moveStrafe);
         }
@@ -156,7 +166,8 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static boolean canSwim(EntityPlayerSP player) {
 
-        return ((IPlayerResizeable) player).getEyesInWaterPlayer();
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && ((IPlayerResizeable) player).getEyesInWaterPlayer();
     }
 
     public static boolean isMovingForward(float moveForward, float moveStrafe) {
@@ -172,7 +183,8 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static boolean canPerformElytraTakeoff(EntityPlayerSP player, MovementInputStorage movementStorage) {
 
-        return ConfigHandler.MovementConfig.easyElytraTakeoff && player.movementInput.jump
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && ConfigHandler.MovementConfig.easyElytraTakeoff && player.movementInput.jump
             && !movementStorage.isStartingToFly
             && !movementStorage.jump
             && player.motionY >= 0.0
@@ -183,6 +195,7 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static boolean handleExactPlayerBlockCollision(EntityPlayerSP player, double x, double z) {
 
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return false;
         if (ConfigHandler.playerBlockCollisions != ConfigHandler.PlayerBlockCollisions.EXACT) {
             return false;
         }
@@ -196,6 +209,7 @@ public final class AquaClientPlayerMovementPolicy {
 
     public static int roundPlayerBlockCollisionOffset(float value) {
 
+        if (!PlayerMovementMode.useModernPlayerMovementClient()) return Math.round(value);
         if (ConfigHandler.playerBlockCollisions == ConfigHandler.PlayerBlockCollisions.APPROXIMATE) {
             value -= 0.65;
         }

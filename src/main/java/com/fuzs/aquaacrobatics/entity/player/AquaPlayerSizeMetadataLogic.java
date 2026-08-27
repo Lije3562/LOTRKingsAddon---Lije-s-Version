@@ -2,6 +2,8 @@ package com.fuzs.aquaacrobatics.entity.player;
 
 import net.minecraft.entity.player.EntityPlayer;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.entity.EntitySize;
 import com.fuzs.aquaacrobatics.entity.Pose;
 
@@ -21,6 +23,7 @@ public final class AquaPlayerSizeMetadataLogic {
     }
 
     public static float getEyeHeight(EntityPlayer player, Pose pose, EntitySize size) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return player.eyeHeight;
         return AquaPoseLogic.getEyeHeight(
             pose,
             player.eyeHeight,

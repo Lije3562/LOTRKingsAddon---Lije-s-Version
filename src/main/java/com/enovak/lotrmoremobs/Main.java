@@ -41,6 +41,7 @@ import cpw.mods.fml.common.event.FMLServerStoppingEvent;
 import com.enovak.lotrmoremobs.network.PickupFilterClearPacket;
 import com.enovak.lotrmoremobs.network.PickupFilterSyncPacket;
 import com.enovak.lotrmoremobs.network.PickupFilterTogglePacket;
+import com.enovak.lotrmoremobs.network.ServerGameplaySyncPacket;
 import com.enovak.lotrmoremobs.pickupfilter.PickupFilterRequestManager;
 import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 
@@ -114,6 +115,12 @@ public class Main {
                 Side.SERVER
         );
         SiegeNetwork.register();
+        network.registerMessage(
+                ServerGameplaySyncPacket.Handler.class,
+                ServerGameplaySyncPacket.class,
+                28,
+                Side.CLIENT
+        );
     }
 
     @EventHandler

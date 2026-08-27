@@ -1,5 +1,6 @@
 package com.fuzs.aquaacrobatics.client;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
 import net.minecraft.client.Minecraft;
 import net.minecraft.entity.player.EntityPlayer;
 
@@ -24,7 +25,8 @@ public final class AquaCameraState {
 
     public void tick(Minecraft minecraft) {
         EntityPlayer localPlayer = minecraft.thePlayer;
-        if (localPlayer == null || minecraft.renderViewEntity != localPlayer) {
+        if (localPlayer == null || minecraft.renderViewEntity != localPlayer
+                || !PlayerMovementMode.useModernPlayerMovement(localPlayer)) {
             this.reset();
             return;
         }

@@ -22,6 +22,8 @@ public final class MumakilConfig {
     public static final String CATEGORY_MORTAL_GANDALF = "mortal gandalf";
     public static final String CATEGORY_SIEGE_GATES = "siege gates";
     public static final String CATEGORY_BATTLE_RAMS = "battle rams";
+    public static final String CATEGORY_PLAYER_ANIMATIONS = "player animations";
+    public static final String CATEGORY_SERVER_GAMEPLAY = "server gameplay";
 
     /* Legacy category names retained only so existing config values can migrate. */
     private static final String LEGACY_CATEGORY_GAMEPLAY = "general gameplay";
@@ -50,6 +52,8 @@ public final class MumakilConfig {
     private static final boolean DEFAULT_ENABLE_BATTLE_RAMS = true;
     private static final int DEFAULT_RAM_SIEGE_DAMAGE = 100;
     private static final int DEFAULT_RAM_CARRIER_RESPAWN_DELAY_SECONDS = 30;
+    private static final boolean DEFAULT_MODERN_PLAYER_ANIMATIONS = true;
+    private static final boolean DEFAULT_NPC_BOMBER_BLOCK_DAMAGE = true;
 
     private static final int MIN_DENOMINATOR = 1;
     private static final int MAX_DENOMINATOR = 10000;
@@ -124,6 +128,10 @@ public final class MumakilConfig {
     public static volatile int ramSiegeDamage = DEFAULT_RAM_SIEGE_DAMAGE;
     public static volatile int ramCarrierRespawnDelaySeconds =
             DEFAULT_RAM_CARRIER_RESPAWN_DELAY_SECONDS;
+    public static volatile boolean modernPlayerAnimations =
+            DEFAULT_MODERN_PLAYER_ANIMATIONS;
+    public static volatile boolean npcBomberBlockDamage =
+            DEFAULT_NPC_BOMBER_BLOCK_DAMAGE;
 
     /*
      * Invasion-duration value assigned to each formation member.
@@ -172,6 +180,8 @@ public final class MumakilConfig {
         syncMortalGandalfCategory();
         syncSiegeGateCategory();
         syncBattleRamCategory();
+        syncPlayerAnimationsCategory();
+        syncServerGameplayCategory();
 
         if (conquestMinimumDenominator > conquestUnitRollDenominator) {
             conquestMinimumDenominator = conquestUnitRollDenominator;
@@ -625,6 +635,69 @@ public final class MumakilConfig {
         );
     }
 
+    private static void syncPlayerAnimationsCategory() {
+        configuration.setCategoryComment(
+                CATEGORY_PLAYER_ANIMATIONS,
+                "Server/world-controlled player movement and presentation settings. In "
+                        + "multiplayer, the server value overrides each client's "
+                        + "local preference so all players use the same movement mode."
+        );
+        configuration.setCategoryLanguageKey(
+                CATEGORY_PLAYER_ANIMATIONS,
+                "config.lotrmoremobs.category.playerAnimations"
+        );
+        configuration.setCategoryPropertyOrder(
+                CATEGORY_PLAYER_ANIMATIONS,
+                Arrays.asList("modernPlayerAnimations")
+        );
+        modernPlayerAnimations = configuration.getBoolean(
+                "modernPlayerAnimations",
+                CATEGORY_PLAYER_ANIMATIONS,
+                DEFAULT_MODERN_PLAYER_ANIMATIONS,
+                "When enabled, players use KOME's integrated modern swimming, "
+                        + "crawling, crouching, player sizing, camera, and matching "
+                        + "1.13-style presentation. When disabled, player movement, "
+                        + "stance sizing, camera behavior, and animations return to "
+                        + "classic Minecraft 1.7.10 behavior. Server/world controlled. "
+                        + "Restart required: No.",
+                "config.lotrmoremobs.modernPlayerAnimations"
+        );
+        markPropertiesRuntimeEditable(
+                CATEGORY_PLAYER_ANIMATIONS,
+                "modernPlayerAnimations"
+        );
+    }
+
+    private static void syncServerGameplayCategory() {
+        configuration.setCategoryComment(
+                CATEGORY_SERVER_GAMEPLAY,
+                "Server-side world/gameplay safety settings."
+        );
+        configuration.setCategoryLanguageKey(
+                CATEGORY_SERVER_GAMEPLAY,
+                "config.lotrmoremobs.category.serverGameplay"
+        );
+        configuration.setCategoryPropertyOrder(
+                CATEGORY_SERVER_GAMEPLAY,
+                Arrays.asList("npcBomberBlockDamage")
+        );
+        npcBomberBlockDamage = configuration.getBoolean(
+                "npcBomberBlockDamage",
+                CATEGORY_SERVER_GAMEPLAY,
+                DEFAULT_NPC_BOMBER_BLOCK_DAMAGE,
+                "When enabled, LOTR NPC-thrown Orc bombs and Warg Bombardier "
+                        + "explosions can damage terrain normally. When disabled, "
+                        + "those NPC explosions still damage entities and play their "
+                        + "normal effects but do not destroy blocks. Player-thrown "
+                        + "Orc bombs are unaffected. Restart required: No.",
+                "config.lotrmoremobs.npcBomberBlockDamage"
+        );
+        markPropertiesRuntimeEditable(
+                CATEGORY_SERVER_GAMEPLAY,
+                "npcBomberBlockDamage"
+        );
+    }
+
     private static void removeLegacyCategories() {
         if (configuration.hasCategory(LEGACY_CATEGORY_GAMEPLAY)) {
             configuration.removeCategory(
@@ -729,6 +802,8 @@ public final class MumakilConfig {
                         + " battleRams=" + enableBattleRams
                         + " ramDamage=" + ramSiegeDamage
                         + " carrierRespawnSeconds=" + ramCarrierRespawnDelaySeconds
+                        + " modernAnimations=" + modernPlayerAnimations
+                        + " npcBomberBlockDamage=" + npcBomberBlockDamage
         );
     }
 }

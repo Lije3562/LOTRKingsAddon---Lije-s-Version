@@ -3,6 +3,8 @@ package com.fuzs.aquaacrobatics.entity.player;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.entity.player.EntityPlayerMP;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.entity.EntitySize;
 import com.fuzs.aquaacrobatics.entity.Pose;
 
@@ -32,7 +34,12 @@ public final class AquaPlayerLifecycleLogic {
         ((IPlayerResizeable) player).setPose(Pose.DYING);
     }
 
+    public static void onDeath(EntityPlayerMP player) {
+        onDeath((EntityPlayer) player);
+    }
+
     public static float defaultEyeHeight(EntityPlayer player) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return 1.62F;
         return ((IPlayerResizeable) player).getPose() == Pose.SWIMMING ? 0.4F : 1.62F;
     }
 
@@ -41,7 +48,8 @@ public final class AquaPlayerLifecycleLogic {
     }
 
     public static boolean hasSwimmingEyeHeight(EntityPlayer player) {
-        return ((IPlayerResizeable) player).getPose() == Pose.SWIMMING;
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && ((IPlayerResizeable) player).getPose() == Pose.SWIMMING;
     }
 
     public static boolean hasSwimmingEyeHeight(EntityPlayerMP player) {
@@ -49,6 +57,11 @@ public final class AquaPlayerLifecycleLogic {
     }
 
     public static EntitySize resizeSize(EntityPlayer player, Pose pose) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) {
+            if (pose == Pose.SLEEPING) return AquaPoseLogic.SLEEPING_SIZE;
+            if (pose == Pose.DYING) return new EntitySize(0.6F, 1.8F, false);
+            return AquaPoseLogic.STANDING_SIZE;
+        }
         return ((IPlayerResizeable) player).getSize(pose);
     }
 

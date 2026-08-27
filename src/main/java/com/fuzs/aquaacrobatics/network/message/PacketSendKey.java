@@ -1,5 +1,6 @@
 package com.fuzs.aquaacrobatics.network.message;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
 import net.minecraft.entity.player.EntityPlayerMP;
 import net.minecraft.network.NetHandlerPlayServer;
 
@@ -91,6 +92,8 @@ public class PacketSendKey implements IMessage {
         private void handle(KeybindPacket keybind, EntityPlayerMP playerEntity) {
 
             if (keybind == KeybindPacket.TOGGLE_CRAWLING) {
+                if (!PlayerMovementMode.useModernPlayerMovement(playerEntity)) return;
+
                 IPlayerResizeable resizeable = (IPlayerResizeable) playerEntity;
 
                 // flip crawl state

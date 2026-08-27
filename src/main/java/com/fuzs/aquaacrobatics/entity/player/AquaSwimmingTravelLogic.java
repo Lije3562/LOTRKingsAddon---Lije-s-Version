@@ -6,13 +6,15 @@ import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.MathHelper;
 import net.minecraftforge.fluids.IFluidBlock;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 /** Shared predicates and numerical rules for Aqua's existing sprint-swim travel path. */
 public final class AquaSwimmingTravelLogic {
 
     private AquaSwimmingTravelLogic() {}
 
     public static boolean isActive(EntityPlayer player, IPlayerResizeable resizeable) {
-        return resizeable.isSwimming() && !player.isRiding() && !player.capabilities.isFlying && player.isInWater()
+        return PlayerMovementMode.useModernPlayerMovement(player) && resizeable.isSwimming() && !player.isRiding() && !player.capabilities.isFlying && player.isInWater()
             && !player.isOnLadder();
     }
 

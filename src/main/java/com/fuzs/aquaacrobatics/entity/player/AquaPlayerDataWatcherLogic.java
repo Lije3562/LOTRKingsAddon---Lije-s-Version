@@ -36,7 +36,8 @@ public final class AquaPlayerDataWatcherLogic {
     }
 
     public static void setForcingCrawling(EntityPlayer player, boolean flag) {
-        if (!AquaMovementLogic.canForceCrawling(player)) return;
+        if (!ConfigHandler.MovementConfig.enableToggleCrawling) return;
+        if (flag && !AquaMovementLogic.canForceCrawling(player)) return;
         player.getDataWatcher().updateObject(ConfigHandler.MiscellaneousConfig.CrawlingId, flag ? 1 : 0);
     }
 

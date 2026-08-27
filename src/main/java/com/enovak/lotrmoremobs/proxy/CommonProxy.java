@@ -23,9 +23,12 @@ import cpw.mods.fml.common.FMLCommonHandler;
 import net.minecraftforge.common.MinecraftForge;
 import com.enovak.lotrmoremobs.handler.PickupFilterEventHandler;
 import com.enovak.lotrmoremobs.handler.PickupFilterConnectionHandler;
+import com.enovak.lotrmoremobs.handler.NpcBomberBlockDamageHandler;
+import com.enovak.lotrmoremobs.handler.ServerGameplaySyncEventHandler;
 import com.enovak.lotrmoremobs.siege.creation.GateCreationEventHandler;
 import com.enovak.lotrmoremobs.siege.gate.SiegeGateLifecycleHandler;
 import com.enovak.lotrmoremobs.network.PickupFilterSyncPacket;
+import com.enovak.lotrmoremobs.network.ServerGameplaySyncPacket;
 import com.enovak.lotrmoremobs.siege.network.GateCreationSyncPacket;
 import com.enovak.lotrmoremobs.siege.network.GateAccessSyncPacket;
 import com.enovak.lotrmoremobs.siege.network.GateHealthSyncPacket;
@@ -57,6 +60,9 @@ public class CommonProxy {
     }
 
     public void handlePickupFilterSync(PickupFilterSyncPacket packet) {
+    }
+
+    public void handleServerGameplaySync(ServerGameplaySyncPacket packet) {
     }
 
     public void handleGateCreationSync(GateCreationSyncPacket packet) {
@@ -103,6 +109,13 @@ public class CommonProxy {
     }
 
     public void registerEventHandlers() {
+        FMLCommonHandler.instance().bus().register(
+                new ServerGameplaySyncEventHandler()
+        );
+        MinecraftForge.EVENT_BUS.register(
+                new NpcBomberBlockDamageHandler()
+        );
+
         if (MumakilConfig.enableMumakil) {
             MinecraftForge.EVENT_BUS.register(new MumakilFearEventHandler());
             MinecraftForge.EVENT_BUS.register(new MumakilEquipmentEventHandler());

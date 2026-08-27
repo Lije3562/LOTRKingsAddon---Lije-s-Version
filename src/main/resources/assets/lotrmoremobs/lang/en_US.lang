@@ -58,3 +58,7 @@ config.lotrmoremobs.defaultGateHealth=Default Gate Health
 config.lotrmoremobs.enableBattleRams=Enable Battle Rams
 config.lotrmoremobs.ramDamagePerImpact=Ram Damage Per Impact
 config.lotrmoremobs.ramCarrierRespawnDelaySeconds=Ram Carrier Respawn Delay (Seconds)
+config.lotrmoremobs.category.playerAnimations=Player Movement & Animations
+config.lotrmoremobs.category.serverGameplay=Server Gameplay
+config.lotrmoremobs.modernPlayerAnimations=Modern 1.13 Movement & Animations
+config.lotrmoremobs.npcBomberBlockDamage=NPC Bomber Block Damage

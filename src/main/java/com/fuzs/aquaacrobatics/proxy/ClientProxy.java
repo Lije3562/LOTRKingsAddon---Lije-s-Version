@@ -5,6 +5,8 @@ import net.minecraft.client.entity.EntityPlayerSP;
 import net.minecraft.util.ChatComponentTranslation;
 import net.minecraftforge.common.MinecraftForge;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.AquaAcrobatics;
 import com.fuzs.aquaacrobatics.biome.BiomeWaterFogColors;
 import com.fuzs.aquaacrobatics.client.handler.AirMeterHandler;
@@ -62,6 +64,9 @@ public class ClientProxy extends CommonProxy {
 
     @SubscribeEvent
     public void onKeyPress(InputEvent.KeyInputEvent event) {
+        EntityPlayerSP localPlayer = Minecraft.getMinecraft().thePlayer;
+        if (localPlayer != null && !PlayerMovementMode.useModernPlayerMovement(localPlayer)) return;
+
         if (ConfigHandler.MovementConfig.enableToggleCrawling && Keybindings.forceCrawling.getIsKeyPressed()) {
             //todone apply slowness when forcing crawling
             //todone when jumping, stop forcing crawling

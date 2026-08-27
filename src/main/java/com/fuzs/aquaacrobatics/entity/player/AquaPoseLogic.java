@@ -3,6 +3,8 @@ package com.fuzs.aquaacrobatics.entity.player;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.AxisAlignedBB;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.config.ConfigHandler;
 import com.fuzs.aquaacrobatics.entity.EntitySize;
 import com.fuzs.aquaacrobatics.entity.Pose;
@@ -37,6 +39,7 @@ public final class AquaPoseLogic {
     public static Pose choosePose(EntityPlayer player, IPlayerResizeable resizeable) {
         if (resizeable.getShouldBeDead()) return Pose.DYING;
         if (player.isPlayerSleeping()) return Pose.SLEEPING;
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return Pose.STANDING;
 
         boolean swimmingClear = isPoseClear(player, resizeable, Pose.SWIMMING);
         boolean crouchingClear = isPoseClear(player, resizeable, Pose.CROUCHING);
@@ -54,9 +57,15 @@ public final class AquaPoseLogic {
 
     /** Applies the existing post-player-tick pose boundary. */
     public static void updatePose(EntityPlayer player, IPlayerResizeable resizeable) {
+        boolean modern = PlayerMovementMode.useModernPlayerMovement(player);
+        if (!modern) {
+            resizeable.setSwimming(false);
+            resizeable.setForcingCrawling(false);
+        }
+
         Pose pose = choosePose(player, resizeable);
         if (player.worldObj.isRemote) {
-            player.yOffset = pose == Pose.SWIMMING ? 0.28F : 1.62F;
+            player.yOffset = modern && pose == Pose.SWIMMING ? 0.28F : 1.62F;
         }
         resizeable.setPose(pose);
 

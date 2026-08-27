@@ -1,5 +1,6 @@
 package com.fuzs.aquaacrobatics.entity.player;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
 import com.fuzs.aquaacrobatics.entity.Pose;
 import com.fuzs.aquaacrobatics.util.math.MathHelperNew;
 import net.minecraft.block.material.Material;
@@ -22,22 +23,30 @@ public final class AquaPlayerPresentationLogic {
 
     /** Preserves the accepted previous-to-current partial-tick interpolation direction. */
     public static float getSwimAnimation(EntityPlayer player, float partialTicks) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return 0.0F;
         AquaPlayerState state = ((IAquaPlayerStateHolder) player).getAquaPlayerState();
         return MathHelperNew.lerp(partialTicks, state.lastSwimAnimation, state.swimAnimation);
     }
 
     public static boolean isActuallySwimming(EntityPlayer player) {
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) return false;
         Pose pose = ((IPlayerResizeable) player).getPose();
         return pose == Pose.SWIMMING || pose == Pose.FALL_FLYING;
     }
 
     /** Preserves virtual isActuallySwimming dispatch before consulting vanilla water state. */
     public static boolean isVisuallySwimming(EntityPlayer player) {
-        return ((IPlayerResizeable) player).isActuallySwimming() && !player.isInWater();
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && ((IPlayerResizeable) player).isActuallySwimming() && !player.isInWater();
     }
 
     private static void updateSwimAnimation(EntityPlayer player) {
         AquaPlayerState state = ((IAquaPlayerStateHolder) player).getAquaPlayerState();
+        if (!PlayerMovementMode.useModernPlayerMovement(player)) {
+            state.lastSwimAnimation = 0.0F;
+            state.swimAnimation = 0.0F;
+            return;
+        }
         state.lastSwimAnimation = state.swimAnimation;
         if (((IPlayerResizeable) player).isActuallySwimming()) {
             state.swimAnimation = Math.min(1.0F, state.swimAnimation + 0.09F);

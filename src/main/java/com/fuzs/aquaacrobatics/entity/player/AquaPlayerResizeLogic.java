@@ -3,6 +3,8 @@ package com.fuzs.aquaacrobatics.entity.player;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.AxisAlignedBB;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.entity.EntitySize;
 import com.fuzs.aquaacrobatics.entity.Pose;
 import com.fuzs.aquaacrobatics.integration.IntegrationManager;
@@ -16,7 +18,9 @@ public final class AquaPlayerResizeLogic {
     public static void recalculateSize(EntityPlayer player, IPlayerResizeable resizeable) {
         EntitySize oldSize = resizeable.getAquaPlayerState().size;
         Pose pose = resizeable.getPose();
-        EntitySize newSize = resizeable.getSize(pose);
+        EntitySize newSize = PlayerMovementMode.useModernPlayerMovement(player)
+            ? resizeable.getSize(pose)
+            : classicSizeForPose(pose);
         if (resizeable.isResizingAllowed()) {
             recalculateSize(player, oldSize, newSize);
             player.width = newSize.width;
@@ -25,6 +29,12 @@ public final class AquaPlayerResizeLogic {
 
         // The resize gate intentionally observes the old size through getWidth/getHeight.
         resizeable.getAquaPlayerState().size = newSize;
+    }
+
+    private static EntitySize classicSizeForPose(Pose pose) {
+        if (pose == Pose.SLEEPING) return AquaPoseLogic.SLEEPING_SIZE;
+        if (pose == Pose.DYING) return new EntitySize(0.6F, 1.8F, false);
+        return AquaPoseLogic.STANDING_SIZE;
     }
 
     private static void recalculateSize(EntityPlayer player, EntitySize oldSize, EntitySize newSize) {

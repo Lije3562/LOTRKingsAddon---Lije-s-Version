@@ -4,6 +4,8 @@ import net.minecraft.block.material.Material;
 import net.minecraft.entity.player.EntityPlayer;
 import net.minecraft.util.MathHelper;
 
+import com.enovak.lotrmoremobs.config.PlayerMovementMode;
+
 import com.fuzs.aquaacrobatics.integration.efr.EFRIntegration;
 
 /** Shared general water, underwater, and synchronized swimming-state policy. */
@@ -37,7 +39,8 @@ public final class AquaPlayerWaterLogic {
     }
 
     public static boolean canSwim(EntityPlayer player) {
-        return ((IAquaPlayerStateHolder) player).getAquaPlayerState().eyesInWater && player.isInWater();
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && ((IAquaPlayerStateHolder) player).getAquaPlayerState().eyesInWater && player.isInWater();
     }
 
     public static void updateSwimming(EntityPlayer player) {
@@ -45,6 +48,7 @@ public final class AquaPlayerWaterLogic {
     }
 
     public static boolean isSwimming(EntityPlayer player, boolean swimmingFlag) {
-        return !player.capabilities.isFlying && swimmingFlag && !EFRIntegration.isSpectator(player);
+        return PlayerMovementMode.useModernPlayerMovement(player)
+            && !player.capabilities.isFlying && swimmingFlag && !EFRIntegration.isSpectator(player);
     }
 }

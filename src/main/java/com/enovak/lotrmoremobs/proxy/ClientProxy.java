@@ -7,6 +7,7 @@ import com.enovak.lotrmoremobs.client.MumakilHiredDriverGuiHandler;
 import com.enovak.lotrmoremobs.client.MumakilInventoryKeyHandler;
 import com.enovak.lotrmoremobs.client.UnitTradePledgeNavigationHandler;
 import com.enovak.lotrmoremobs.client.config.MumakilConfigChangeHandler;
+import com.enovak.lotrmoremobs.client.config.ClientServerGameplayState;
 import com.enovak.lotrmoremobs.client.gui.MumakilHiredDriverGuiContext;
 import com.enovak.lotrmoremobs.entity.animal.LOTREntityMumakil;
 import com.enovak.lotrmoremobs.entity.npc.LOTREntityMumakilHirePreviewDriver;
@@ -27,6 +28,7 @@ import net.minecraftforge.common.MinecraftForge;
 import software.bernie.geckolib3.GeckoLib;
 import com.enovak.lotrmoremobs.client.pickupfilter.ClientPickupFilterState;
 import com.enovak.lotrmoremobs.network.PickupFilterSyncPacket;
+import com.enovak.lotrmoremobs.network.ServerGameplaySyncPacket;
 import com.enovak.lotrmoremobs.client.pickupfilter.PickupFilterGuiOpenHandler;
 import com.enovak.lotrmoremobs.client.pickupfilter.PickupFilterInventoryButtonHandler;
 import com.enovak.lotrmoremobs.siege.client.GateCreationClientHandler;
@@ -146,6 +148,20 @@ public class ClientProxy extends CommonProxy {
             public void run() {
                 ClientPickupFilterState.setExcludedItems(
                         packet.getExcludedItems()
+                );
+            }
+        });
+    }
+
+    @Override
+    public void handleServerGameplaySync(
+            final ServerGameplaySyncPacket packet
+    ) {
+        Minecraft.getMinecraft().func_152344_a(new Runnable() {
+            @Override
+            public void run() {
+                ClientServerGameplayState.setModernPlayerAnimations(
+                        packet.isModernPlayerAnimations()
                 );
             }
         });
