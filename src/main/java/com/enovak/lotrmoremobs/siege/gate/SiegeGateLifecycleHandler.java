@@ -120,15 +120,20 @@ public final class SiegeGateLifecycleHandler {
     }
 
     /**
-     * Sneak-right-click keeps block placement available while making the gate
-     * GUI accessible with an empty hand or a non-block item.
+     * Siege Gate interaction is authoritative for Siege Gate blocks.
      *
-     * Forge normally gives a sneaking held item first chance to use itself,
-     * which means Block#onBlockActivated may never run for items such as
-     * weapons or tools. Intercept the server-side interaction event so those
-     * non-placeable clicks still open the appropriate gate GUI.
+     * LOTR banner protection and other generic area-protection handlers may
+     * cancel PlayerInteractEvent before vanilla reaches Block#onBlockActivated.
+     * Gate operation must not inherit those external permissions: the gate's
+     * own canOperate/canManage rules already decide what each player may do.
+     *
+     * Run at LOWEST and receive canceled events so the gate can consume its own
+     * interaction after generic protection handlers have had their turn.
      */
-    @SubscribeEvent(priority = EventPriority.HIGHEST)
+    @SubscribeEvent(
+            priority = EventPriority.LOWEST,
+            receiveCanceled = true
+    )
     public void onPlayerInteract(PlayerInteractEvent event) {
         if (event.world == null
                 || event.world.isRemote
@@ -138,58 +143,109 @@ public final class SiegeGateLifecycleHandler {
         }
 
         EntityPlayer player = event.entityPlayer;
-        if (!(player instanceof EntityPlayerMP)
-                || !player.isSneaking()) {
+        if (!(player instanceof EntityPlayerMP)) {
             return;
         }
 
-        /*
-         * A held block keeps normal sneak-placement semantics. Everything
-         * else -- including an empty hand -- is treated as a GUI request.
-         */
-        ItemStack held = player.getCurrentEquippedItem();
-        if (held != null && held.getItem() instanceof ItemBlock) {
+        boolean clickedController =
+                event.world.getBlock(
+                        event.x,
+                        event.y,
+                        event.z
+                ) == SiegeRegistry.gateController;
+
+        boolean clickedPart =
+                event.world.getBlock(
+                        event.x,
+                        event.y,
+                        event.z
+                ) == SiegeRegistry.gatePart;
+
+        if (!clickedController
+                && !clickedPart) {
             return;
         }
 
         TileEntitySiegeGate controller = null;
 
-        if (event.world.getBlock(event.x, event.y, event.z)
-                == SiegeRegistry.gateController) {
+        if (clickedController) {
+            TileEntity tileEntity =
+                    event.world.getTileEntity(
+                            event.x,
+                            event.y,
+                            event.z
+                    );
 
-            TileEntity tileEntity = event.world.getTileEntity(
-                    event.x,
-                    event.y,
-                    event.z
-            );
             if (tileEntity instanceof TileEntitySiegeGate) {
-                controller = (TileEntitySiegeGate)tileEntity;
+                controller =
+                        (TileEntitySiegeGate)tileEntity;
             }
 
-        } else if (event.world.getBlock(event.x, event.y, event.z)
-                == SiegeRegistry.gatePart) {
-
-            controller = GateRegistry.getController(
-                    event.world,
-                    event.x,
-                    event.y,
-                    event.z
-            );
         } else {
-            return;
+            controller =
+                    GateRegistry.getController(
+                            event.world,
+                            event.x,
+                            event.y,
+                            event.z
+                    );
         }
 
         if (controller == null) {
             return;
         }
 
+        /*
+         * Preserve the controller's existing sneak-placement behavior.
+         * Placing a held block against the controller is ordinary world
+         * placement, not a gate command, so normal LOTR banner protection may
+         * still govern that placement.
+         *
+         * GateParts intentionally keep their existing behavior: sneaking on a
+         * part opens Gate Management rather than placing against the part.
+         */
+        ItemStack held =
+                player.getCurrentEquippedItem();
+
+        if (clickedController
+                && player.isSneaking()
+                && held != null
+                && held.getItem() instanceof ItemBlock) {
+
+            return;
+        }
+
+        /*
+         * Consume the gate command even if another handler already canceled
+         * this event. We invoke the gate's authoritative server path directly,
+         * so external banner protection cannot grant or deny gate access.
+         */
         event.setCanceled(true);
 
-        EntityPlayerMP serverPlayer = (EntityPlayerMP)player;
+        EntityPlayerMP serverPlayer =
+                (EntityPlayerMP)player;
+
+        if (clickedPart
+                && !player.isSneaking()) {
+
+            controller.tryToggleOpenState(
+                    serverPlayer
+            );
+
+            return;
+        }
+
         if (controller.isFinalized()) {
-            GateManagementManager.open(serverPlayer, controller);
+            GateManagementManager.open(
+                    serverPlayer,
+                    controller
+            );
+
         } else {
-            GateCreationManager.openControls(serverPlayer, controller);
+            GateCreationManager.openControls(
+                    serverPlayer,
+                    controller
+            );
         }
     }
 
