@@ -130,14 +130,14 @@ public class GuiGateManagement extends GuiScreen {
                 );
 
         /*
-         * Mirror the condition controls: Max HP belongs under Health on the
-         * left, while the operating mode belongs under State on the right.
+         * Keep the secondary controls visually lighter than Gate Name.
+         * Max HP stays compact under Health, while Mode mirrors it under State.
          */
         maxHealthField =
                 createField(
-                        centerX - 80,
+                        centerX - 70,
                         top + 61,
-                        80,
+                        58,
                         7,
                         gate == null
                                 ? Integer.toString(
@@ -152,7 +152,7 @@ public class GuiGateManagement extends GuiScreen {
         buttonList.add(
                 new GuiButton(
                         GATE_CONTROL_MODE_BUTTON,
-                        centerX + 45,
+                        centerX + 42,
                         top + 61,
                         84,
                         20,
@@ -171,7 +171,7 @@ public class GuiGateManagement extends GuiScreen {
                         .codeName();
 
         int factionWidth =
-                150;
+                132;
 
         int factionX =
                 centerX
@@ -180,7 +180,7 @@ public class GuiGateManagement extends GuiScreen {
         buttonList.add(
                 new GuiGateFactionArrowButton(
                         FACTION_PREVIOUS_BUTTON,
-                        factionX - 26,
+                        factionX - 22,
                         top + 103,
                         true
                 )
@@ -191,7 +191,7 @@ public class GuiGateManagement extends GuiScreen {
                         FACTION_NEXT_BUTTON,
                         factionX
                                 + factionWidth
-                                + 6,
+                                + 2,
                         top + 103,
                         false
                 )
@@ -244,9 +244,9 @@ public class GuiGateManagement extends GuiScreen {
         buttonList.add(
                 new GuiGateRepairButton(
                         BEGIN_REPAIR_BUTTON,
-                        centerX - 120,
+                        centerX - 90,
                         top + 176,
-                        240,
+                        180,
                         20,
                         "Repair Gate"
                 )
@@ -649,10 +649,10 @@ public class GuiGateManagement extends GuiScreen {
         );
 
         int leftColumnX =
-                centerX - 125;
+                centerX - 116;
 
         int rightColumnX =
-                centerX + 10;
+                centerX + 14;
 
         drawString(
                 fontRendererObj,
@@ -667,7 +667,7 @@ public class GuiGateManagement extends GuiScreen {
                 gate.getCurrentHealth()
                         + " / "
                         + gate.getMaxHealth(),
-                centerX - 80,
+                centerX - 74,
                 top + 43,
                 0xCCCCCC
         );
@@ -683,7 +683,7 @@ public class GuiGateManagement extends GuiScreen {
         drawString(
                 fontRendererObj,
                 gate.getGateState().name(),
-                centerX + 48,
+                centerX + 53,
                 top + 43,
                 0xCCCCCC
         );
@@ -1460,7 +1460,7 @@ public class GuiGateManagement extends GuiScreen {
             int factionY
     ) {
         int boxWidth =
-                150;
+                132;
 
         int left =
                 centerX
@@ -2345,7 +2345,7 @@ public class GuiGateManagement extends GuiScreen {
             int y
     ) {
         int boxWidth =
-                150;
+                132;
 
         int left =
                 centerX

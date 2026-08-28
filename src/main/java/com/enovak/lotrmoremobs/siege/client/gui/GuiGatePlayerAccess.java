@@ -30,10 +30,10 @@ public class GuiGatePlayerAccess
             18;
 
     private static final int ROW_SPACING =
-            19;
+            22;
 
     private static final int ROWS_TOP_OFFSET =
-            55;
+            103;
 
     private static final int BACK_BUTTON =
             1;
@@ -155,9 +155,9 @@ public class GuiGatePlayerAccess
         GuiButton factionAccessButton =
                 new GuiButton(
                         FACTION_ACCESS_BUTTON,
-                        left + 20,
-                        top + 30,
-                        142,
+                        centerX - 90,
+                        top + 29,
+                        180,
                         20,
                         getFactionAccessButtonText(
                                 gate
@@ -173,12 +173,41 @@ public class GuiGatePlayerAccess
                 factionAccessButton
         );
 
+        String alignmentLabel =
+                "Required Alignment";
+
+        int alignmentFieldWidth =
+                60;
+
+        int alignmentGap =
+                6;
+
+        int alignmentLabelWidth =
+                fontRendererObj
+                        .getStringWidth(
+                                alignmentLabel
+                        );
+
+        int alignmentGroupWidth =
+                alignmentLabelWidth
+                        + alignmentGap
+                        + alignmentFieldWidth;
+
+        int alignmentLabelX =
+                centerX
+                        - alignmentGroupWidth / 2;
+
+        int alignmentFieldX =
+                alignmentLabelX
+                        + alignmentLabelWidth
+                        + alignmentGap;
+
         alignmentField =
                 new GuiTextField(
                         fontRendererObj,
-                        left + 220,
-                        top + 30,
-                        54,
+                        alignmentFieldX,
+                        top + 55,
+                        alignmentFieldWidth,
                         20
                 );
 
@@ -449,14 +478,6 @@ public class GuiGatePlayerAccess
                 0xFFFFFF
         );
 
-        drawCenteredString(
-                fontRendererObj,
-                "Access = operate/repair    Manager = operate/configure",
-                centerX,
-                top + 15,
-                0xAAAAAA
-        );
-
         TileEntitySiegeGate gate =
                 getGate();
 
@@ -465,18 +486,69 @@ public class GuiGatePlayerAccess
                     fontRendererObj,
                     "Gate unavailable",
                     centerX,
-                    top + 48,
+                    top + 58,
                     0xFF7777
             );
         } else if (alignmentField != null) {
+            String alignmentLabel =
+                    "Required Alignment";
+
+            int alignmentFieldWidth =
+                    60;
+
+            int alignmentGap =
+                    6;
+
+            int alignmentLabelWidth =
+                    fontRendererObj
+                            .getStringWidth(
+                                    alignmentLabel
+                            );
+
+            int alignmentGroupWidth =
+                    alignmentLabelWidth
+                            + alignmentGap
+                            + alignmentFieldWidth;
+
+            int alignmentLabelX =
+                    centerX
+                            - alignmentGroupWidth / 2;
+
             drawString(
                     fontRendererObj,
-                    "Alignment",
-                    centerX + 19,
-                    top + 36,
+                    alignmentLabel,
+                    alignmentLabelX,
+                    top + 61,
                     canEditAlignment(gate)
                             ? 0xBBBBBB
                             : 0x666666
+            );
+
+            int panelLeft =
+                    centerX - 147;
+
+            drawRect(
+                    panelLeft + 20,
+                    top + 82,
+                    panelLeft + 274,
+                    top + 83,
+                    0xFF555555
+            );
+
+            drawString(
+                    fontRendererObj,
+                    "Player",
+                    panelLeft + 22,
+                    top + 89,
+                    0x888888
+            );
+
+            drawCenteredString(
+                    fontRendererObj,
+                    "Role",
+                    panelLeft + 231,
+                    top + 89,
+                    0x888888
             );
         }
 
@@ -555,10 +627,10 @@ public class GuiGatePlayerAccess
                                 + ROWS_TOP_OFFSET
                                 + 5
                                 + row * ROW_SPACING;
-                drawString(
+                drawCenteredString(
                         fontRendererObj,
                         role,
-                        actionX + 8,
+                        actionX + 33,
                         y,
                         0xBBBBBB
                 );
@@ -579,6 +651,87 @@ public class GuiGatePlayerAccess
                 : fields) {
 
             field.drawTextBox();
+        }
+
+        drawRoleTooltip(
+                mouseX,
+                mouseY
+        );
+    }
+
+    private void drawRoleTooltip(
+            int mouseX,
+            int mouseY
+    ) {
+        int top =
+                getTop();
+
+        int left =
+                width / 2 - 147;
+
+        int actionX =
+                left + 20 + 174 + 4;
+
+        for (int row = 0;
+             row < fields.size();
+             ++row) {
+
+            if (rowUuids[row] == null) {
+                continue;
+            }
+
+            int rowY =
+                    top
+                            + ROWS_TOP_OFFSET
+                            + row * ROW_SPACING;
+
+            if (mouseX < actionX
+                    || mouseX >= actionX + 66
+                    || mouseY < rowY
+                    || mouseY >= rowY + ROW_HEIGHT) {
+
+                continue;
+            }
+
+            List<String> tooltip =
+                    new ArrayList<String>();
+
+            if (rowOwners[row]) {
+                tooltip.add(
+                        "Owner"
+                );
+
+                tooltip.add(
+                        "Full gate control"
+                );
+
+            } else if (rowEditors[row]) {
+                tooltip.add(
+                        "Manager"
+                );
+
+                tooltip.add(
+                        "Can operate, repair, and configure the gate"
+                );
+
+            } else {
+                tooltip.add(
+                        "Access"
+                );
+
+                tooltip.add(
+                        "Can operate and repair the gate"
+                );
+            }
+
+            drawHoveringText(
+                    tooltip,
+                    mouseX,
+                    mouseY,
+                    fontRendererObj
+            );
+
+            return;
         }
     }
 
