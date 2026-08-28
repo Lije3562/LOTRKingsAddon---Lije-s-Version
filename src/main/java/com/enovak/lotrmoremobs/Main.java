@@ -56,14 +56,15 @@ import com.enovak.lotrmoremobs.pickupfilter.PlayerPickupFilterData;
 public class Main {
 
     public static final String MODID = "lotrmoremobs";
-    public static final String VERSION = "1.0.1";
+    public static final String VERSION = "1.0.2";
     public static final String NAME =
-            "LOTR Kings of Middle Earth Addon";
+            "LOTR KOME Addon";
     public static final String DESCRIPTION =
-            "Adds Mumakil, Mumakil equipment and war formations, an item "
-                    + "pickup filter, Mortal Gandalf, customizable siege gates, "
-                    + "battle rams, and additional Middle-earth content designed "
-                    + "for The Lord of the Rings Mod.";
+            "Expands The Lord of the Rings Mod with rideable and hireable Mumakil, "
+                    + "Mumakil equipment and war formations, customizable siege gates "
+                    + "with ownership and access controls, crewed battle rams and siege "
+                    + "mechanics, configurable item pickup filtering, Mortal Gandalf, "
+                    + "enhanced movement, and additional immersive Middle-earth gameplay.";
     public static SimpleNetworkWrapper network;
 
     @SidedProxy(
