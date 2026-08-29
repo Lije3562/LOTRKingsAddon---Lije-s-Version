@@ -39,6 +39,10 @@ public final class AquaClientEntityTransformer implements IClassTransformer {
     private static final String MODEL_BIPED = "net.minecraft.client.model.ModelBiped";
     private static final String RENDER_PLAYER = "net.minecraft.client.renderer.entity.RenderPlayer";
     private static final String ENTITY_RENDERER = "net.minecraft.client.renderer.EntityRenderer";
+    private static final String CHARACTER_CREATION_RENDERER =
+        "com.lotrcharactercreation.client.render.RacePlayerRenderer";
+    private static final String CHARACTER_CREATION_MODEL_PREFIX =
+        "com.lotrcharactercreation.client.model.Player";
     private static final String BOAT_LOGIC = "com/fuzs/aquaacrobatics/client/render/AquaBoatRenderLogic";
     private static final String REMOTE_PRESENTATION_LOGIC =
         "com/fuzs/aquaacrobatics/client/entity/AquaRemotePlayerPresentationLogic";
@@ -47,7 +51,9 @@ public final class AquaClientEntityTransformer implements IClassTransformer {
     private static final String MODEL_LOGIC = "com/fuzs/aquaacrobatics/client/model/AquaModelBipedLogic";
     private static final String MODEL_INTERFACE = "com/fuzs/aquaacrobatics/client/model/IModelBipedSwimming";
     private static final String RENDER_PLAYER_LOGIC = "com/fuzs/aquaacrobatics/client/render/AquaRenderPlayerLogic";
+    private static final String PLAYER_LIGHTING_LOGIC = "com/fuzs/aquaacrobatics/client/render/AquaPlayerLightingLogic";
     private static final String CAMERA_RENDER_LOGIC = "com/fuzs/aquaacrobatics/client/AquaCameraRenderLogic";
+    private static final String CAMERA_COLLISION_LOGIC = "com/fuzs/aquaacrobatics/client/AquaCameraCollisionLogic";
     private static final String ON_UPDATE_MCP = "onUpdate";
     private static final String ON_UPDATE_SRG = "func_70071_h_";
     private static final String ON_UPDATE_NOTCH = "h";
@@ -60,7 +66,12 @@ public final class AquaClientEntityTransformer implements IClassTransformer {
 
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
-        if (!ENTITY_OTHER_PLAYER.equals(transformedName) && !ITEM_RENDERER.equals(transformedName) && !CLIENT_PLAYER.equals(transformedName) && !ENTITY_PLAYER_SP.equals(transformedName) && !RENDER_BOAT.equals(transformedName) && !MODEL_BIPED.equals(transformedName) && !RENDER_PLAYER.equals(transformedName) && !ENTITY_RENDERER.equals(transformedName)) return basicClass;
+        if (!ENTITY_OTHER_PLAYER.equals(transformedName) && !ITEM_RENDERER.equals(transformedName)
+            && !CLIENT_PLAYER.equals(transformedName) && !ENTITY_PLAYER_SP.equals(transformedName)
+            && !RENDER_BOAT.equals(transformedName) && !MODEL_BIPED.equals(transformedName)
+            && !RENDER_PLAYER.equals(transformedName) && !ENTITY_RENDERER.equals(transformedName)
+            && !CHARACTER_CREATION_RENDERER.equals(transformedName)
+            && !this.isCharacterCreationModelAdapter(transformedName)) return basicClass;
         if (basicClass == null) {
             throw new IllegalStateException("Aqua client transformer received null bytecode for " + transformedName);
         }
@@ -73,12 +84,223 @@ public final class AquaClientEntityTransformer implements IClassTransformer {
         } else if (ITEM_RENDERER.equals(transformedName)) {
             this.addWarpedWaterOverlayAlphaBridge(classNode);
             this.verifyWarpedWaterOverlayAlphaBridge(classNode);
-        } else if(ENTITY_PLAYER_SP.equals(transformedName)) { this.addMovementStorageAccess(classNode); this.addClientPlayerPushOutHooks(classNode); } else if(CLIENT_PLAYER.equals(transformedName)) this.addClientPlayerMethods(classNode); else if(RENDER_BOAT.equals(transformedName)) this.addBoatBridge(classNode); else if(MODEL_BIPED.equals(transformedName)) this.addModelBiped(classNode); else if(RENDER_PLAYER.equals(transformedName)) this.addRenderPlayer(classNode); else { this.addCameraBridge(classNode); this.verifyCameraBridge(classNode); }
+        } else if(ENTITY_PLAYER_SP.equals(transformedName)) {
+            this.addMovementStorageAccess(classNode);
+            this.addClientPlayerPushOutHooks(classNode);
+        } else if(CLIENT_PLAYER.equals(transformedName)) {
+            this.addClientPlayerMethods(classNode);
+        } else if(RENDER_BOAT.equals(transformedName)) {
+            this.addBoatBridge(classNode);
+        } else if(MODEL_BIPED.equals(transformedName)) {
+            this.addModelBiped(classNode);
+        } else if(RENDER_PLAYER.equals(transformedName)) {
+            this.addRenderPlayer(classNode);
+        } else if(CHARACTER_CREATION_RENDERER.equals(transformedName)) {
+            this.addCharacterCreationRendererLightingBridge(classNode);
+            this.verifyCharacterCreationRendererLightingBridge(classNode);
+        } else if(this.isCharacterCreationModelAdapter(transformedName)) {
+            this.addCharacterCreationModelPost(classNode);
+        } else if(ENTITY_RENDERER.equals(transformedName)) {
+            this.addCameraBridge(classNode);
+            this.addCameraCollisionBridge(classNode);
+            this.verifyCameraBridge(classNode);
+            this.verifyCameraCollisionBridge(classNode);
+        }
 
         ClassWriter writer = new ClassWriter(ClassWriter.COMPUTE_MAXS);
         classNode.accept(writer);
         byte[] result = writer.toByteArray();
         return result;
+    }
+
+    private boolean isCharacterCreationModelAdapter(String transformedName) {
+        if (transformedName == null || !transformedName.startsWith(CHARACTER_CREATION_MODEL_PREFIX)) return false;
+        return transformedName.endsWith("DwarfModelAdapter")
+            || transformedName.endsWith("ElfModelAdapter")
+            || transformedName.endsWith("HobbitModelAdapter")
+            || transformedName.endsWith("ManModelAdapter")
+            || transformedName.endsWith("OrcModelAdapter");
+    }
+
+    /**
+     * Character Creation's adapters invoke the complete LOTRModel* angle method after
+     * ModelBiped's transformed method has run. Apply Aqua's swimming limbs once more
+     * at the adapter RETURN so LOTR's final rotations cannot overwrite them.
+     */
+    private void addCharacterCreationModelPost(ClassNode classNode) {
+        MethodNode target = null;
+        for (MethodNode method : classNode.methods) {
+            if (!("setRotationAngles".equals(method.name) || "func_78087_a".equals(method.name)
+                || "a".equals(method.name))) continue;
+
+            org.objectweb.asm.Type[] args = org.objectweb.asm.Type.getArgumentTypes(method.desc);
+            if (args.length != 7 || org.objectweb.asm.Type.getReturnType(method.desc).getSort() != org.objectweb.asm.Type.VOID) continue;
+            boolean shape = true;
+            for (int i = 0; i < 6; ++i) {
+                if (args[i].getSort() != org.objectweb.asm.Type.FLOAT) {
+                    shape = false;
+                    break;
+                }
+            }
+            if (!shape || args[6].getSort() != org.objectweb.asm.Type.OBJECT) continue;
+            if (target != null) {
+                throw new IllegalStateException("Ambiguous Character Creation model angle target in " + classNode.name);
+            }
+            target = method;
+        }
+        if (target == null) {
+            throw new IllegalStateException("Missing Character Creation model angle target in " + classNode.name);
+        }
+
+        int returns = 0;
+        for (AbstractInsnNode instruction = target.instructions.getFirst(); instruction != null;
+            instruction = instruction.getNext()) {
+
+            if (instruction.getOpcode() != Opcodes.RETURN) continue;
+            InsnList post = new InsnList();
+            post.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            for (int i = 1; i <= 6; ++i) post.add(new VarInsnNode(Opcodes.FLOAD, i));
+            post.add(new VarInsnNode(Opcodes.ALOAD, 7));
+            post.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                MODEL_LOGIC,
+                "postCharacterCreation",
+                "(Ljava/lang/Object;FFFFFFLjava/lang/Object;)V",
+                false));
+            target.instructions.insertBefore(instruction, post);
+            ++returns;
+        }
+        if (returns != 1) {
+            throw new IllegalStateException(
+                "Character Creation model angle target expected one RETURN in " + classNode.name + ", found " + returns);
+        }
+    }
+
+
+    /**
+     * Vanilla 1.7.10 third-person camera tracing uses World#rayTraceBlocks(Vec3, Vec3),
+     * which explicitly includes non-collidable blocks. Route the one orientCamera
+     * ray-trace call through a helper that asks World to ignore blocks without a
+     * collision box so tall grass, flowers, and similar permeable blocks do not
+     * collapse the camera into the player's head.
+     */
+    private void addCameraCollisionBridge(ClassNode c) {
+        MethodNode camera = findMethod(c, "(F)V", "orientCamera", "func_78467_g", "h");
+        MethodInsnNode rayTrace = null;
+        for (AbstractInsnNode i = camera.instructions.getFirst(); i != null; i = i.getNext()) {
+            if (!(i instanceof MethodInsnNode)) continue;
+            MethodInsnNode x = (MethodInsnNode) i;
+            if (x.getOpcode() != Opcodes.INVOKEVIRTUAL) continue;
+            if (!("rayTraceBlocks".equals(x.name) || "func_72933_a".equals(x.name) || "a".equals(x.name))) continue;
+            org.objectweb.asm.Type[] args = org.objectweb.asm.Type.getArgumentTypes(x.desc);
+            org.objectweb.asm.Type result = org.objectweb.asm.Type.getReturnType(x.desc);
+            if (args.length != 2 || args[0].getSort() != org.objectweb.asm.Type.OBJECT
+                || args[1].getSort() != org.objectweb.asm.Type.OBJECT
+                || result.getSort() != org.objectweb.asm.Type.OBJECT) continue;
+            if (rayTrace != null) throw new IllegalStateException("ambiguous EntityRenderer third-person ray trace");
+            rayTrace = x;
+        }
+        if (rayTrace == null) throw new IllegalStateException("missing EntityRenderer third-person ray trace");
+
+        String worldOwner = rayTrace.owner;
+        String originalDescriptor = rayTrace.desc;
+        rayTrace.setOpcode(Opcodes.INVOKESTATIC);
+        rayTrace.owner = CAMERA_COLLISION_LOGIC;
+        rayTrace.name = "rayTraceCameraBlocks";
+        rayTrace.desc = "(L" + worldOwner + ";" + originalDescriptor.substring(1);
+        rayTrace.itf = false;
+    }
+
+    private void verifyCameraCollisionBridge(ClassNode c) {
+        MethodNode camera = findMethod(c, "(F)V", "orientCamera", "func_78467_g", "h");
+        int bridges = 0;
+        for (AbstractInsnNode i = camera.instructions.getFirst(); i != null; i = i.getNext()) {
+            if (!(i instanceof MethodInsnNode)) continue;
+            MethodInsnNode x = (MethodInsnNode) i;
+            if (!CAMERA_COLLISION_LOGIC.equals(x.owner)) continue;
+            if (x.getOpcode() != Opcodes.INVOKESTATIC || !"rayTraceCameraBlocks".equals(x.name)) {
+                throw new IllegalStateException("unexpected EntityRenderer camera collision bridge");
+            }
+            org.objectweb.asm.Type[] args = org.objectweb.asm.Type.getArgumentTypes(x.desc);
+            if (args.length != 3 || args[0].getSort() != org.objectweb.asm.Type.OBJECT
+                || args[1].getSort() != org.objectweb.asm.Type.OBJECT
+                || args[2].getSort() != org.objectweb.asm.Type.OBJECT
+                || org.objectweb.asm.Type.getReturnType(x.desc).getSort() != org.objectweb.asm.Type.OBJECT) {
+                throw new IllegalStateException("invalid EntityRenderer camera collision bridge descriptor");
+            }
+            ++bridges;
+        }
+        if (bridges != 1) {
+            throw new IllegalStateException("EntityRenderer camera collision bridge verification failed: " + bridges);
+        }
+    }
+
+    /**
+     * RenderManager has already chosen a lightmap before Character Creation enters
+     * its RacePlayerRenderer. Character Creation temporarily changes local yOffset
+     * during that same render tick, so reapply the physical-player lightmap directly
+     * before each RacePlayerRenderer -> RenderPlayer delegation.
+     */
+    private void addCharacterCreationRendererLightingBridge(ClassNode c) {
+        MethodNode render = null;
+        for (MethodNode method : c.methods) {
+            org.objectweb.asm.Type[] args = org.objectweb.asm.Type.getArgumentTypes(method.desc);
+            if (args.length != 6 || args[0].getSort() != org.objectweb.asm.Type.OBJECT
+                || args[1].getSort() != org.objectweb.asm.Type.DOUBLE
+                || args[2].getSort() != org.objectweb.asm.Type.DOUBLE
+                || args[3].getSort() != org.objectweb.asm.Type.DOUBLE
+                || args[4].getSort() != org.objectweb.asm.Type.FLOAT
+                || args[5].getSort() != org.objectweb.asm.Type.FLOAT
+                || org.objectweb.asm.Type.getReturnType(method.desc).getSort() != org.objectweb.asm.Type.VOID) continue;
+            if (!("doRender".equals(method.name) || "func_76986_a".equals(method.name) || "a".equals(method.name))) continue;
+            if (render != null) throw new IllegalStateException("ambiguous Character Creation player render target");
+            render = method;
+        }
+        if (render == null) throw new IllegalStateException("missing Character Creation player render target");
+
+        int delegates = 0;
+        for (AbstractInsnNode i = render.instructions.getFirst(); i != null; i = i.getNext()) {
+            if (!(i instanceof MethodInsnNode)) continue;
+            MethodInsnNode x = (MethodInsnNode) i;
+            if (x.getOpcode() != Opcodes.INVOKESPECIAL || !c.superName.equals(x.owner) || !render.desc.equals(x.desc)) continue;
+
+            InsnList light = new InsnList();
+            light.add(new VarInsnNode(Opcodes.ALOAD, 1));
+            light.add(new VarInsnNode(Opcodes.FLOAD, 9));
+            light.add(new MethodInsnNode(
+                Opcodes.INVOKESTATIC,
+                PLAYER_LIGHTING_LOGIC,
+                "applyCharacterCreationLightmap",
+                "(Ljava/lang/Object;F)V",
+                false));
+            render.instructions.insertBefore(x, light);
+            ++delegates;
+        }
+        if (delegates != 2) {
+            throw new IllegalStateException(
+                "Character Creation renderer expected two RenderPlayer delegates, found " + delegates);
+        }
+    }
+
+    private void verifyCharacterCreationRendererLightingBridge(ClassNode c) {
+        int bridges = 0;
+        for (MethodNode method : c.methods) {
+            for (AbstractInsnNode i = method.instructions.getFirst(); i != null; i = i.getNext()) {
+                if (!(i instanceof MethodInsnNode)) continue;
+                MethodInsnNode x = (MethodInsnNode) i;
+                if (!PLAYER_LIGHTING_LOGIC.equals(x.owner)) continue;
+                if (x.getOpcode() != Opcodes.INVOKESTATIC
+                    || !"applyCharacterCreationLightmap".equals(x.name)
+                    || !"(Ljava/lang/Object;F)V".equals(x.desc)) {
+                    throw new IllegalStateException("unexpected Character Creation player lighting bridge");
+                }
+                ++bridges;
+            }
+        }
+        if (bridges != 2) {
+            throw new IllegalStateException(
+                "Character Creation player lighting bridge verification failed: " + bridges);
+        }
     }
 
     private MethodNode findMethod(ClassNode c,String desc,String... names){MethodNode r=null;for(MethodNode m:c.methods){if(!m.desc.equals(desc))continue;boolean ok=false;for(String n:names)if(n.equals(m.name))ok=true;if(!ok)continue;if(r!=null)throw new IllegalStateException("Ambiguous Aqua client target "+desc);r=m;}if(r==null)throw new IllegalStateException("Missing Aqua client target "+desc);return r;}
@@ -146,8 +368,84 @@ public final class AquaClientEntityTransformer implements IClassTransformer {
         if (c.interfaces.contains(CLIENT_PLAYER_INTERFACE)) throw new IllegalStateException("Duplicate IPlayerSPSwimming");
         c.interfaces.add(CLIENT_PLAYER_INTERFACE);
         addClient(c,"isActuallySneaking","()Z"); addClient(c,"isForcedDown","()Z"); addClient(c,"isUsingSwimmingAnimation","()Z"); addClient(c,"isUsingSwimmingAnimation","(FF)Z"); addClient(c,"canSwim","()Z"); addClient(c,"isMovingForward","(FF)Z"); addClient(c,"canPerformElytraTakeoff","()Z");
+        addClientPlayerNetworkStanceGuard(c);
+        verifyClientPlayerNetworkStanceGuard(c);
     }
     private void addClient(ClassNode c,String name,String desc) { for(MethodNode old:c.methods)if(old.name.equals(name)&&old.desc.equals(desc))throw new IllegalStateException("Client method collision "+name+desc); MethodNode m=new MethodNode(Opcodes.ACC_PUBLIC,name,desc,null,null); m.instructions.add(new VarInsnNode(Opcodes.ALOAD,0)); if("(FF)Z".equals(desc)){m.instructions.add(new VarInsnNode(Opcodes.FLOAD,1));m.instructions.add(new VarInsnNode(Opcodes.FLOAD,2));} m.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC,CLIENT_PLAYER_LOGIC,name,"(L"+c.name+";"+desc.substring(1),false)); m.instructions.add(new org.objectweb.asm.tree.InsnNode(Opcodes.IRETURN)); c.methods.add(m); }
+
+    private void addClientPlayerNetworkStanceGuard(ClassNode c) {
+        MethodNode method = findSendMotionUpdates(c);
+        int savedPosY = method.maxLocals;
+        method.maxLocals += 2;
+
+        AbstractInsnNode first = method.instructions.getFirst();
+        while (first != null && first.getOpcode() < 0) first = first.getNext();
+        if (first == null) throw new IllegalStateException("Empty EntityClientPlayerMP sendMotionUpdates");
+
+        InsnList begin = new InsnList();
+        begin.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        begin.add(new MethodInsnNode(Opcodes.INVOKESTATIC, CLIENT_PLAYER_LOGIC, "beginLegalNetworkStance",
+            "(L" + c.name + ";)D", false));
+        begin.add(new VarInsnNode(Opcodes.DSTORE, savedPosY));
+        method.instructions.insertBefore(first, begin);
+
+        int returns = 0;
+        for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
+            instruction = instruction.getNext()) {
+            if (instruction.getOpcode() != Opcodes.RETURN) continue;
+            InsnList end = new InsnList();
+            end.add(new VarInsnNode(Opcodes.ALOAD, 0));
+            end.add(new VarInsnNode(Opcodes.DLOAD, savedPosY));
+            end.add(new MethodInsnNode(Opcodes.INVOKESTATIC, CLIENT_PLAYER_LOGIC, "endLegalNetworkStance",
+                "(L" + c.name + ";D)V", false));
+            method.instructions.insertBefore(instruction, end);
+            ++returns;
+        }
+        if (returns != 1) throw new IllegalStateException(
+            "EntityClientPlayerMP sendMotionUpdates expected one RETURN, found " + returns);
+    }
+
+    /**
+     * Namespace-independent target: sendMotionUpdates is the only ()V method in
+     * EntityClientPlayerMP that constructs both position-only (DDDDZ) and
+     * position+look (DDDDFFZ) movement packets.
+     */
+    private MethodNode findSendMotionUpdates(ClassNode c) {
+        MethodNode result = null;
+        for (MethodNode method : c.methods) {
+            if (!"()V".equals(method.desc)) continue;
+            boolean positionPacket = false;
+            boolean positionLookPacket = false;
+            for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
+                instruction = instruction.getNext()) {
+                if (!(instruction instanceof MethodInsnNode)) continue;
+                MethodInsnNode call = (MethodInsnNode) instruction;
+                if (!"<init>".equals(call.name)) continue;
+                if ("(DDDDZ)V".equals(call.desc)) positionPacket = true;
+                if ("(DDDDFFZ)V".equals(call.desc)) positionLookPacket = true;
+            }
+            if (!positionPacket || !positionLookPacket) continue;
+            if (result != null) throw new IllegalStateException("Ambiguous EntityClientPlayerMP sendMotionUpdates");
+            result = method;
+        }
+        if (result == null) throw new IllegalStateException("Missing EntityClientPlayerMP sendMotionUpdates");
+        return result;
+    }
+
+    private void verifyClientPlayerNetworkStanceGuard(ClassNode c) {
+        MethodNode method = findSendMotionUpdates(c);
+        int begin = 0, end = 0;
+        for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
+            instruction = instruction.getNext()) {
+            if (!(instruction instanceof MethodInsnNode)) continue;
+            MethodInsnNode call = (MethodInsnNode) instruction;
+            if (!CLIENT_PLAYER_LOGIC.equals(call.owner)) continue;
+            if ("beginLegalNetworkStance".equals(call.name) && ("(L" + c.name + ";)D").equals(call.desc)) ++begin;
+            if ("endLegalNetworkStance".equals(call.name) && ("(L" + c.name + ";D)V").equals(call.desc)) ++end;
+        }
+        if (begin != 1 || end != 1) throw new IllegalStateException(
+            "EntityClientPlayerMP network stance guard verification failed: begin=" + begin + ", end=" + end);
+    }
 
     private void addWarpedWaterOverlayAlphaBridge(ClassNode classNode) {
         MethodNode warpedOverlay = this.findSingleWarpedOverlay(classNode);

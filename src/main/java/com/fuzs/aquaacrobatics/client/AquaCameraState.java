@@ -33,7 +33,7 @@ public final class AquaCameraState {
 
         IPlayerResizeable resizeable = (IPlayerResizeable) localPlayer;
         double currentFeetY = getPhysicalFeetY(localPlayer);
-        float targetEyeHeight = AquaCameraLogic.getPoseEyeHeight(resizeable.getPose());
+        float targetEyeHeight = AquaCameraLogic.getPoseEyeHeight(localPlayer, resizeable.getPose());
         if (this.player != localPlayer) {
             this.player = localPlayer;
             this.previousFeetY = currentFeetY;
@@ -55,7 +55,7 @@ public final class AquaCameraState {
             // keeps the very first pre-tick render feet-relative without owning state.
             double interpolatedEntityY = player.prevPosY + (player.posY - player.prevPosY) * partialTicks;
             return (float) (interpolatedEntityY - player.boundingBox.minY
-                - AquaCameraLogic.getPoseEyeHeight(((IPlayerResizeable) player).getPose()));
+                - AquaCameraLogic.getPoseEyeHeight(player, ((IPlayerResizeable) player).getPose()));
         }
 
         double interpolatedEntityY = player.prevPosY + (player.posY - player.prevPosY) * partialTicks;

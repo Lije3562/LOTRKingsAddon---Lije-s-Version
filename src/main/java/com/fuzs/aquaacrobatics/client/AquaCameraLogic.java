@@ -1,6 +1,9 @@
 package com.fuzs.aquaacrobatics.client;
 
+import net.minecraft.entity.player.EntityPlayer;
+
 import com.fuzs.aquaacrobatics.entity.Pose;
+import com.fuzs.aquaacrobatics.integration.charactercreation.CharacterCreationIntegration;
 /** Modern pose-driven camera values, independent of the hook used to apply them. */
 public final class AquaCameraLogic {
 
@@ -10,16 +13,20 @@ public final class AquaCameraLogic {
 
     private AquaCameraLogic() {}
 
-    public static float getPoseEyeHeight(Pose pose) {
+    public static float getPoseEyeHeight(EntityPlayer player, Pose pose) {
+        float heightScale = CharacterCreationIntegration.getHeightScale(player);
+        float standingEyeHeight = CharacterCreationIntegration.getStandingEyeHeight(player);
         switch (pose) {
             case CROUCHING:
-                return CROUCHING_EYE_HEIGHT;
+                return standingEyeHeight - (STANDING_EYE_HEIGHT - CROUCHING_EYE_HEIGHT) * heightScale;
             case SWIMMING:
             case FALL_FLYING:
             case SPIN_ATTACK:
+                // Match the canonical Aqua 0.60-block crawl/swim box instead of
+                // scaling the camera downward with a short race's standing body.
                 return SWIMMING_EYE_HEIGHT;
             default:
-                return STANDING_EYE_HEIGHT;
+                return standingEyeHeight;
         }
     }
 

@@ -66,6 +66,9 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
         "com/fuzs/aquaacrobatics/entity/player/AquaPlayerSizeMetadataLogic";
     private static final String INITIALIZE_SIZE_METADATA = "initialize";
     private static final String GET_AQUA_EYE_HEIGHT = "getEyeHeight";
+    private static final String VANILLA_EYE_HEIGHT_MCP = "getEyeHeight";
+    private static final String VANILLA_EYE_HEIGHT_SRG = "func_70047_e";
+    private static final String VANILLA_EYE_HEIGHT_NOTCH = "g";
     private static final String GET_STANDING_EYE_HEIGHT = "getStandingEyeHeight";
     private static final String GET_SIZE = "getSize";
     private static final String PRESENTATION_LOGIC =
@@ -133,6 +136,8 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
         this.verifyWaterStatePlumbing(classNode);
         this.addLifecycleSleepPlumbing(classNode);
         this.verifyLifecycleSleepPlumbing(classNode);
+        this.addVanillaEyeHeightBridge(classNode);
+        this.verifyVanillaEyeHeightBridge(classNode);
         this.addLegacyBobBridge(classNode);
         this.verifyLegacyBobBridge(classNode);
         this.addSwimTravelPlumbing(classNode);
@@ -629,12 +634,13 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
             "(" + POSE_DESCRIPTOR + ")" + ENTITY_SIZE_DESCRIPTOR,
             null,
             null);
+        method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 1));
         method.instructions.add(new MethodInsnNode(
             Opcodes.INVOKESTATIC,
             SIZE_METADATA_LOGIC,
             GET_SIZE,
-            "(" + POSE_DESCRIPTOR + ")" + ENTITY_SIZE_DESCRIPTOR,
+            "(" + playerDescriptor + POSE_DESCRIPTOR + ")" + ENTITY_SIZE_DESCRIPTOR,
             false));
         method.instructions.add(new InsnNode(Opcodes.ARETURN));
         return method;
@@ -766,6 +772,71 @@ public final class AquaEntityPlayerTransformer implements IClassTransformer {
 
     private boolean isSleepInBedDescriptor(String descriptor) {
         return descriptor.startsWith("(III)L") && descriptor.endsWith(";");
+    }
+
+    /**
+     * Keep the real legacy EntityPlayer#getEyeHeight() aligned with Aqua's
+     * canonical swim/crawl origin. Render-camera interpolation is separate, but
+     * vanilla block/entity ray traces still use this virtual method.
+     */
+    private void addVanillaEyeHeightBridge(ClassNode classNode) {
+        MethodNode eyeHeight = this.findSingleNamedMethod(
+            classNode,
+            VANILLA_EYE_HEIGHT_MCP,
+            VANILLA_EYE_HEIGHT_SRG,
+            VANILLA_EYE_HEIGHT_NOTCH,
+            "()F",
+            false);
+
+        LabelNode vanilla = new LabelNode();
+        InsnList head = new InsnList();
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new MethodInsnNode(
+            Opcodes.INVOKESTATIC,
+            LIFECYCLE_LOGIC,
+            "hasSwimmingEyeHeight",
+            "(L" + classNode.name + ";)Z",
+            false));
+        head.add(new JumpInsnNode(Opcodes.IFEQ, vanilla));
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new MethodInsnNode(
+            Opcodes.INVOKESTATIC,
+            LIFECYCLE_LOGIC,
+            "swimmingEyeHeight",
+            "(L" + classNode.name + ";)F",
+            false));
+        head.add(new InsnNode(Opcodes.FRETURN));
+        head.add(vanilla);
+        eyeHeight.instructions.insert(head);
+    }
+
+    private void verifyVanillaEyeHeightBridge(ClassNode classNode) {
+        MethodNode eyeHeight = this.findSingleNamedMethod(
+            classNode,
+            VANILLA_EYE_HEIGHT_MCP,
+            VANILLA_EYE_HEIGHT_SRG,
+            VANILLA_EYE_HEIGHT_NOTCH,
+            "()F",
+            false);
+
+        int predicate = 0;
+        int value = 0;
+        for (AbstractInsnNode instruction = eyeHeight.instructions.getFirst(); instruction != null;
+            instruction = instruction.getNext()) {
+
+            if (!(instruction instanceof MethodInsnNode)) continue;
+            MethodInsnNode invocation = (MethodInsnNode) instruction;
+            if (!LIFECYCLE_LOGIC.equals(invocation.owner)) continue;
+            if ("hasSwimmingEyeHeight".equals(invocation.name)
+                && ("(L" + classNode.name + ";)Z").equals(invocation.desc)) ++predicate;
+            if ("swimmingEyeHeight".equals(invocation.name)
+                && ("(L" + classNode.name + ";)F").equals(invocation.desc)) ++value;
+        }
+        if (predicate != 1 || value != 1) {
+            throw new IllegalStateException(
+                "Aqua EntityPlayer legacy eye-height bridge verification failed: predicate=" + predicate
+                    + ", value=" + value);
+        }
     }
 
     /** Phase 2O: preserves the former EntityPlayerMixin onLivingUpdate TAIL bob update. */

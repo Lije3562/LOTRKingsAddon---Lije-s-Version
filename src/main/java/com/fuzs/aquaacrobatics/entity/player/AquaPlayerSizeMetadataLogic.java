@@ -18,21 +18,21 @@ public final class AquaPlayerSizeMetadataLogic {
      */
     public static void initialize(EntityPlayer player) {
         AquaPlayerState state = ((IAquaPlayerStateHolder) player).getAquaPlayerState();
-        state.size = AquaPoseLogic.STANDING_SIZE;
+        state.size = AquaPoseLogic.getSize(player, Pose.STANDING);
         state.playerEyeHeight = getEyeHeight(player, Pose.STANDING, state.size);
     }
 
     public static float getEyeHeight(EntityPlayer player, Pose pose, EntitySize size) {
         if (!PlayerMovementMode.useModernPlayerMovement(player)) return player.eyeHeight;
         return AquaPoseLogic.getEyeHeight(
+            player,
             pose,
             player.eyeHeight,
             ((IPlayerResizeable) player).isResizingAllowed());
     }
 
     /** Preserves the former getSize body plus its inseparable DYING Mixin override. */
-    public static EntitySize getSize(Pose pose) {
-        if (pose == Pose.DYING) return new EntitySize(0.6F, 1.8F, false);
-        return AquaPoseLogic.getSize(pose);
+    public static EntitySize getSize(EntityPlayer player, Pose pose) {
+        return AquaPoseLogic.getSize(player, pose);
     }
 }

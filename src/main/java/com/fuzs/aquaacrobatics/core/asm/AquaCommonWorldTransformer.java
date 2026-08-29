@@ -67,8 +67,8 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
     @Override
     public byte[] transform(String name, String transformedName, byte[] basicClass) {
         if (!ENTITY.equals(transformedName) && !ENTITY_LIVING_BASE.equals(transformedName) && !ENTITY_THROWABLE.equals(transformedName) && !BLOCK_GRASS.equals(transformedName)
-            && !BLOCK_MYCELIUM.equals(transformedName) && !ENTITY_ITEM.equals(transformedName) && !ENTITY_BOAT.equals(transformedName)
-            && !BLOCK_LIQUID.equals(transformedName)) return basicClass;
+                && !BLOCK_MYCELIUM.equals(transformedName) && !ENTITY_ITEM.equals(transformedName) && !ENTITY_BOAT.equals(transformedName)
+                && !BLOCK_LIQUID.equals(transformedName)) return basicClass;
         if (ENTITY_ITEM.equals(transformedName) && this.isItemPhysicPresent()) return basicClass;
         if (basicClass == null) {
             throw new IllegalStateException("Aqua common world transformer received null bytecode for " + transformedName);
@@ -146,7 +146,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode call = (MethodInsnNode) instruction;
             if (call.getOpcode() != Opcodes.INVOKEVIRTUAL || !("(" + this.livingMaterialDescriptor(classNode) + ")Z").equals(call.desc)
-                || !("isInsideOfMaterial".equals(call.name) || "func_70055_a".equals(call.name)
+                    || !("isInsideOfMaterial".equals(call.name) || "func_70055_a".equals(call.name)
                     || "a".equals(call.name))) continue;
             if (target != null) throw new IllegalStateException("Aqua EntityLivingBase found multiple water-material checks");
             target = call;
@@ -170,7 +170,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode call = (MethodInsnNode) instruction;
             if (call.getOpcode() != Opcodes.INVOKEVIRTUAL || !"(I)V".equals(call.desc)
-                || !("setAir".equals(call.name) || "func_70050_g".equals(call.name) || "h".equals(call.name))) continue;
+                    || !("setAir".equals(call.name) || "func_70050_g".equals(call.name) || "h".equals(call.name))) continue;
             targets.add(call);
         }
         if (targets.isEmpty()) throw new IllegalStateException("Aqua EntityLivingBase could not find setAir call");
@@ -191,7 +191,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             if (!(instruction instanceof FieldInsnNode)) continue;
             FieldInsnNode field = (FieldInsnNode) instruction;
             if (field.getOpcode() == Opcodes.GETFIELD && "Z".equals(field.desc)
-                && ("isCollidedHorizontally".equals(field.name) || "field_70123_F".equals(field.name) || "E".equals(field.name))) fields.add(field);
+                    && ("isCollidedHorizontally".equals(field.name) || "field_70123_F".equals(field.name) || "E".equals(field.name))) fields.add(field);
         }
         if (fields.size() < 2) throw new IllegalStateException("Aqua EntityLivingBase could not find ordinal-1 horizontal collision read");
         FieldInsnNode target = fields.get(1);
@@ -238,11 +238,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         method.instructions.add(new VarInsnNode(Opcodes.ILOAD, 1));
         method.instructions.add(new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            ENTITY_LOGIC,
-            name,
-            "(L" + classNode.name + ";Z)V",
-            false));
+                Opcodes.INVOKESTATIC,
+                ENTITY_LOGIC,
+                name,
+                "(L" + classNode.name + ";Z)V",
+                false));
         method.instructions.add(new InsnNode(Opcodes.RETURN));
         classNode.methods.add(method);
     }
@@ -265,7 +265,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         LdcInsnNode target = null;
         for (AbstractInsnNode instruction = water.instructions.getFirst(); instruction != null; instruction = instruction.getNext()) {
             if (!(instruction instanceof LdcInsnNode) || !( ((LdcInsnNode) instruction).cst instanceof Double)
-                || ((Double) ((LdcInsnNode) instruction).cst).doubleValue() != -0.4000000059604645D) continue;
+                    || ((Double) ((LdcInsnNode) instruction).cst).doubleValue() != -0.4000000059604645D) continue;
             if (target != null) throw new IllegalStateException("Aqua Entity found multiple water Y constants");
             target = (LdcInsnNode) instruction;
         }
@@ -274,11 +274,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         bridge.add(new VarInsnNode(Opcodes.ALOAD, 0));
         bridge.add(new LdcInsnNode(-0.4000000059604645D));
         bridge.add(new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            ENTITY_LOGIC,
-            "adjustWaterMovementY",
-            "(L" + classNode.name + ";D)D",
-            false));
+                Opcodes.INVOKESTATIC,
+                ENTITY_LOGIC,
+                "adjustWaterMovementY",
+                "(L" + classNode.name + ";D)D",
+                false));
         water.instructions.insertBefore(target, bridge);
         water.instructions.remove(target);
     }
@@ -291,15 +291,15 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             Type[] arguments = Type.getArgumentTypes(invocation.desc);
             if (arguments.length != 3 || arguments[0].getSort() != Type.INT || arguments[1].getSort() != Type.INT
-                || arguments[2].getSort() != Type.INT || Type.getReturnType(invocation.desc).getSort() != Type.OBJECT
-                || !("getBlock".equals(invocation.name) || "func_147439_a".equals(invocation.name) || "a".equals(invocation.name))) continue;
+                    || arguments[2].getSort() != Type.INT || Type.getReturnType(invocation.desc).getSort() != Type.OBJECT
+                    || !("getBlock".equals(invocation.name) || "func_147439_a".equals(invocation.name) || "a".equals(invocation.name))) continue;
             AbstractInsnNode next = invocation.getNext();
             while (next != null && next.getOpcode() < 0) next = next.getNext();
             if (!(next instanceof VarInsnNode) || next.getOpcode() != Opcodes.ASTORE) continue;
             int local = ((VarInsnNode) next).var;
             for (AbstractInsnNode candidate = next.getNext(); candidate != null; candidate = candidate.getNext()) {
                 if (candidate instanceof VarInsnNode && candidate.getOpcode() == Opcodes.ALOAD
-                    && ((VarInsnNode) candidate).var == local) {
+                        && ((VarInsnNode) candidate).var == local) {
                     if (load != null && load != candidate) {
                         throw new IllegalStateException("Aqua Entity found multiple climbing block loads");
                     }
@@ -311,11 +311,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         }
         if (load == null) throw new IllegalStateException("Aqua Entity could not find walking block LOAD");
         movement.instructions.insert(load, new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            ENTITY_LOGIC,
-            "getFakeClimbingBlock",
-            "(" + blockDescriptor + ")" + blockDescriptor,
-            false));
+                Opcodes.INVOKESTATIC,
+                ENTITY_LOGIC,
+                "getFakeClimbingBlock",
+                "(" + blockDescriptor + ")" + blockDescriptor,
+                false));
     }
 
     private void verifyEntity(ClassNode classNode, MethodNode water, MethodNode movement) {
@@ -364,11 +364,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         MethodNode splash = new MethodNode(Opcodes.ACC_PUBLIC, "aqua$getSplashSound", "()Ljava/lang/String;", null, null);
         splash.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         splash.instructions.add(new MethodInsnNode(
-            Opcodes.INVOKEVIRTUAL,
-            classNode.name,
-            this.boatSplashSoundName(classNode),
-            "()Ljava/lang/String;",
-            false));
+                Opcodes.INVOKEVIRTUAL,
+                classNode.name,
+                this.boatSplashSoundName(classNode),
+                "()Ljava/lang/String;",
+                false));
         splash.instructions.add(new InsnNode(Opcodes.ARETURN));
         classNode.methods.add(splash);
     }
@@ -393,11 +393,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         if ("(Z)V".equals(descriptor)) method.instructions.add(new VarInsnNode(Opcodes.ILOAD, 1));
         if ("(F)F".equals(descriptor)) method.instructions.add(new VarInsnNode(Opcodes.FLOAD, 1));
         method.instructions.add(new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            BOAT_LOGIC,
-            helperName,
-            "(L" + classNode.name + ";" + descriptor.substring(1),
-            false));
+                Opcodes.INVOKESTATIC,
+                BOAT_LOGIC,
+                helperName,
+                "(L" + classNode.name + ";" + descriptor.substring(1),
+                false));
         method.instructions.add(new InsnNode("(F)F".equals(descriptor) ? Opcodes.FRETURN : Opcodes.RETURN));
         classNode.methods.add(method);
     }
@@ -406,11 +406,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         MethodNode onUpdate = this.findSingleOnUpdate(classNode);
         List<MethodInsnNode> rotations = new ArrayList<>();
         for (AbstractInsnNode instruction = onUpdate.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             if (invocation.getOpcode() == Opcodes.INVOKEVIRTUAL && "(FF)V".equals(invocation.desc)
-                && ("setRotation".equals(invocation.name) || "func_70101_b".equals(invocation.name)
+                    && ("setRotation".equals(invocation.name) || "func_70101_b".equals(invocation.name)
                     || "b".equals(invocation.name))) rotations.add(invocation);
         }
         if (rotations.size() != 2) {
@@ -436,10 +436,10 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         MethodNode onUpdate = this.findSingleOnUpdate(classNode);
         int updateHelpers = 0;
         for (AbstractInsnNode instruction = onUpdate.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (instruction instanceof MethodInsnNode && BOAT_LOGIC.equals(((MethodInsnNode) instruction).owner)
-                && "updateRocking".equals(((MethodInsnNode) instruction).name)
-                && ("(L" + classNode.name + ";)V").equals(((MethodInsnNode) instruction).desc)) ++updateHelpers;
+                    && "updateRocking".equals(((MethodInsnNode) instruction).name)
+                    && ("(L" + classNode.name + ";)V").equals(((MethodInsnNode) instruction).desc)) ++updateHelpers;
         }
         if (updateHelpers != 1) throw new IllegalStateException("Aqua EntityBoat expected one rocking update bridge");
     }
@@ -452,7 +452,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
 
     private boolean isItemPhysicPresent() {
         return AquaCommonWorldTransformer.class.getClassLoader()
-            .getResource("com/creativemd/itemphysic/asm/ItemPhysicEarlyMixins.class") != null;
+                .getResource("com/creativemd/itemphysic/asm/ItemPhysicEarlyMixins.class") != null;
     }
 
     private void transformThrowable(ClassNode classNode) {
@@ -471,14 +471,14 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             if (!(instruction instanceof FieldInsnNode)) continue;
             FieldInsnNode field = (FieldInsnNode) instruction;
             if (field.getOpcode() == Opcodes.GETFIELD && "D".equals(field.desc)
-                && ("motionY".equals(field.name) || "field_70181_x".equals(field.name) || "w".equals(field.name))) {
+                    && ("motionY".equals(field.name) || "field_70181_x".equals(field.name) || "w".equals(field.name))) {
                 target = field;
                 break;
             }
         }
         if (target == null) throw new IllegalStateException("Aqua EntityItem could not find ordinal-0 motionY GETFIELD");
         onUpdate.instructions.set(target, new MethodInsnNode(Opcodes.INVOKESTATIC, ITEM_LOGIC, "getMotionYForUpdate",
-            "(L" + classNode.name + ";)D", false));
+                "(L" + classNode.name + ";)D", false));
         this.verifyItem(classNode, onUpdate);
     }
 
@@ -486,8 +486,8 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         int bridges = 0;
         for (AbstractInsnNode instruction = onUpdate.instructions.getFirst(); instruction != null; instruction = instruction.getNext()) {
             if (instruction instanceof MethodInsnNode && ITEM_LOGIC.equals(((MethodInsnNode) instruction).owner)
-                && "getMotionYForUpdate".equals(((MethodInsnNode) instruction).name)
-                && ("(L" + classNode.name + ";)D").equals(((MethodInsnNode) instruction).desc)) ++bridges;
+                    && "getMotionYForUpdate".equals(((MethodInsnNode) instruction).name)
+                    && ("(L" + classNode.name + ";)D").equals(((MethodInsnNode) instruction).desc)) ++bridges;
         }
         if (bridges != 1) throw new IllegalStateException("Aqua EntityItem expected one motionY bridge, found " + bridges);
     }
@@ -500,7 +500,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         LabelNode fallback = new LabelNode();
         method.instructions.add(new VarInsnNode(Opcodes.ALOAD, 0));
         method.instructions.add(new MethodInsnNode(Opcodes.INVOKESTATIC, LIQUID_LOGIC, "hasBrighterWaterOpacity",
-            "(L" + classNode.name + ";)Z", false));
+                "(L" + classNode.name + ";)Z", false));
         method.instructions.add(new JumpInsnNode(Opcodes.IFEQ, fallback));
         method.instructions.add(new InsnNode(Opcodes.ICONST_1));
         method.instructions.add(new InsnNode(Opcodes.IRETURN));
@@ -517,12 +517,26 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
     }
 
     private String findBlockAccessDescriptor(ClassNode classNode) {
+        String found = null;
         for (MethodNode method : classNode.methods) {
             Type[] args = Type.getArgumentTypes(method.desc);
-            if (("getMixedBrightnessForBlock".equals(method.name) || "func_149677_c".equals(method.name) || "c".equals(method.name))
-                && args.length == 4 && args[0].getSort() == Type.OBJECT && args[1].getSort() == Type.INT
-                && args[2].getSort() == Type.INT && args[3].getSort() == Type.INT && Type.getReturnType(method.desc).getSort() == Type.INT) return args[0].getDescriptor();
+
+            // Do not derive IBlockAccess from getMixedBrightnessForBlock: that method is
+            // client-only in 1.7.10 and is stripped from dedicated-server BlockLiquid.
+            // Instead identify the common-side (IBlockAccess, int, int, int) -> boolean
+            // signature used by BlockLiquid#getBlocksMovement. Descriptor-shape matching
+            // keeps this valid across MCP, SRG, and raw obfuscated runtime bytecode.
+            if (args.length == 4 && args[0].getSort() == Type.OBJECT && args[1].getSort() == Type.INT
+                    && args[2].getSort() == Type.INT && args[3].getSort() == Type.INT
+                    && Type.getReturnType(method.desc).getSort() == Type.BOOLEAN) {
+                String descriptor = args[0].getDescriptor();
+                if (found != null && !found.equals(descriptor)) {
+                    throw new IllegalStateException("Aqua BlockLiquid found conflicting IBlockAccess descriptors");
+                }
+                found = descriptor;
+            }
         }
+        if (found != null) return found;
         throw new IllegalStateException("Aqua BlockLiquid could not derive IBlockAccess descriptor");
     }
 
@@ -557,24 +571,24 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
             if (!"<init>".equals(method.name)) continue;
             int returns = 0;
             for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
-                instruction = instruction.getNext()) {
+                 instruction = instruction.getNext()) {
                 if (instruction.getOpcode() != Opcodes.RETURN) continue;
                 InsnList initialization = new InsnList();
                 initialization.add(new VarInsnNode(Opcodes.ALOAD, 0));
                 initialization.add(new VarInsnNode(Opcodes.ALOAD, 0));
                 initialization.add(new MethodInsnNode(
-                    Opcodes.INVOKESTATIC,
-                    THROWABLE_LOGIC,
-                    "isNewProjectile",
-                    descriptor,
-                    false));
+                        Opcodes.INVOKESTATIC,
+                        THROWABLE_LOGIC,
+                        "isNewProjectile",
+                        descriptor,
+                        false));
                 initialization.add(new FieldInsnNode(Opcodes.PUTFIELD, classNode.name, NEW_PROJECTILE_FIELD, "Z"));
                 method.instructions.insertBefore(instruction, initialization);
                 ++returns;
             }
             if (returns != 1) {
                 throw new IllegalStateException(
-                    "Aqua EntityThrowable constructor " + method.desc + " expected one RETURN, found " + returns);
+                        "Aqua EntityThrowable constructor " + method.desc + " expected one RETURN, found " + returns);
             }
             ++constructors;
         }
@@ -585,7 +599,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         MethodNode result = null;
         for (MethodNode method : classNode.methods) {
             if (!"()V".equals(method.desc) || !(ON_UPDATE_MCP.equals(method.name) || ON_UPDATE_SRG.equals(method.name)
-                || ON_UPDATE_NOTCH.equals(method.name))) continue;
+                    || ON_UPDATE_NOTCH.equals(method.name))) continue;
             if (result != null) {
                 throw new IllegalStateException("Aqua EntityThrowable found multiple onUpdate candidates");
             }
@@ -612,11 +626,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         replacement.add(new VarInsnNode(Opcodes.ALOAD, startLocal));
         replacement.add(new VarInsnNode(Opcodes.ALOAD, endLocal));
         replacement.add(new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            THROWABLE_LOGIC,
-            "rayTraceThroughLiquid",
-            "(ZL" + rayTrace.owner + ";" + rayTrace.desc.substring(1),
-            false));
+                Opcodes.INVOKESTATIC,
+                THROWABLE_LOGIC,
+                "rayTraceThroughLiquid",
+                "(ZL" + rayTrace.owner + ";" + rayTrace.desc.substring(1),
+                false));
         onUpdate.instructions.insertBefore(rayTrace, replacement);
         onUpdate.instructions.remove(rayTrace);
     }
@@ -624,14 +638,14 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
     private MethodInsnNode findSingleRayTrace(MethodNode method) {
         MethodInsnNode result = null;
         for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             Type[] arguments = Type.getArgumentTypes(invocation.desc);
             if (invocation.getOpcode() != Opcodes.INVOKEVIRTUAL || !this.isWorldOwner(invocation.owner) || !(RAY_TRACE_MCP.equals(invocation.name)
-                || RAY_TRACE_SRG.equals(invocation.name) || RAY_TRACE_NOTCH.equals(invocation.name))
-                || arguments.length != 2 || arguments[0].getSort() != Type.OBJECT || arguments[1].getSort() != Type.OBJECT
-                || Type.getReturnType(invocation.desc).getSort() != Type.OBJECT) continue;
+                    || RAY_TRACE_SRG.equals(invocation.name) || RAY_TRACE_NOTCH.equals(invocation.name))
+                    || arguments.length != 2 || arguments[0].getSort() != Type.OBJECT || arguments[1].getSort() != Type.OBJECT
+                    || Type.getReturnType(invocation.desc).getSort() != Type.OBJECT) continue;
             if (result != null) throw new IllegalStateException("Aqua EntityThrowable found multiple rayTraceBlocks targets");
             result = invocation;
         }
@@ -656,11 +670,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
     private FieldInsnNode findSinglePosXWrite(ClassNode classNode, MethodNode method) {
         FieldInsnNode result = null;
         for (AbstractInsnNode instruction = method.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof FieldInsnNode)) continue;
             FieldInsnNode field = (FieldInsnNode) instruction;
             if (field.getOpcode() != Opcodes.PUTFIELD || !"D".equals(field.desc) || !(POS_X_MCP.equals(field.name)
-                || POS_X_SRG.equals(field.name) || POS_X_NOTCH.equals(field.name))) continue;
+                    || POS_X_SRG.equals(field.name) || POS_X_NOTCH.equals(field.name))) continue;
             if (!classNode.name.equals(field.owner)) continue;
             if (result != null) throw new IllegalStateException("Aqua EntityThrowable found multiple posX PUTFIELD targets");
             result = field;
@@ -674,16 +688,16 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         int rayHelpers = 0;
         int collisionCalls = 0;
         for (AbstractInsnNode instruction = onUpdate.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             if (THROWABLE_LOGIC.equals(invocation.owner) && "rayTraceThroughLiquid".equals(invocation.name)) ++rayHelpers;
             if (classNode.name.equals(invocation.owner) && "func_145775_I".equals(invocation.name)
-                && "()V".equals(invocation.desc)) ++collisionCalls;
+                    && "()V".equals(invocation.desc)) ++collisionCalls;
         }
         if (rayHelpers != 1 || collisionCalls != 1) {
             throw new IllegalStateException(
-                "Aqua EntityThrowable verification failed: rayHelpers=" + rayHelpers + ", collisionCalls=" + collisionCalls);
+                    "Aqua EntityThrowable verification failed: rayHelpers=" + rayHelpers + ", collisionCalls=" + collisionCalls);
         }
     }
 
@@ -699,10 +713,10 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         for (MethodNode method : classNode.methods) {
             Type[] arguments = Type.getArgumentTypes(method.desc);
             if (!(UPDATE_TICK_MCP.equals(method.name) || UPDATE_TICK_SRG.equals(method.name)
-                || UPDATE_TICK_NOTCH.equals(method.name)) || Type.getReturnType(method.desc).getSort() != Type.VOID
-                || arguments.length != 5 || arguments[0].getSort() != Type.OBJECT || arguments[1].getSort() != Type.INT
-                || arguments[2].getSort() != Type.INT || arguments[3].getSort() != Type.INT
-                || arguments[4].getSort() != Type.OBJECT) continue;
+                    || UPDATE_TICK_NOTCH.equals(method.name)) || Type.getReturnType(method.desc).getSort() != Type.VOID
+                    || arguments.length != 5 || arguments[0].getSort() != Type.OBJECT || arguments[1].getSort() != Type.INT
+                    || arguments[2].getSort() != Type.INT || arguments[3].getSort() != Type.INT
+                    || arguments[4].getSort() != Type.OBJECT) continue;
             if (result != null) throw new IllegalStateException("Aqua grass-like block found multiple updateTick candidates");
             result = method;
         }
@@ -719,11 +733,11 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         bridge.add(new VarInsnNode(Opcodes.ILOAD, 4));
         bridge.add(new VarInsnNode(Opcodes.ALOAD, 5));
         bridge.add(new MethodInsnNode(
-            Opcodes.INVOKESTATIC,
-            GRASS_LOGIC,
-            helper,
-            updateTick.desc.substring(0, updateTick.desc.length() - 1) + "Z",
-            false));
+                Opcodes.INVOKESTATIC,
+                GRASS_LOGIC,
+                helper,
+                updateTick.desc.substring(0, updateTick.desc.length() - 1) + "Z",
+                false));
         bridge.add(new JumpInsnNode(Opcodes.IFEQ, continueVanilla));
         bridge.add(new InsnNode(Opcodes.RETURN));
         bridge.add(continueVanilla);
@@ -733,15 +747,15 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
     private void replaceOptionalSecondSetBlock(MethodNode updateTick) {
         List<MethodInsnNode> calls = new ArrayList<>();
         for (AbstractInsnNode instruction = updateTick.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             Type[] arguments = Type.getArgumentTypes(invocation.desc);
             if (invocation.getOpcode() != Opcodes.INVOKEVIRTUAL || !this.isWorldOwner(invocation.owner) || !(SET_BLOCK_MCP.equals(invocation.name)
-                || SET_BLOCK_SRG.equals(invocation.name) || SET_BLOCK_NOTCH.equals(invocation.name))
-                || arguments.length != 4 || arguments[0].getSort() != Type.INT || arguments[1].getSort() != Type.INT
-                || arguments[2].getSort() != Type.INT || arguments[3].getSort() != Type.OBJECT
-                || Type.getReturnType(invocation.desc).getSort() != Type.BOOLEAN) continue;
+                    || SET_BLOCK_SRG.equals(invocation.name) || SET_BLOCK_NOTCH.equals(invocation.name))
+                    || arguments.length != 4 || arguments[0].getSort() != Type.INT || arguments[1].getSort() != Type.INT
+                    || arguments[2].getSort() != Type.INT || arguments[3].getSort() != Type.OBJECT
+                    || Type.getReturnType(invocation.desc).getSort() != Type.BOOLEAN) continue;
             calls.add(invocation);
         }
         // Mixin require=0 made ordinal 1 optional. Preserve that behavior while never selecting ordinal 0.
@@ -765,7 +779,7 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         int headHelpers = 0;
         int setBlockHelpers = 0;
         for (AbstractInsnNode instruction = updateTick.instructions.getFirst(); instruction != null;
-            instruction = instruction.getNext()) {
+             instruction = instruction.getNext()) {
             if (!(instruction instanceof MethodInsnNode)) continue;
             MethodInsnNode invocation = (MethodInsnNode) instruction;
             if (GRASS_LOGIC.equals(invocation.owner) && headHelper.equals(invocation.name)) ++headHelpers;
@@ -773,8 +787,8 @@ public final class AquaCommonWorldTransformer implements IClassTransformer {
         }
         if (headHelpers != 1 || setBlockHelpers > 1) {
             throw new IllegalStateException(
-                "Aqua grass-like verification failed: headHelpers=" + headHelpers + ", setBlockHelpers="
-                    + setBlockHelpers);
+                    "Aqua grass-like verification failed: headHelpers=" + headHelpers + ", setBlockHelpers="
+                            + setBlockHelpers);
         }
     }
 }

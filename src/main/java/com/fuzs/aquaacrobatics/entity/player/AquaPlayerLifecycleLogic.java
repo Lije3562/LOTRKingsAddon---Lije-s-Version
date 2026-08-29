@@ -7,6 +7,7 @@ import com.enovak.lotrmoremobs.config.PlayerMovementMode;
 
 import com.fuzs.aquaacrobatics.entity.EntitySize;
 import com.fuzs.aquaacrobatics.entity.Pose;
+import com.fuzs.aquaacrobatics.integration.charactercreation.CharacterCreationIntegration;
 
 /** Shared lifecycle and sleep state semantics; ASM retains the required super dispatch. */
 public final class AquaPlayerLifecycleLogic {
@@ -40,7 +41,21 @@ public final class AquaPlayerLifecycleLogic {
 
     public static float defaultEyeHeight(EntityPlayer player) {
         if (!PlayerMovementMode.useModernPlayerMovement(player)) return 1.62F;
-        return ((IPlayerResizeable) player).getPose() == Pose.SWIMMING ? 0.4F : 1.62F;
+        if (((IPlayerResizeable) player).getPose() != Pose.SWIMMING) return 1.62F;
+
+        float desired = swimmingEyeHeight(player);
+        return CharacterCreationIntegration.composeDefaultEyeHeight(player, desired);
+    }
+
+    public static float swimmingEyeHeight(EntityPlayer player) {
+        // This is the legacy EntityPlayer#getEyeHeight component, not the full
+        // feet-relative camera height. Aqua's canonical swim origin is:
+        // yOffset 0.28 + eyeHeight 0.12 = 0.40 blocks above the physical feet.
+        return 0.12F;
+    }
+
+    public static float swimmingEyeHeight(EntityPlayerMP player) {
+        return swimmingEyeHeight((EntityPlayer) player);
     }
 
     public static float defaultEyeHeight(EntityPlayerMP player) {
@@ -59,8 +74,7 @@ public final class AquaPlayerLifecycleLogic {
     public static EntitySize resizeSize(EntityPlayer player, Pose pose) {
         if (!PlayerMovementMode.useModernPlayerMovement(player)) {
             if (pose == Pose.SLEEPING) return AquaPoseLogic.SLEEPING_SIZE;
-            if (pose == Pose.DYING) return new EntitySize(0.6F, 1.8F, false);
-            return AquaPoseLogic.STANDING_SIZE;
+            return CharacterCreationIntegration.getStandingSize(player, false);
         }
         return ((IPlayerResizeable) player).getSize(pose);
     }

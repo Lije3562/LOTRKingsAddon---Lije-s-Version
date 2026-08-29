@@ -52,7 +52,7 @@ public final class AquaPlayerDataWatcherLogic {
         // Preserve the old callback's getSize evaluation before derived eye state.
         resizeable.getSize(pose);
         AquaPlayerState state = resizeable.getAquaPlayerState();
-        state.playerEyeHeight = AquaPoseLogic.getEyeHeight(pose, player.eyeHeight, resizeable.isResizingAllowed());
+        state.playerEyeHeight = AquaPoseLogic.getEyeHeight(player, pose, player.eyeHeight, resizeable.isResizingAllowed());
         state.previousEyeHeight = player.eyeHeight;
         resizeable.recalculateSize();
     }

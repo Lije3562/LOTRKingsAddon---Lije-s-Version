@@ -1,6 +1,7 @@
 package com.fuzs.aquaacrobatics.client.model;
 
 import net.minecraft.client.model.ModelRenderer;
+import net.minecraft.entity.player.EntityPlayer;
 
 import com.fuzs.aquaacrobatics.entity.Pose;
 
@@ -33,7 +34,11 @@ public final class AquaPlayerRenderLogic {
         }
     }
 
-    public static double getCrouchingRenderY(double ySize, boolean hasLegacyRemoteSneakOffset) {
-        return ySize + CROUCHING_RENDER_OFFSET + (hasLegacyRemoteSneakOffset ? 0.125D : 0.0D);
+    public static double getCrouchingRenderY(EntityPlayer player, double ySize, boolean hasLegacyRemoteSneakOffset) {
+        // RenderPlayer's Y translation is world-space and happens before Character
+        // Creation scales the racial model. Keep Aqua's canonical crouch offset here;
+        // multiplying it by render scale made short races sink and fall into shadow.
+        return ySize + CROUCHING_RENDER_OFFSET
+            + (hasLegacyRemoteSneakOffset ? 0.125D : 0.0D);
     }
 }

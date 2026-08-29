@@ -112,7 +112,9 @@ public final class AquaServerPlayerTransformer implements IClassTransformer {
         head.add(new MethodInsnNode(Opcodes.INVOKESTATIC, LIFECYCLE, "hasSwimmingEyeHeight",
             "(L" + classNode.name + ";)Z", false));
         head.add(new JumpInsnNode(Opcodes.IFEQ, original));
-        head.add(new LdcInsnNode(0.4F));
+        head.add(new VarInsnNode(Opcodes.ALOAD, 0));
+        head.add(new MethodInsnNode(Opcodes.INVOKESTATIC, LIFECYCLE, "swimmingEyeHeight",
+            "(L" + classNode.name + ";)F", false));
         head.add(new InsnNode(Opcodes.FRETURN));
         head.add(original);
         eye.instructions.insert(head);
